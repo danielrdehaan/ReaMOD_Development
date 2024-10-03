@@ -20,15 +20,18 @@
 
 #define FILE_PATH_BUFFER_SIZE 1024
 
+#define DEBUG true
+
 namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
 
 // Declare the global variable to store the custom action ID
-static int g_actionId = 0;
+static int actionIdOpenCloseReaMODWindow = 0;
 
 // ImGui context
-ImGui_Context* g_imgui_ctx = nullptr;
+ImGui_Context* reaMOD_ImGui_Context = nullptr;
 char selected_file_path[FILE_PATH_BUFFER_SIZE] = "";  // Full path of selected .fspro file
 char selected_file_name[FILE_PATH_BUFFER_SIZE] = "No project selected.";  // Initial text in the input box
+bool reaModWindowOpen = true;
 
 // Store the list of found .bank files and their toggle states
 std::vector<std::string> bank_files;
@@ -39,10 +42,89 @@ std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map o
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
 
+// A function for showing debug messages in Reaper's console.
+void DebugMsg(const char* fmt, ...) {
+    // This function can accept fully formated messages
+    // or messages that require additional formating.
+    // e.g. DebugMsg("Event %d path not found", i);
+    if (DEBUG == true) { // only show messages if DEBUG is true
+        if (ShowConsoleMsg == nullptr) {
+        return; // If ShowConsoleMsg is not initialized, do nothing
+        }
+
+        va_list args;
+        va_start(args, fmt);
+
+        // Create a buffer to format the message if needed
+        char buffer[1024];
+
+        // Check if the format string contains any format specifiers
+        bool needsFormatting = false;
+        for (const char* p = fmt; *p != '\0'; ++p) {
+            if (*p == '%') {
+                needsFormatting = true;
+                break;
+            }
+        }
+
+        if (needsFormatting) {
+            // Format the message using vsnprintf
+            vsnprintf(buffer, sizeof(buffer), fmt, args);
+            ShowConsoleMsg(buffer);  // Display the formatted message
+        } else {
+            // No formatting required, just pass the original message
+            ShowConsoleMsg(fmt);
+        }
+
+        va_end(args);
+    }  
+}
+
+// A function for showing messages in Reaper's console.
+void PostMsg(const char* fmt, ...) {
+    // This function is intended for non-debug related messages.
+    // This function can accept fully formated messages
+    // or messages that require additional formating
+    // e.g. DebugMsg("Event %d path not found", i);
+    
+    if (ShowConsoleMsg == nullptr) {
+    return; // If ShowConsoleMsg is not initialized, do nothing
+    }
+
+    va_list args;
+    va_start(args, fmt);
+
+    // Create a buffer to format the message if needed
+    char buffer[1024];
+
+    // Check if the format string contains any format specifiers
+    bool needsFormatting = false;
+    for (const char* p = fmt; *p != '\0'; ++p) {
+        if (*p == '%') {
+            needsFormatting = true;
+            break;
+        }
+    }
+
+    if (needsFormatting) {
+        // Format the message using vsnprintf
+        vsnprintf(buffer, sizeof(buffer), fmt, args);
+        ShowConsoleMsg(buffer);  // Display the formatted message
+    } else {
+        // No formatting required, just pass the original message
+        ShowConsoleMsg(fmt);
+    }
+
+    va_end(args);
+}
+
 // Load Reaper API functions
 void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
     if (rec && rec->GetFunc) {
         GetUserFileNameForRead = (bool (*)(char*, const char*, const char*))rec->GetFunc("GetUserFileNameForRead");
+        plugin_getapi   = reinterpret_cast<decltype(plugin_getapi)>(rec->GetFunc("plugin_getapi"));
+        plugin_register = reinterpret_cast<decltype(plugin_register)>(rec->GetFunc("plugin_register"));
+        ShowMessageBox  = reinterpret_cast<decltype(ShowMessageBox)>(rec->GetFunc("ShowMessageBox"));
     }
 }
 
@@ -50,6 +132,19 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
 void InitializeFMOD() {
     FMOD::Studio::System::create(&fmod_system);
     fmod_system->initialize(512, FMOD_STUDIO_INIT_NORMAL, FMOD_INIT_NORMAL, 0);
+}
+
+// Function to check if FMOD System is Initialzed
+bool IsFMODInitialized() {
+    if (fmod_system) {
+        FMOD::System* coreSystem = nullptr;
+        FMOD_RESULT result = fmod_system->getCoreSystem(&coreSystem);  // Get the core system
+        
+        if (result == FMOD_OK && coreSystem) {
+            return true;  // FMOD is initialized
+        }
+    }
+    return false;  // FMOD is not initialized
 }
 
 // Load a bank and retrieve its events
@@ -170,6 +265,28 @@ void PlayEvent(const std::string& event_path) {
     fmod_system->update();
 }
 
+// Function to stop all FMOD events
+void StopAllFMODEvents() {
+    FMOD::Studio::Bus* masterBus = nullptr;
+    FMOD_RESULT result = fmod_system->getBus("bus:/", &masterBus);  // Get the master bus
+
+    char busPath[512];
+    masterBus->getPath(busPath, sizeof(busPath), nullptr);
+    DebugMsg("Stopping all events routed through %sMaster\n", busPath);
+
+    if (result == FMOD_OK && masterBus) {
+        result = masterBus->stopAllEvents(FMOD_STUDIO_STOP_ALLOWFADEOUT);  // Stop all events on the master bus
+        if (result == FMOD_OK) {
+            DebugMsg("All FMOD events stopped.\n");
+        } else {
+            DebugMsg("Failed to stop events on master bus.\n");
+        }
+    } else {
+        DebugMsg("Failed to get master bus.\n");
+    }
+    fmod_system->update();  // Ensure FMOD processes the stop command
+}
+
 // Function to split an event path into folder structure
 std::map<std::string, std::vector<std::string>> GroupEventsByPath(const std::vector<std::string>& events) {
     std::map<std::string, std::vector<std::string>> grouped_events;
@@ -184,31 +301,31 @@ std::map<std::string, std::vector<std::string>> GroupEventsByPath(const std::vec
 
 // GUI rendering function
 void RenderGUI() {
-    ImGui::SetNextWindowSize(g_imgui_ctx, 700, 400, ImGui::Cond_FirstUseEver);
+    ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
-    bool open = true;
-    if (ImGui::Begin(g_imgui_ctx, "FMOD Project Selector", &open)) {
-        ImGui::Text(g_imgui_ctx, "FMOD Project:");
+    bool open = true;  // Open flag for the window
+    if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open)) {
+        ImGui::Text(reaMOD_ImGui_Context, "FMOD Project:");
 
         // Move the "Select" button to the left of the selected .fspro file
-        if (ImGui::Button(g_imgui_ctx, "Select")) {
+        if (ImGui::Button(reaMOD_ImGui_Context, "Select")) {
             OpenFileDialog();
         }
-        ImGui::SameLine(g_imgui_ctx);  // Put the file name on the same line as the button
-        ImGui::Text(g_imgui_ctx, selected_file_name);
+
+        ImGui::SameLine(reaMOD_ImGui_Context);  // Put the file name on the same line as the button
+        ImGui::Text(reaMOD_ImGui_Context, selected_file_name);
 
         // List the .bank files found in the "Build/Desktop/" directory
         if (!bank_files.empty()) {
-            ImGui::Separator(g_imgui_ctx);  // Add a separator line
-            ImGui::Text(g_imgui_ctx, "FMOD Bank Files:");
-            
+            ImGui::Separator(reaMOD_ImGui_Context);  // Add a separator line
+            ImGui::Text(reaMOD_ImGui_Context, "FMOD Bank Files:");
+
             for (size_t i = 0; i < bank_files.size(); ++i) {
                 std::string bank_file_name = fs::path(bank_files[i]).filename().string();
-                // Create a unique label for each button by appending the index
                 std::string button_label = bank_load_states[i] ? "Unload##" + std::to_string(i) : "Load##" + std::to_string(i);
 
                 // Render the toggle button for loading/unloading the bank on the left
-                if (ImGui::Button(g_imgui_ctx, button_label.c_str())) {
+                if (ImGui::Button(reaMOD_ImGui_Context, button_label.c_str())) {
                     if (bank_load_states[i]) {
                         // If unloading, unload the bank and clear the events
                         loaded_banks[bank_files[i]]->unload();
@@ -221,10 +338,10 @@ void RenderGUI() {
                     bank_load_states[i] = !bank_load_states[i];  // Toggle the load state
                 }
 
-                ImGui::SameLine(g_imgui_ctx);  // Place the text on the same line as the button
+                ImGui::SameLine(reaMOD_ImGui_Context);  // Place the text on the same line as the button
 
                 // Display the bank file name as a collapsible tree node
-                if (ImGui::TreeNode(g_imgui_ctx, bank_file_name.c_str())) {
+                if (ImGui::TreeNode(reaMOD_ImGui_Context, bank_file_name.c_str())) {
                     // If the bank is loaded, display its events grouped by folder structure
                     if (bank_load_states[i]) {
                         if (bank_events.find(bank_files[i]) != bank_events.end()) {
@@ -233,84 +350,86 @@ void RenderGUI() {
 
                             for (const auto& folder : grouped_events) {
                                 // Display the folder as a tree node
-                                if (ImGui::TreeNode(g_imgui_ctx, folder.first.c_str())) {
+                                if (ImGui::TreeNode(reaMOD_ImGui_Context, folder.first.c_str())) {
                                     // Display events inside the folder
                                     for (size_t j = 0; j < folder.second.size(); ++j) {
                                         std::string event_label = "Play##" + std::to_string(i) + "_" + std::to_string(j);
-                                        if (ImGui::Button(g_imgui_ctx, event_label.c_str())) {
+                                        if (ImGui::Button(reaMOD_ImGui_Context, event_label.c_str())) {
                                             PlayEvent(folder.first + "/" + folder.second[j]);
                                         }
-                                        ImGui::SameLine(g_imgui_ctx);
-                                        ImGui::Text(g_imgui_ctx, folder.second[j].c_str());
+                                        ImGui::SameLine(reaMOD_ImGui_Context);
+                                        ImGui::Text(reaMOD_ImGui_Context, folder.second[j].c_str());
                                     }
-                                    ImGui::TreePop(g_imgui_ctx);  // End the folder node
+                                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the folder node
                                 }
                             }
                         }
                     }
-                    ImGui::TreePop(g_imgui_ctx);  // End the tree node
+                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the tree node
                 }
             }
         }
 
-        ImGui::End(g_imgui_ctx);
+        ImGui::End(reaMOD_ImGui_Context);
     }
 
     // If the window is closed, unregister the timer to stop rendering
     if (!open) {
         plugin_register("-timer", reinterpret_cast<void*>(&RenderGUI));
-        g_imgui_ctx = nullptr;
+        reaMOD_ImGui_Context = nullptr;
+    }
+}
+
+// Open/Close ReaMODWindow
+void toggleReaMODWindow() {
+    if (!reaMOD_ImGui_Context) {
+        
+        // First-time setup: initialize ReaImGui and FMOD, and start rendering
+        ImGui::init(plugin_getapi);
+        reaMOD_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
+
+        // Initialize FMOD only if it's not already initialized
+        if (!IsFMODInitialized()) {
+            InitializeFMOD();  // Initialize the FMOD system
+        }
+        
+        // Start the rendering loop
+        plugin_register("timer", reinterpret_cast<void*>(&RenderGUI));
+
+    } else {
+        // Unregister the timer to stop the rendering the window
+        plugin_register("-timer", reinterpret_cast<void*>(&RenderGUI));
+        reaMOD_ImGui_Context = nullptr;
     }
 }
 
 // Command hook function for Reaper custom action
-static bool commandHook(KbdSectionInfo *sec, const int command,
-  const int val, const int valhw, const int relmode, HWND hwnd)
-{
+static bool commandHook(KbdSectionInfo *sec, const int command, const int val, const int valhw, const int relmode, HWND hwnd) {
     // Check if the action ID matches
-    if (command != g_actionId) return false;
+    if (command != actionIdOpenCloseReaMODWindow) return false;
 
-    // Initialize ReaImGui context and set up rendering loop
-    if (!g_imgui_ctx) {
-        ImGui::init(plugin_getapi);
-        g_imgui_ctx = ImGui::CreateContext("ReaMOD Settings & Control");
-
-        InitializeFMOD();  // Initialize the FMOD system
-
-        plugin_register("timer", reinterpret_cast<void*>(&RenderGUI));  // Hook up the render loop
-    } else {
-        ImGui::SetNextWindowFocus(g_imgui_ctx);  // Focus on the existing window if it's already open
-    }
+    // Call the toggle function to open/close the window
+    toggleReaMODWindow();
 
     return true;
 }
 
-// Entry point function for the Reaper plugin
-extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
-  REAPER_PLUGIN_HINSTANCE instance, reaper_plugin_info_t *rec)
-{
-    if (!rec) return 0;  // If rec is null, clean up
-
-    LoadReaperAPIFunctions(rec);  // Load API functions
-
-    if (rec->caller_version != REAPER_PLUGIN_VERSION) return 0;  // Check for compatibility
-
-    // Fetch Reaper API functions
-    plugin_getapi   = reinterpret_cast<decltype(plugin_getapi)>(rec->GetFunc("plugin_getapi"));
-    plugin_register = reinterpret_cast<decltype(plugin_register)>(rec->GetFunc("plugin_register"));
-    ShowMessageBox  = reinterpret_cast<decltype(ShowMessageBox)>(rec->GetFunc("ShowMessageBox"));
-
-    // Check if GetUserFileNameForRead is available (already loaded in LoadReaperAPIFunctions)
-    if (!GetUserFileNameForRead) {
-        ShowMessageBox("GetUserFileNameForRead not available", "Error", 0);
-        return 0;
-    }
-
-    // Register custom action and command hook
-    custom_action_register_t action { 0, "LINK_FMOD_PROJECT", "ReaMOD: Settings & Control" };
-    g_actionId = plugin_register("custom_action", &action);  // Assign the action ID to g_actionId
+// Register custom Reaper actions
+void RegisterActions(){
 
     plugin_register("hookcommand2", reinterpret_cast<void*>(&commandHook));  // Hook the action
+    
+    // Register custom actions
+    static custom_action_register_t actionOpenReaMODWindowReg = { 0, "ReaMOD_OpenCloseReaMODWindow", "ReaMOD: Open/Close Window" };
+    actionIdOpenCloseReaMODWindow = plugin_register("custom_action", &actionOpenReaMODWindowReg);  // Assign the action ID to actionIdOpenCloseReaMODWindow
+}
 
+// Entry point function for the Reaper plugin
+extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT( REAPER_PLUGIN_HINSTANCE instance, reaper_plugin_info_t *rec) {
+    if (!rec) return 0;  // If rec is null, clean up
+    if (rec->caller_version != REAPER_PLUGIN_VERSION) return 0;  // Check for compatibility
+    
+    LoadReaperAPIFunctions(rec);  // Load API functions
+    RegisterActions(); // Register custom action and command hook
     return 1;  // Success
 }
