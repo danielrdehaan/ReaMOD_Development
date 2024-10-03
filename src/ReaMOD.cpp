@@ -299,6 +299,17 @@ std::map<std::string, std::vector<std::string>> GroupEventsByPath(const std::vec
     return grouped_events;
 }
 
+// Function to render an arrow play button and trigger the FMOD event
+void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const std::string& event_path) {
+    if (ImGui::ArrowButton(ctx, ("##play_button_" + button_id).c_str(), ImGui::Dir_Right)) {
+        DebugMsg("Play button clicked: Event Path - %s\n", event_path.c_str());  // Debugging event path
+
+        // Trigger the FMOD event when the button is clicked
+        PlayEvent(event_path);
+    }
+}
+
+
 // GUI rendering function
 void RenderGUI() {
     ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
@@ -354,9 +365,11 @@ void RenderGUI() {
                                     // Display events inside the folder
                                     for (size_t j = 0; j < folder.second.size(); ++j) {
                                         std::string event_label = "Play##" + std::to_string(i) + "_" + std::to_string(j);
-                                        if (ImGui::Button(reaMOD_ImGui_Context, event_label.c_str())) {
-                                            PlayEvent(folder.first + "/" + folder.second[j]);
-                                        }
+                                        std::string event_path = folder.first + "/" + folder.second[j];
+
+                                        // Render the play button and pass the event path
+                                        RenderPlayButton(reaMOD_ImGui_Context, event_label, event_path);
+
                                         ImGui::SameLine(reaMOD_ImGui_Context);
                                         ImGui::Text(reaMOD_ImGui_Context, folder.second[j].c_str());
                                     }
@@ -379,6 +392,7 @@ void RenderGUI() {
         reaMOD_ImGui_Context = nullptr;
     }
 }
+
 
 // Open/Close ReaMODWindow
 void toggleReaMODWindow() {
