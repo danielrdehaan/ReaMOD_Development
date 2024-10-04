@@ -287,17 +287,46 @@ void StopAllFMODEvents() {
     fmod_system->update();  // Ensure FMOD processes the stop command
 }
 
-// Function to split an event path into folder structure
-std::map<std::string, std::vector<std::string>> GroupEventsByPath(const std::vector<std::string>& events) {
-    std::map<std::string, std::vector<std::string>> grouped_events;
-    for (const auto& event : events) {
-        size_t last_slash_pos = event.find_last_of('/');
-        std::string folder = event.substr(0, last_slash_pos);
-        std::string event_name = event.substr(last_slash_pos + 1);
-        grouped_events[folder].push_back(event_name);
+// Function to strip "event:" prefix from the event path for display purposes
+std::string StripPathPrefix(const std::string& event_path) {
+    const std::string eventPrefix = "event:";
+    const std::string snapshotPrefix = "snapshot:";
+
+    if (event_path.rfind(eventPrefix, 0) == 0) { // Check if the "event:" prefix exists at the start
+        return event_path.substr(eventPrefix.length()); // Return string without the prefix
     }
-    return grouped_events;
+    if (event_path.rfind(snapshotPrefix, 0) == 0) { // Check if the "snapshot:" prefix exists at the start
+        return event_path.substr(snapshotPrefix.length()); // Return string without the prefix
+    }
+    return event_path; // Return original path if no prefix
 }
+
+// Function to group events and snapshots, storing both stripped and full paths
+std::map<std::string, std::map<std::string, std::vector<std::pair<std::string, std::string>>>> GroupEventsAndSnapshotsByPath(const std::vector<std::string>& events) {
+    std::map<std::string, std::map<std::string, std::vector<std::pair<std::string, std::string>>>> grouped_folders;
+
+    for (const auto& event : events) {
+        bool is_snapshot = (event.find("snapshot:") == 0); // Check if it's a snapshot
+        std::string type_folder = is_snapshot ? "Snapshots" : "Events";
+
+        // Strip the prefix from the event path
+        std::string stripped_event = StripPathPrefix(event);
+
+        // Split the stripped event into folder and event name
+        size_t last_slash_pos = stripped_event.find_last_of('/');
+        std::string folder = stripped_event.substr(0, last_slash_pos);  // Folder path
+        std::string event_name = stripped_event.substr(last_slash_pos + 1);  // Event name
+
+        // Strip prefix from subfolders (if any) in the path
+        folder = StripPathPrefix(folder);
+
+        // Store both the stripped name for display and the full path for playback
+        grouped_folders[type_folder][folder].emplace_back(event_name, event);  // (display_name, full_path)
+    }
+
+    return grouped_folders;
+}
+
 
 // Function to render an arrow play button and trigger the FMOD event
 void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const std::string& event_path) {
@@ -308,7 +337,6 @@ void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
         PlayEvent(event_path);
     }
 }
-
 
 // GUI rendering function
 void RenderGUI() {
@@ -353,32 +381,39 @@ void RenderGUI() {
 
                 // Display the bank file name as a collapsible tree node
                 if (ImGui::TreeNode(reaMOD_ImGui_Context, bank_file_name.c_str())) {
-                    // If the bank is loaded, display its events grouped by folder structure
+                    // If the bank is loaded, display its events grouped by "Events" and "Snapshots"
                     if (bank_load_states[i]) {
                         if (bank_events.find(bank_files[i]) != bank_events.end()) {
                             const std::vector<std::string>& events = bank_events[bank_files[i]];
-                            auto grouped_events = GroupEventsByPath(events);
+                            auto grouped_folders = GroupEventsAndSnapshotsByPath(events);
 
-                            for (const auto& folder : grouped_events) {
-                                // Display the folder as a tree node
-                                if (ImGui::TreeNode(reaMOD_ImGui_Context, folder.first.c_str())) {
-                                    // Display events inside the folder
-                                    for (size_t j = 0; j < folder.second.size(); ++j) {
-                                        std::string event_label = "Play##" + std::to_string(i) + "_" + std::to_string(j);
-                                        std::string event_path = folder.first + "/" + folder.second[j];
+                            // Iterate over "Events" and "Snapshots"
+                            for (const auto& folder_type : grouped_folders) {
+                                if (ImGui::TreeNode(reaMOD_ImGui_Context, folder_type.first.c_str())) {  // "Events" or "Snapshots"
+                                    // Iterate over subfolders
+                                    for (const auto& folder : folder_type.second) {
+                                        if (ImGui::TreeNode(reaMOD_ImGui_Context, folder.first.c_str())) {
+                                            // Display events inside the folder
+                                            for (size_t j = 0; j < folder.second.size(); ++j) {
+                                                std::string event_label = "Play##" + std::to_string(i) + "_" + std::to_string(j);
+                                                const std::string& display_name = folder.second[j].first; // Stripped name for display
+                                                const std::string& full_path = folder.second[j].second;   // Full path for playback
 
-                                        // Render the play button and pass the event path
-                                        RenderPlayButton(reaMOD_ImGui_Context, event_label, event_path);
+                                                // Render the play button and pass the full event path to PlayEvent
+                                                RenderPlayButton(reaMOD_ImGui_Context, event_label, full_path);
 
-                                        ImGui::SameLine(reaMOD_ImGui_Context);
-                                        ImGui::Text(reaMOD_ImGui_Context, folder.second[j].c_str());
+                                                ImGui::SameLine(reaMOD_ImGui_Context);
+                                                ImGui::Text(reaMOD_ImGui_Context, display_name.c_str());
+                                            }
+                                            ImGui::TreePop(reaMOD_ImGui_Context);  // End the folder node
+                                        }
                                     }
-                                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the folder node
+                                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the "Events"/"Snapshots" node
                                 }
                             }
                         }
                     }
-                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the tree node
+                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the bank file tree node
                 }
             }
         }
@@ -392,7 +427,6 @@ void RenderGUI() {
         reaMOD_ImGui_Context = nullptr;
     }
 }
-
 
 // Open/Close ReaMODWindow
 void toggleReaMODWindow() {
