@@ -280,7 +280,7 @@ void PlayEvent(const std::string& event_path) {
 }
 
 // Function to stop all FMOD events
-void StopAllFMODEvents() {
+void StopAllEvents() {
     FMOD::Studio::Bus* masterBus = nullptr;
     FMOD_RESULT result = fmod_system->getBus("bus:/", &masterBus);  // Get the master bus
 
@@ -353,7 +353,7 @@ void MonitorPlayCursorAndTriggerEvents() {
             }
         }
     } else if (previousPlayState & 1) {  // Reaper was playing but now stopped
-        StopAllFMODEvents(); // Stop all FMOD events when playback stops
+        StopAllEvents(); // Stop all FMOD events when playback stops
     }
 
     // Update previousPlayState to track state changes correctly
@@ -367,13 +367,21 @@ void MonitorPlayCursorAndTriggerEvents() {
 }
 
 double lastCallTime = 0.0;
-double desiredInterval = 0.01;  // 10ms interval
+double desiredInterval = 0.1;  // 10ms interval
 
-// High-precision play cursor monitoring function (every 2ms)
+// High-precision play cursor monitoring function
 void HighPrecisionMonitor() {
-    // Only monitor play cursor if Reaper is playing
-    if (GetPlayState() & 1) {
-        MonitorPlayCursorAndTriggerEvents();  // Monitor play cursor and trigger events
+    // Get the current time
+    double currentTime = time_precise();  // High-resolution time in seconds
+
+    // Only perform the monitoring if 2ms (desiredInterval) have passed since the last call
+    if (currentTime - lastCallTime >= desiredInterval) {
+        lastCallTime = currentTime;  // Update last call time
+
+        // Only monitor play cursor if Reaper is playing
+        if (GetPlayState() & 1) {
+            MonitorPlayCursorAndTriggerEvents();  // Monitor play cursor and trigger events
+        }
     }
 }
 
@@ -542,7 +550,7 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
     }
 
     if (command == actionIdStopAllFMODEvents) {
-        StopAllFMODEvents();
+        StopAllEvents();
     }
 
     return true;
