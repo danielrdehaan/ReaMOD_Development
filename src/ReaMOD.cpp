@@ -26,12 +26,17 @@ namespace fs = std::filesystem;  // Alias for easier use of filesystem operation
 
 // Declare the global variable to store the custom action ID
 static int actionIdOpenCloseReaMODWindow = 0;
+static int actionIdStopAllFMODEvents = 0;
 
 // ImGui context
 ImGui_Context* reaMOD_ImGui_Context = nullptr;
 char selected_file_path[FILE_PATH_BUFFER_SIZE] = "";  // Full path of selected .fspro file
 char selected_file_name[FILE_PATH_BUFFER_SIZE] = "No project selected.";  // Initial text in the input box
 bool reaModWindowOpen = true;
+
+// Global variables to track timers
+bool isGuiRenderingActive = false;
+bool isMonitoringActive = false;
 
 // Store the list of found .bank files and their toggle states
 std::vector<std::string> bank_files;
@@ -125,6 +130,15 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         plugin_getapi   = reinterpret_cast<decltype(plugin_getapi)>(rec->GetFunc("plugin_getapi"));
         plugin_register = reinterpret_cast<decltype(plugin_register)>(rec->GetFunc("plugin_register"));
         ShowMessageBox  = reinterpret_cast<decltype(ShowMessageBox)>(rec->GetFunc("ShowMessageBox"));
+        time_precise = (double (*)())rec->GetFunc("time_precise");
+        CountTracks = (int (*)(ReaProject*))rec->GetFunc("CountTracks");
+        CountTrackMediaItems = (int (*)(MediaTrack*))rec->GetFunc("CountTrackMediaItems");
+        GetMediaItemInfo_Value = (double (*)(MediaItem*, const char*))rec->GetFunc("GetMediaItemInfo_Value");
+        GetPlayPosition = (double (*)())rec->GetFunc("GetPlayPosition");
+        GetPlayState = (int (*)())rec->GetFunc("GetPlayState");
+        GetTrack = (MediaTrack* (*)(ReaProject*, int))rec->GetFunc("GetTrack");
+        GetTrackMediaItem = (MediaItem* (*)(MediaTrack*, int))rec->GetFunc("GetTrackMediaItem");
+        GetSetMediaItemInfo_String = (bool (*)(MediaItem*, const char*, char*, bool))rec->GetFunc("GetSetMediaItemInfo_String");
     }
 }
 
@@ -287,6 +301,82 @@ void StopAllFMODEvents() {
     fmod_system->update();  // Ensure FMOD processes the stop command
 }
 
+double previousPlayPosition = 0.0; // Track the previous play position
+int previousPlayState = 0;  // 0 means stopped, 1 means playing
+std::set<MediaItem*> triggeredItems; // Track already-triggered items to ensure the note is printed only once
+
+// Function to monitor play cursor and trigger FMOD events based on item notes
+void MonitorPlayCursorAndTriggerEvents() {
+    int playState = GetPlayState();  // Get current playback state
+
+    // Ensure Reaper is playing
+    if (playState & 1) {  
+        // Get the current play position (where the play cursor is)
+        double playPosition = GetPlayPosition();
+
+        // Check if the play cursor has moved backward (e.g., due to scrubbing or looping)
+        if (playPosition < previousPlayPosition) {
+            // Clear triggered items so notes can be triggered again
+            triggeredItems.clear();
+        }
+
+        // Update previous play position
+        previousPlayPosition = playPosition;
+
+        // Iterate over all tracks in the project
+        int numTracks = CountTracks(nullptr);
+        for (int i = 0; i < numTracks; ++i) {
+            MediaTrack* track = GetTrack(nullptr, i);
+            int numItems = CountTrackMediaItems(track);
+
+            // Iterate over all items on the track
+            for (int j = 0; j < numItems; ++j) {
+                MediaItem* item = GetTrackMediaItem(track, j);
+                double itemStart = GetMediaItemInfo_Value(item, "D_POSITION");
+
+                // Check if the play cursor has reached the start of the item and it hasn't been triggered yet
+                if (playPosition >= itemStart && triggeredItems.find(item) == triggeredItems.end()) {
+                    char note[4096] = {0}; // Initialize buffer to store the note
+
+                    // Get the item's notes
+                    bool hasNote = GetSetMediaItemInfo_String(item, "P_NOTES", note, false);
+
+                    // If the item has a note and it starts with "event:", trigger the FMOD event
+                    if (hasNote && strncmp(note, "event:", 6) == 0) {
+                        std::string eventPath = std::string(note); // Remove the "event:" prefix
+                        PlayEvent(eventPath); // Trigger the FMOD event with the event path
+                    }
+
+                    // Mark this item as triggered so we don't trigger it again unless playhead moves back
+                    triggeredItems.insert(item);
+                }
+            }
+        }
+    } else if (previousPlayState & 1) {  // Reaper was playing but now stopped
+        StopAllFMODEvents(); // Stop all FMOD events when playback stops
+    }
+
+    // Update previousPlayState to track state changes correctly
+    previousPlayState = playState;
+
+    // Reset previous play position when playback stops
+    if (!(playState & 1)) {
+        previousPlayPosition = 0.0;
+        triggeredItems.clear();  // Optionally reset triggered items between playbacks
+    }
+}
+
+double lastCallTime = 0.0;
+double desiredInterval = 0.01;  // 10ms interval
+
+// High-precision play cursor monitoring function (every 2ms)
+void HighPrecisionMonitor() {
+    // Only monitor play cursor if Reaper is playing
+    if (GetPlayState() & 1) {
+        MonitorPlayCursorAndTriggerEvents();  // Monitor play cursor and trigger events
+    }
+}
+
 // Function to strip "event:" prefix from the event path for display purposes
 std::string StripPathPrefix(const std::string& event_path) {
     const std::string eventPrefix = "event:";
@@ -327,7 +417,6 @@ std::map<std::string, std::map<std::string, std::vector<std::pair<std::string, s
     return grouped_folders;
 }
 
-
 // Function to render an arrow play button and trigger the FMOD event
 void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const std::string& event_path) {
     if (ImGui::ArrowButton(ctx, ("##play_button_" + button_id).c_str(), ImGui::Dir_Right)) {
@@ -338,15 +427,16 @@ void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
     }
 }
 
-// GUI rendering function
+// GUI rendering function (every 30ms)
 void RenderGUI() {
+    if (reaMOD_ImGui_Context == nullptr) return;  // Ensure the context is valid
+
     ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
     bool open = true;  // Open flag for the window
     if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open)) {
         ImGui::Text(reaMOD_ImGui_Context, "FMOD Project:");
 
-        // Move the "Select" button to the left of the selected .fspro file
         if (ImGui::Button(reaMOD_ImGui_Context, "Select")) {
             OpenFileDialog();
         }
@@ -354,7 +444,6 @@ void RenderGUI() {
         ImGui::SameLine(reaMOD_ImGui_Context);  // Put the file name on the same line as the button
         ImGui::Text(reaMOD_ImGui_Context, selected_file_name);
 
-        // List the .bank files found in the "Build/Desktop/" directory
         if (!bank_files.empty()) {
             ImGui::Separator(reaMOD_ImGui_Context);  // Add a separator line
             ImGui::Text(reaMOD_ImGui_Context, "FMOD Bank Files:");
@@ -363,90 +452,83 @@ void RenderGUI() {
                 std::string bank_file_name = fs::path(bank_files[i]).filename().string();
                 std::string button_label = bank_load_states[i] ? "Unload##" + std::to_string(i) : "Load##" + std::to_string(i);
 
-                // Render the toggle button for loading/unloading the bank on the left
                 if (ImGui::Button(reaMOD_ImGui_Context, button_label.c_str())) {
                     if (bank_load_states[i]) {
-                        // If unloading, unload the bank and clear the events
                         loaded_banks[bank_files[i]]->unload();
                         loaded_banks.erase(bank_files[i]);
                         bank_events.erase(bank_files[i]);
                     } else {
-                        // If loading, load the bank and retrieve its events
                         LoadBank(bank_files[i]);
                     }
                     bank_load_states[i] = !bank_load_states[i];  // Toggle the load state
                 }
 
-                ImGui::SameLine(reaMOD_ImGui_Context);  // Place the text on the same line as the button
-
-                // Display the bank file name as a collapsible tree node
+                ImGui::SameLine(reaMOD_ImGui_Context);  // Same line for bank name
                 if (ImGui::TreeNode(reaMOD_ImGui_Context, bank_file_name.c_str())) {
-                    // If the bank is loaded, display its events grouped by "Events" and "Snapshots"
-                    if (bank_load_states[i]) {
-                        if (bank_events.find(bank_files[i]) != bank_events.end()) {
-                            const std::vector<std::string>& events = bank_events[bank_files[i]];
-                            auto grouped_folders = GroupEventsAndSnapshotsByPath(events);
+                    // Display events if the bank is loaded
+                    if (bank_load_states[i] && bank_events.find(bank_files[i]) != bank_events.end()) {
+                        const std::vector<std::string>& events = bank_events[bank_files[i]];
+                        auto grouped_folders = GroupEventsAndSnapshotsByPath(events);
 
-                            // Iterate over "Events" and "Snapshots"
-                            for (const auto& folder_type : grouped_folders) {
-                                if (ImGui::TreeNode(reaMOD_ImGui_Context, folder_type.first.c_str())) {  // "Events" or "Snapshots"
-                                    // Iterate over subfolders
-                                    for (const auto& folder : folder_type.second) {
-                                        if (ImGui::TreeNode(reaMOD_ImGui_Context, folder.first.c_str())) {
-                                            // Display events inside the folder
-                                            for (size_t j = 0; j < folder.second.size(); ++j) {
-                                                std::string event_label = "Play##" + std::to_string(i) + "_" + std::to_string(j);
-                                                const std::string& display_name = folder.second[j].first; // Stripped name for display
-                                                const std::string& full_path = folder.second[j].second;   // Full path for playback
+                        for (const auto& folder_type : grouped_folders) {
+                            if (ImGui::TreeNode(reaMOD_ImGui_Context, folder_type.first.c_str())) {
+                                for (const auto& folder : folder_type.second) {
+                                    if (ImGui::TreeNode(reaMOD_ImGui_Context, folder.first.c_str())) {
+                                        for (size_t j = 0; j < folder.second.size(); ++j) {
+                                            std::string event_label = "Play##" + std::to_string(i) + "_" + std::to_string(j);
+                                            const std::string& display_name = folder.second[j].first;
+                                            const std::string& full_path = folder.second[j].second;
 
-                                                // Render the play button and pass the full event path to PlayEvent
-                                                RenderPlayButton(reaMOD_ImGui_Context, event_label, full_path);
-
-                                                ImGui::SameLine(reaMOD_ImGui_Context);
-                                                ImGui::Text(reaMOD_ImGui_Context, display_name.c_str());
-                                            }
-                                            ImGui::TreePop(reaMOD_ImGui_Context);  // End the folder node
+                                            RenderPlayButton(reaMOD_ImGui_Context, event_label, full_path);
+                                            ImGui::SameLine(reaMOD_ImGui_Context);
+                                            ImGui::Text(reaMOD_ImGui_Context, display_name.c_str());
                                         }
+                                        ImGui::TreePop(reaMOD_ImGui_Context);
                                     }
-                                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the "Events"/"Snapshots" node
                                 }
+                                ImGui::TreePop(reaMOD_ImGui_Context);
                             }
                         }
                     }
-                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the bank file tree node
+                    ImGui::TreePop(reaMOD_ImGui_Context);  // End tree node
                 }
             }
         }
-
         ImGui::End(reaMOD_ImGui_Context);
-    }
-
-    // If the window is closed, unregister the timer to stop rendering
-    if (!open) {
-        plugin_register("-timer", reinterpret_cast<void*>(&RenderGUI));
-        reaMOD_ImGui_Context = nullptr;
     }
 }
 
-// Open/Close ReaMODWindow
+// Toggle function to handle ReaMOD GUI window
 void toggleReaMODWindow() {
     if (!reaMOD_ImGui_Context) {
-        
-        // First-time setup: initialize ReaImGui and FMOD, and start rendering
+        // Initialize ImGui context and FMOD system
         ImGui::init(plugin_getapi);
         reaMOD_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
 
-        // Initialize FMOD only if it's not already initialized
         if (!IsFMODInitialized()) {
-            InitializeFMOD();  // Initialize the FMOD system
+            InitializeFMOD();
         }
-        
-        // Start the rendering loop
+
+        // Register the GUI rendering timer (30 ms interval)
         plugin_register("timer", reinterpret_cast<void*>(&RenderGUI));
+        isGuiRenderingActive = true;
+
+        // Register the high-precision monitoring timer (2 ms interval)
+        plugin_register("timer", reinterpret_cast<void*>(&HighPrecisionMonitor));
+        isMonitoringActive = true;
 
     } else {
-        // Unregister the timer to stop the rendering the window
-        plugin_register("-timer", reinterpret_cast<void*>(&RenderGUI));
+        // If the window is already open, unregister the timers
+        if (isGuiRenderingActive) {
+            plugin_register("-timer", reinterpret_cast<void*>(&RenderGUI));
+            isGuiRenderingActive = false;
+        }
+        if (isMonitoringActive) {
+            plugin_register("-timer", reinterpret_cast<void*>(&HighPrecisionMonitor));
+            isMonitoringActive = false;
+        }
+
+        // Cleanup ImGui context
         reaMOD_ImGui_Context = nullptr;
     }
 }
@@ -454,10 +536,14 @@ void toggleReaMODWindow() {
 // Command hook function for Reaper custom action
 static bool commandHook(KbdSectionInfo *sec, const int command, const int val, const int valhw, const int relmode, HWND hwnd) {
     // Check if the action ID matches
-    if (command != actionIdOpenCloseReaMODWindow) return false;
+    if (command == actionIdOpenCloseReaMODWindow) {
+        // Call the toggle function to open/close the window
+        toggleReaMODWindow();
+    }
 
-    // Call the toggle function to open/close the window
-    toggleReaMODWindow();
+    if (command == actionIdStopAllFMODEvents) {
+        StopAllFMODEvents();
+    }
 
     return true;
 }
@@ -470,6 +556,10 @@ void RegisterActions(){
     // Register custom actions
     static custom_action_register_t actionOpenReaMODWindowReg = { 0, "ReaMOD_OpenCloseReaMODWindow", "ReaMOD: Open/Close Window" };
     actionIdOpenCloseReaMODWindow = plugin_register("custom_action", &actionOpenReaMODWindowReg);  // Assign the action ID to actionIdOpenCloseReaMODWindow
+
+    // Register custom actions
+    static custom_action_register_t actionStopAllFMODEvents = { 0, "ReaMOD_StopAllFMODEvents", "ReaMOD: Stop all FMOD Events" };
+    actionIdStopAllFMODEvents = plugin_register("custom_action", &actionStopAllFMODEvents);  // Assign the action ID to actionIdStopAllFMODEvents
 }
 
 // Entry point function for the Reaper plugin
