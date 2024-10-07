@@ -2,7 +2,7 @@
 	"artifacts" : 
 	[
 		{
-			"path" : "reaper_ReaMODPlugin.dylib"
+			"path" : "reaper_ReaMOD_Plugin.dylib"
 		}
 	],
 	"backtrace" : 1,
@@ -140,7 +140,7 @@
 		"language" : "CXX"
 	},
 	"name" : "reaper_ReaMODPlugin",
-	"nameOnDisk" : "reaper_ReaMODPlugin.dylib",
+	"nameOnDisk" : "reaper_ReaMOD_Plugin.dylib",
 	"paths" : 
 	{
 		"build" : ".",

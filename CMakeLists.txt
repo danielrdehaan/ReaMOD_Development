@@ -46,6 +46,6 @@ if(APPLE)
     set_target_properties(reaper_ReaMODPlugin PROPERTIES
         PREFIX ""  # This removes the 'lib' prefix
         SUFFIX ".dylib"
-        OUTPUT_NAME "reaper_ReaMODPlugin"  # Custom output name without 'lib'
+        OUTPUT_NAME "reaper_ReaMOD_Plugin"  # Custom output name
     )
 endif()

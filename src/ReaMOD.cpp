@@ -7,6 +7,7 @@
 #include <map>        // Use for storing hierarchical paths
 #include <set>        // Use for sorted folder paths
 #include <filesystem> // C++17 file system operations
+#include <functional>
 #include "fmod_studio.hpp"
 #include "fmod.hpp"
 #include "fmod_errors.h"
@@ -20,13 +21,12 @@
 
 #define FILE_PATH_BUFFER_SIZE 1024
 
-#define DEBUG true
+#define DEBUG false
 
 namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
 
 // Declare the global variable to store the custom action ID
 static int actionIdOpenCloseReaMODWindow = 0;
-static int actionIdStopAllFMODEvents = 0;
 
 // ImGui context
 ImGui_Context* reaMOD_ImGui_Context = nullptr;
@@ -34,18 +34,43 @@ char selected_file_path[FILE_PATH_BUFFER_SIZE] = "";  // Full path of selected .
 char selected_file_name[FILE_PATH_BUFFER_SIZE] = "No project selected.";  // Initial text in the input box
 bool reaModWindowOpen = true;
 
-// Global variables to track timers
-bool isGuiRenderingActive = false;
-bool isMonitoringActive = false;
-
 // Store the list of found .bank files and their toggle states
 std::vector<std::string> bank_files;
 std::vector<bool> bank_load_states;
 std::unordered_map<std::string, FMOD::Studio::Bank*> loaded_banks;  // Map of loaded banks
 std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map of events in each bank
+std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
+
+
+// Global variables to track playback
+double previousPlayPosition = 0.0;
+double lastCallTime = 0.0;
+double desiredInterval = 1.0;  // 10ms interval for monitoring playback
+int previousPlayState = 0;
+
+// Task management
+std::unordered_map<int, std::function<void()>> taskMap;
+int nextTaskId = 0;
+int guiTaskId = -1;
+int playbackTaskId = -1;
 
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
+
+// Load Reaper API functions
+void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
+    if (rec && rec->GetFunc) {
+        GetUserFileNameForRead = (bool (*)(char*, const char*, const char*))rec->GetFunc("GetUserFileNameForRead");
+        plugin_getapi   = reinterpret_cast<decltype(plugin_getapi)>(rec->GetFunc("plugin_getapi"));
+        plugin_register = reinterpret_cast<decltype(plugin_register)>(rec->GetFunc("plugin_register"));
+        ShowMessageBox  = reinterpret_cast<decltype(ShowMessageBox)>(rec->GetFunc("ShowMessageBox"));
+        ShowConsoleMsg   = reinterpret_cast<decltype(ShowConsoleMsg)>(rec->GetFunc("ShowConsoleMsg"));
+        GetPlayState = reinterpret_cast<decltype(GetPlayState)>(rec->GetFunc("GetPlayState"));
+        GetPlayPosition = reinterpret_cast<decltype(GetPlayPosition)>(rec->GetFunc("GetPlayPosition"));
+        EnumProjectMarkers = reinterpret_cast<decltype(EnumProjectMarkers)>(rec->GetFunc("EnumProjectMarkers"));
+        CountProjectMarkers = reinterpret_cast<decltype(CountProjectMarkers)>(rec->GetFunc("CountProjectMarkers"));
+    }
+}
 
 // A function for showing debug messages in Reaper's console.
 void DebugMsg(const char* fmt, ...) {
@@ -121,25 +146,6 @@ void PostMsg(const char* fmt, ...) {
     }
 
     va_end(args);
-}
-
-// Load Reaper API functions
-void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
-    if (rec && rec->GetFunc) {
-        GetUserFileNameForRead = (bool (*)(char*, const char*, const char*))rec->GetFunc("GetUserFileNameForRead");
-        plugin_getapi   = reinterpret_cast<decltype(plugin_getapi)>(rec->GetFunc("plugin_getapi"));
-        plugin_register = reinterpret_cast<decltype(plugin_register)>(rec->GetFunc("plugin_register"));
-        ShowMessageBox  = reinterpret_cast<decltype(ShowMessageBox)>(rec->GetFunc("ShowMessageBox"));
-        time_precise = (double (*)())rec->GetFunc("time_precise");
-        CountTracks = (int (*)(ReaProject*))rec->GetFunc("CountTracks");
-        CountTrackMediaItems = (int (*)(MediaTrack*))rec->GetFunc("CountTrackMediaItems");
-        GetMediaItemInfo_Value = (double (*)(MediaItem*, const char*))rec->GetFunc("GetMediaItemInfo_Value");
-        GetPlayPosition = (double (*)())rec->GetFunc("GetPlayPosition");
-        GetPlayState = (int (*)())rec->GetFunc("GetPlayState");
-        GetTrack = (MediaTrack* (*)(ReaProject*, int))rec->GetFunc("GetTrack");
-        GetTrackMediaItem = (MediaItem* (*)(MediaTrack*, int))rec->GetFunc("GetTrackMediaItem");
-        GetSetMediaItemInfo_String = (bool (*)(MediaItem*, const char*, char*, bool))rec->GetFunc("GetSetMediaItemInfo_String");
-    }
 }
 
 // Initialize FMOD system
@@ -301,90 +307,6 @@ void StopAllEvents() {
     fmod_system->update();  // Ensure FMOD processes the stop command
 }
 
-double previousPlayPosition = 0.0; // Track the previous play position
-int previousPlayState = 0;  // 0 means stopped, 1 means playing
-std::set<MediaItem*> triggeredItems; // Track already-triggered items to ensure the note is printed only once
-
-// Function to monitor play cursor and trigger FMOD events based on item notes
-void MonitorPlayCursorAndTriggerEvents() {
-    int playState = GetPlayState();  // Get current playback state
-
-    // Ensure Reaper is playing
-    if (playState & 1) {  
-        // Get the current play position (where the play cursor is)
-        double playPosition = GetPlayPosition();
-
-        // Check if the play cursor has moved backward (e.g., due to scrubbing or looping)
-        if (playPosition < previousPlayPosition) {
-            // Clear triggered items so notes can be triggered again
-            triggeredItems.clear();
-        }
-
-        // Update previous play position
-        previousPlayPosition = playPosition;
-
-        // Iterate over all tracks in the project
-        int numTracks = CountTracks(nullptr);
-        for (int i = 0; i < numTracks; ++i) {
-            MediaTrack* track = GetTrack(nullptr, i);
-            int numItems = CountTrackMediaItems(track);
-
-            // Iterate over all items on the track
-            for (int j = 0; j < numItems; ++j) {
-                MediaItem* item = GetTrackMediaItem(track, j);
-                double itemStart = GetMediaItemInfo_Value(item, "D_POSITION");
-
-                // Check if the play cursor has reached the start of the item and it hasn't been triggered yet
-                if (playPosition >= itemStart && triggeredItems.find(item) == triggeredItems.end()) {
-                    char note[4096] = {0}; // Initialize buffer to store the note
-
-                    // Get the item's notes
-                    bool hasNote = GetSetMediaItemInfo_String(item, "P_NOTES", note, false);
-
-                    // If the item has a note and it starts with "event:", trigger the FMOD event
-                    if (hasNote && strncmp(note, "event:", 6) == 0) {
-                        std::string eventPath = std::string(note); // Remove the "event:" prefix
-                        PlayEvent(eventPath); // Trigger the FMOD event with the event path
-                    }
-
-                    // Mark this item as triggered so we don't trigger it again unless playhead moves back
-                    triggeredItems.insert(item);
-                }
-            }
-        }
-    } else if (previousPlayState & 1) {  // Reaper was playing but now stopped
-        StopAllEvents(); // Stop all FMOD events when playback stops
-    }
-
-    // Update previousPlayState to track state changes correctly
-    previousPlayState = playState;
-
-    // Reset previous play position when playback stops
-    if (!(playState & 1)) {
-        previousPlayPosition = 0.0;
-        triggeredItems.clear();  // Optionally reset triggered items between playbacks
-    }
-}
-
-double lastCallTime = 0.0;
-double desiredInterval = 0.1;  // 10ms interval
-
-// High-precision play cursor monitoring function
-void HighPrecisionMonitor() {
-    // Get the current time
-    double currentTime = time_precise();  // High-resolution time in seconds
-
-    // Only perform the monitoring if 2ms (desiredInterval) have passed since the last call
-    if (currentTime - lastCallTime >= desiredInterval) {
-        lastCallTime = currentTime;  // Update last call time
-
-        // Only monitor play cursor if Reaper is playing
-        if (GetPlayState() & 1) {
-            MonitorPlayCursorAndTriggerEvents();  // Monitor play cursor and trigger events
-        }
-    }
-}
-
 // Function to strip "event:" prefix from the event path for display purposes
 std::string StripPathPrefix(const std::string& event_path) {
     const std::string eventPrefix = "event:";
@@ -435,16 +357,103 @@ void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
     }
 }
 
-// GUI rendering function (every 30ms)
-void RenderGUI() {
-    if (reaMOD_ImGui_Context == nullptr) return;  // Ensure the context is valid
 
+void CheckMarkers(double playPosition) {
+    if (CountProjectMarkers == nullptr || EnumProjectMarkers == nullptr) {
+        DebugMsg("Marker functions are not available.\n");
+        return;
+    }
+
+    int numMarkers = 0, numRegions = 0;
+    CountProjectMarkers(nullptr, &numMarkers, &numRegions);  // Count markers and regions
+
+    int totalMarkersAndRegions = numMarkers + numRegions;
+    double checkAheadWindow = 1.0;  // Check markers 1 second ahead of play position
+    double tolerance = 0.04;        // Small tolerance to account for floating-point inaccuracies
+
+    for (int i = 0; i < totalMarkersAndRegions; ++i) {
+        bool isRegion = false;
+        double markerPosition = 0.0, regionEnd = 0.0;
+        const char* name = nullptr;
+        int markerIndex = 0;  // Marker index from Reaper
+
+        // Corrected order of arguments for EnumProjectMarkers
+        if (EnumProjectMarkers(i, &isRegion, &markerPosition, &regionEnd, &name, &markerIndex)) {
+            if (name == nullptr) continue;  // Skip invalid markers
+
+            std::string markerName(name);
+
+            // Only check markers that are within the 1-second window ahead of the play position
+            if (markerPosition >= playPosition && markerPosition <= playPosition + checkAheadWindow) {
+                DebugMsg("Checking marker %d: %s at position %.2f\n", markerIndex, markerName.c_str(), markerPosition);
+
+                // Trigger the event when the playhead reaches or passes the marker's position (with tolerance)
+                if (playPosition >= markerPosition - tolerance && playPosition <= markerPosition + tolerance) {
+                    // Check if this marker was already triggered
+                    if (!triggeredMarkers[markerIndex]) {
+                        DebugMsg("Triggering event for marker: %s at position %.2f\n", markerName.c_str(), markerPosition);
+                        PlayEvent(markerName);  // Trigger the FMOD event or snapshot
+                        triggeredMarkers[markerIndex] = true;  // Mark this marker as triggered
+                    }
+                }
+            }
+        } else {
+            DebugMsg("Failed to retrieve marker %d\n", i);
+        }
+    }
+}
+
+
+void MonitorPlayback() {
+    if (!IsFMODInitialized()) {
+        DebugMsg("FMOD system is not initialized. Skipping playback monitoring.\n");
+        return;
+    }
+
+    if (GetPlayState == nullptr || GetPlayPosition == nullptr) {
+        DebugMsg("Playback state functions are not available.\n");
+        return;
+    }
+
+    int playState = GetPlayState();  // Get current playback state
+    double playPosition = GetPlayPosition();  // Get current play position
+
+    // Check if REAPER is playing or recording
+    if (playState & 1) {  // REAPER is playing
+        DebugMsg("Playback running. Current position: %.2f\n", playPosition);
+
+        // If playhead moved backward (looping, scrubbing, or jump)
+        if (playPosition < previousPlayPosition) {
+            DebugMsg("Playhead moved backward. Resetting triggered markers.\n");
+            triggeredMarkers.clear();  // Clear all triggered markers to allow retriggering
+        }
+
+        // Update previous play position
+        previousPlayPosition = playPosition;
+
+        // Check markers and trigger FMOD events based on marker positions
+        CheckMarkers(playPosition);
+
+    } else if (previousPlayState & 1) {  // REAPER was playing but now stopped
+        DebugMsg("Playback stopped. Cleaning up any lingering state.\n");
+        triggeredMarkers.clear();  // Clear all triggered markers when playback stops
+    }
+
+    // Update previous play state to track state changes
+    previousPlayState = playState;
+}
+
+
+
+// GUI rendering function
+void RenderGUI() {
     ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
     bool open = true;  // Open flag for the window
     if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open)) {
         ImGui::Text(reaMOD_ImGui_Context, "FMOD Project:");
 
+        // Move the "Select" button to the left of the selected .fspro file
         if (ImGui::Button(reaMOD_ImGui_Context, "Select")) {
             OpenFileDialog();
         }
@@ -452,6 +461,7 @@ void RenderGUI() {
         ImGui::SameLine(reaMOD_ImGui_Context);  // Put the file name on the same line as the button
         ImGui::Text(reaMOD_ImGui_Context, selected_file_name);
 
+        // List the .bank files found in the "Build/Desktop/" directory
         if (!bank_files.empty()) {
             ImGui::Separator(reaMOD_ImGui_Context);  // Add a separator line
             ImGui::Text(reaMOD_ImGui_Context, "FMOD Bank Files:");
@@ -460,83 +470,112 @@ void RenderGUI() {
                 std::string bank_file_name = fs::path(bank_files[i]).filename().string();
                 std::string button_label = bank_load_states[i] ? "Unload##" + std::to_string(i) : "Load##" + std::to_string(i);
 
+                // Render the toggle button for loading/unloading the bank on the left
                 if (ImGui::Button(reaMOD_ImGui_Context, button_label.c_str())) {
                     if (bank_load_states[i]) {
+                        // If unloading, unload the bank and clear the events
                         loaded_banks[bank_files[i]]->unload();
                         loaded_banks.erase(bank_files[i]);
                         bank_events.erase(bank_files[i]);
                     } else {
+                        // If loading, load the bank and retrieve its events
                         LoadBank(bank_files[i]);
                     }
                     bank_load_states[i] = !bank_load_states[i];  // Toggle the load state
                 }
 
-                ImGui::SameLine(reaMOD_ImGui_Context);  // Same line for bank name
+                ImGui::SameLine(reaMOD_ImGui_Context);  // Place the text on the same line as the button
+
+                // Display the bank file name as a collapsible tree node
                 if (ImGui::TreeNode(reaMOD_ImGui_Context, bank_file_name.c_str())) {
-                    // Display events if the bank is loaded
-                    if (bank_load_states[i] && bank_events.find(bank_files[i]) != bank_events.end()) {
-                        const std::vector<std::string>& events = bank_events[bank_files[i]];
-                        auto grouped_folders = GroupEventsAndSnapshotsByPath(events);
+                    // If the bank is loaded, display its events grouped by "Events" and "Snapshots"
+                    if (bank_load_states[i]) {
+                        if (bank_events.find(bank_files[i]) != bank_events.end()) {
+                            const std::vector<std::string>& events = bank_events[bank_files[i]];
+                            auto grouped_folders = GroupEventsAndSnapshotsByPath(events);
 
-                        for (const auto& folder_type : grouped_folders) {
-                            if (ImGui::TreeNode(reaMOD_ImGui_Context, folder_type.first.c_str())) {
-                                for (const auto& folder : folder_type.second) {
-                                    if (ImGui::TreeNode(reaMOD_ImGui_Context, folder.first.c_str())) {
-                                        for (size_t j = 0; j < folder.second.size(); ++j) {
-                                            std::string event_label = "Play##" + std::to_string(i) + "_" + std::to_string(j);
-                                            const std::string& display_name = folder.second[j].first;
-                                            const std::string& full_path = folder.second[j].second;
+                            // Iterate over "Events" and "Snapshots"
+                            for (const auto& folder_type : grouped_folders) {
+                                if (ImGui::TreeNode(reaMOD_ImGui_Context, folder_type.first.c_str())) {  // "Events" or "Snapshots"
+                                    // Iterate over subfolders
+                                    for (const auto& folder : folder_type.second) {
+                                        if (ImGui::TreeNode(reaMOD_ImGui_Context, folder.first.c_str())) {
+                                            // Display events inside the folder
+                                            for (size_t j = 0; j < folder.second.size(); ++j) {
+                                                std::string event_label = "Play##" + std::to_string(i) + "_" + std::to_string(j);
+                                                const std::string& display_name = folder.second[j].first; // Stripped name for display
+                                                const std::string& full_path = folder.second[j].second;   // Full path for playback
 
-                                            RenderPlayButton(reaMOD_ImGui_Context, event_label, full_path);
-                                            ImGui::SameLine(reaMOD_ImGui_Context);
-                                            ImGui::Text(reaMOD_ImGui_Context, display_name.c_str());
+                                                // Render the play button and pass the full event path to PlayEvent
+                                                RenderPlayButton(reaMOD_ImGui_Context, event_label, full_path);
+
+                                                ImGui::SameLine(reaMOD_ImGui_Context);
+                                                ImGui::Text(reaMOD_ImGui_Context, display_name.c_str());
+                                            }
+                                            ImGui::TreePop(reaMOD_ImGui_Context);  // End the folder node
                                         }
-                                        ImGui::TreePop(reaMOD_ImGui_Context);
                                     }
+                                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the "Events"/"Snapshots" node
                                 }
-                                ImGui::TreePop(reaMOD_ImGui_Context);
                             }
                         }
                     }
-                    ImGui::TreePop(reaMOD_ImGui_Context);  // End tree node
+                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the bank file tree node
                 }
             }
         }
+
         ImGui::End(reaMOD_ImGui_Context);
+    }
+
+    // If the window is closed, unregister the timer to stop rendering
+    if (!open) {
+        reaMOD_ImGui_Context = nullptr;
     }
 }
 
-// Toggle function to handle ReaMOD GUI window
+// Add task and return its ID
+int AddTask(std::function<void()> task) {
+    int taskId = nextTaskId++;
+    taskMap[taskId] = task;
+    return taskId;
+}
+
+// Remove a task by ID
+void RemoveTask(int taskId) {
+    taskMap.erase(taskId);
+}
+
+// Timer function
+void OnTimer() {
+    for (auto& [taskId, task] : taskMap) {
+        task();
+    }
+}
+
+// Open/Close ReaMODWindow
 void toggleReaMODWindow() {
     if (!reaMOD_ImGui_Context) {
-        // Initialize ImGui context and FMOD system
+        // First-time setup: initialize ReaImGui and FMOD, and start rendering
         ImGui::init(plugin_getapi);
         reaMOD_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
 
+        // Initialize FMOD only if it's not already initialized
         if (!IsFMODInitialized()) {
-            InitializeFMOD();
+            InitializeFMOD();  // Initialize the FMOD system
+            playbackTaskId = AddTask(MonitorPlayback);  // Add playback monitoring
         }
 
-        // Register the GUI rendering timer (30 ms interval)
-        plugin_register("timer", reinterpret_cast<void*>(&RenderGUI));
-        isGuiRenderingActive = true;
-
-        // Register the high-precision monitoring timer (2 ms interval)
-        plugin_register("timer", reinterpret_cast<void*>(&HighPrecisionMonitor));
-        isMonitoringActive = true;
+        // Add the GUI rendering task and store its ID
+        guiTaskId = AddTask(RenderGUI);
 
     } else {
-        // If the window is already open, unregister the timers
-        if (isGuiRenderingActive) {
-            plugin_register("-timer", reinterpret_cast<void*>(&RenderGUI));
-            isGuiRenderingActive = false;
-        }
-        if (isMonitoringActive) {
-            plugin_register("-timer", reinterpret_cast<void*>(&HighPrecisionMonitor));
-            isMonitoringActive = false;
+        // Remove the GUI rendering task if the window is closed
+        if (guiTaskId != -1) {  // Ensure the task ID is valid
+            RemoveTask(guiTaskId);
+            guiTaskId = -1;  // Invalidate the task ID after removal
         }
 
-        // Cleanup ImGui context
         reaMOD_ImGui_Context = nullptr;
     }
 }
@@ -544,14 +583,10 @@ void toggleReaMODWindow() {
 // Command hook function for Reaper custom action
 static bool commandHook(KbdSectionInfo *sec, const int command, const int val, const int valhw, const int relmode, HWND hwnd) {
     // Check if the action ID matches
-    if (command == actionIdOpenCloseReaMODWindow) {
-        // Call the toggle function to open/close the window
-        toggleReaMODWindow();
-    }
+    if (command != actionIdOpenCloseReaMODWindow) return false;
 
-    if (command == actionIdStopAllFMODEvents) {
-        StopAllEvents();
-    }
+    // Call the toggle function to open/close the window
+    toggleReaMODWindow();
 
     return true;
 }
@@ -564,10 +599,6 @@ void RegisterActions(){
     // Register custom actions
     static custom_action_register_t actionOpenReaMODWindowReg = { 0, "ReaMOD_OpenCloseReaMODWindow", "ReaMOD: Open/Close Window" };
     actionIdOpenCloseReaMODWindow = plugin_register("custom_action", &actionOpenReaMODWindowReg);  // Assign the action ID to actionIdOpenCloseReaMODWindow
-
-    // Register custom actions
-    static custom_action_register_t actionStopAllFMODEvents = { 0, "ReaMOD_StopAllFMODEvents", "ReaMOD: Stop all FMOD Events" };
-    actionIdStopAllFMODEvents = plugin_register("custom_action", &actionStopAllFMODEvents);  // Assign the action ID to actionIdStopAllFMODEvents
 }
 
 // Entry point function for the Reaper plugin
@@ -577,5 +608,15 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT( REAPER_PLUGIN_
     
     LoadReaperAPIFunctions(rec);  // Load API functions
     RegisterActions(); // Register custom action and command hook
+
+    // Register the central timer function once during initialization
+    plugin_register("timer", reinterpret_cast<void*>(&OnTimer));
     return 1;  // Success
+}
+
+// Exit point function for the Reaper plugin
+extern "C" REAPER_PLUGIN_DLL_EXPORT void REAPER_PLUGIN_EXIT() {
+    // Unregister the timer when the plugin is unloaded
+    RemoveTask(playbackTaskId);
+    plugin_register("-timer", reinterpret_cast<void*>(&OnTimer));
 }
