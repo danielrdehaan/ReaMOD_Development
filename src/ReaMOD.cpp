@@ -43,6 +43,8 @@ std::vector<bool> bank_load_states;
 std::unordered_map<std::string, FMOD::Studio::Bank*> loaded_banks;  // Map of loaded banks
 std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map of events in each bank
 std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
+std::unordered_map<MediaItem*, bool> triggeredItems; // Global variable to store whether an item has already triggered
+
 
 
 // Global variables to track playback
@@ -78,8 +80,18 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         CountProjectMarkers = reinterpret_cast<decltype(CountProjectMarkers)>(rec->GetFunc("CountProjectMarkers"));
         AddProjectMarker2 = reinterpret_cast<decltype(AddProjectMarker2)>(rec->GetFunc("AddProjectMarker2"));
         GetCursorPosition = reinterpret_cast<decltype(GetCursorPosition)>(rec->GetFunc("GetCursorPosition"));
+        CountTracks = reinterpret_cast<decltype(CountTracks)>(rec->GetFunc("CountTracks"));
+        GetTrack = reinterpret_cast<decltype(GetTrack)>(rec->GetFunc("GetTrack"));
+        GetSetMediaTrackInfo = reinterpret_cast<decltype(GetSetMediaTrackInfo)>(rec->GetFunc("GetSetMediaTrackInfo"));
+        CountTrackMediaItems = reinterpret_cast<decltype(CountTrackMediaItems)>(rec->GetFunc("CountTrackMediaItems"));
+        GetTrackMediaItem = reinterpret_cast<decltype(GetTrackMediaItem)>(rec->GetFunc("GetTrackMediaItem"));
+        GetActiveTake = reinterpret_cast<decltype(GetActiveTake)>(rec->GetFunc("GetActiveTake"));
+        GetSetMediaItemTakeInfo = reinterpret_cast<decltype(GetSetMediaItemTakeInfo)>(rec->GetFunc("GetSetMediaItemTakeInfo"));
+        GetSetMediaItemInfo = reinterpret_cast<decltype(GetSetMediaItemInfo)>(rec->GetFunc("GetSetMediaItemInfo"));
+        GetSetMediaItemInfo_String = reinterpret_cast<decltype(GetSetMediaItemInfo_String)>(rec->GetFunc("GetSetMediaItemInfo_String"));
     }
 }
+
 
 // A function for showing debug messages in Reaper's console.
 void DebugMsg(const char* fmt, ...) {
@@ -500,6 +512,68 @@ void CheckMarkers(double playPosition) {
     }
 }
 
+// Function to check items on tracks named "FMOD" or "fmod" for event or snapshot item notes
+void CheckItems(double playPosition) {
+    int trackCount = CountTracks(nullptr); // Get total number of tracks in the project
+    DebugMsg("Checking items. Total tracks: %d\n", trackCount);
+
+    double tolerance = 0.04; // Tolerance for play position checking
+
+    // Iterate over all tracks
+    for (int i = 0; i < trackCount; ++i) {
+        MediaTrack* track = GetTrack(nullptr, i); // Get track by index
+        const char* trackName = (const char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+        
+        // Log track name
+        DebugMsg("Track %d name: %s\n", i, trackName ? trackName : "(unnamed)");
+
+        // Check if the track name is "FMOD" or "fmod" (case-insensitive comparison)
+        if (trackName && (strcasecmp(trackName, "FMOD") == 0 || strcasecmp(trackName, "fmod") == 0)) {
+            DebugMsg("Track %d is named 'FMOD'. Checking items...\n", i);
+
+            int itemCount = CountTrackMediaItems(track); // Get number of items on the track
+            DebugMsg("Track %d has %d items.\n", i, itemCount);
+
+            // Iterate over all items on the track
+            for (int j = 0; j < itemCount; ++j) {
+                MediaItem* item = GetTrackMediaItem(track, j);
+                
+                // Retrieve the item note using GetSetMediaItemInfo_String
+                char itemNotes[4096];
+                bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
+                
+                if (!hasNotes || strlen(itemNotes) == 0) {
+                    DebugMsg("Item %d on track %d has no notes. Skipping.\n", j, i);
+                    continue; // Skip if no notes
+                }
+
+                std::string noteStr(itemNotes);
+                // Check if the item note starts with "event:" or "snapshot:"
+                if (noteStr.rfind("event:", 0) == 0 || noteStr.rfind("snapshot:", 0) == 0) {
+                    double itemPosition = *(double*)GetSetMediaItemInfo(item, "D_POSITION", nullptr);
+                    double itemLength = *(double*)GetSetMediaItemInfo(item, "D_LENGTH", nullptr);
+                    double itemEndPosition = itemPosition + itemLength;
+
+                    DebugMsg("Item %d on track %d: Position=%.2f, Length=%.2f, End=%.2f, Note=%s\n",
+                             j, i, itemPosition, itemLength, itemEndPosition, itemNotes);
+
+                    // Check if the play position is within the item range
+                    if (playPosition >= itemPosition - tolerance && playPosition <= itemEndPosition + tolerance) {
+                        // Check if this item was already triggered
+                        if (!triggeredItems[item]) {
+                            DebugMsg("Triggering event for item note: %s at position %.2f\n", noteStr.c_str(), itemPosition);
+                            PlayEvent(noteStr); // Pass the full item note as the event path
+                            triggeredItems[item] = true; // Mark this item as triggered
+                        } else {
+                            DebugMsg("Item %d on track %d has already been triggered. Skipping.\n", j, i);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 void MonitorPlayback() {
     if (!IsFMODInitialized()) {
@@ -523,6 +597,7 @@ void MonitorPlayback() {
         if (playPosition < previousPlayPosition) {
             DebugMsg("Playhead moved backward. Resetting triggered markers.\n");
             triggeredMarkers.clear();  // Clear all triggered markers to allow retriggering
+            triggeredItems.clear();    // Clear all triggered items to allow retriggering
         }
 
         // Update previous play position
@@ -531,16 +606,18 @@ void MonitorPlayback() {
         // Check markers and trigger FMOD events based on marker positions
         CheckMarkers(playPosition);
 
+        // Check items on tracks named "FMOD" or "fmod" for event or snapshot notes
+        CheckItems(playPosition);
+
     } else if (previousPlayState & 1) {  // REAPER was playing but now stopped
         DebugMsg("Playback stopped. Cleaning up any lingering state.\n");
         triggeredMarkers.clear();  // Clear all triggered markers when playback stops
+        triggeredItems.clear();    // Clear all triggered items when playback stops
     }
 
     // Update previous play state to track state changes
     previousPlayState = playState;
 }
-
-
 
 // Update the RenderGUI function to include the right-click clipboard feature
 void RenderGUI() {
@@ -697,7 +774,6 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
     return false;
 }
 
-
 void RegisterActions() {
     plugin_register("hookcommand2", reinterpret_cast<void*>(&commandHook));  // Hook the action
     
@@ -709,7 +785,6 @@ void RegisterActions() {
     static custom_action_register_t actionAddMarkerWithLastFMODEventReg = { 0, "ReaMOD_AddMarkerWithLastFMODEvent", "ReaMOD: Add Marker with Last FMOD Event" };
     actionIdAddMarkerWithLastFMODEvent = plugin_register("custom_action", &actionAddMarkerWithLastFMODEventReg);
 }
-
 
 // Entry point function for the Reaper plugin
 extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT( REAPER_PLUGIN_HINSTANCE instance, reaper_plugin_info_t *rec) {
