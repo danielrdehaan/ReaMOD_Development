@@ -23,12 +23,13 @@
 
 #define FILE_PATH_BUFFER_SIZE 1024
 
-#define DEBUG false
+#define DEBUG true
 
 namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
 
 // Declare the global variable to store the custom action ID
 static int actionIdOpenCloseReaMODWindow = 0;
+static int actionIdAddMarkerWithLastFMODEvent = 0;
 
 // ImGui context
 ImGui_Context* reaMOD_ImGui_Context = nullptr;
@@ -55,6 +56,9 @@ int nextTaskId = 0;
 int guiTaskId = -1;
 int playbackTaskId = -1;
 
+// Global variable to store the last triggered FMOD event path
+std::string lastTriggeredFMODEvent;
+
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
 
@@ -69,6 +73,8 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         GetPlayPosition = reinterpret_cast<decltype(GetPlayPosition)>(rec->GetFunc("GetPlayPosition"));
         EnumProjectMarkers = reinterpret_cast<decltype(EnumProjectMarkers)>(rec->GetFunc("EnumProjectMarkers"));
         CountProjectMarkers = reinterpret_cast<decltype(CountProjectMarkers)>(rec->GetFunc("CountProjectMarkers"));
+        AddProjectMarker2 = reinterpret_cast<decltype(AddProjectMarker2)>(rec->GetFunc("AddProjectMarker2"));
+        GetCursorPosition = reinterpret_cast<decltype(GetCursorPosition)>(rec->GetFunc("GetCursorPosition"));
     }
 }
 
@@ -159,16 +165,16 @@ void InitializeFMOD() {
 // Function to check if FMOD System is Initialzed
 bool IsFMODInitialized() {
     if (fmod_system) {
-        DebugMsg("Checking if FMOD System is initialized...\n");
+        // DebugMsg("Checking if FMOD System is initialized...\n");
         FMOD::System* coreSystem = nullptr;
         FMOD_RESULT result = fmod_system->getCoreSystem(&coreSystem);  // Get the core system
         
         if (result == FMOD_OK && coreSystem) {
-            DebugMsg("FMOD System is initialized.\n");
+            // DebugMsg("FMOD System is initialized.\n");
             return true;  // FMOD is initialized
         }
     }
-    DebugMsg("FMOD System is NOT initialized.\n");
+    // DebugMsg("FMOD System is NOT initialized.\n");
     return false;  // FMOD is not initialized
 }
 
@@ -308,7 +314,6 @@ void OpenFileDialog() {
     }
 }
 
-// Function to play an event
 void PlayEvent(const std::string& event_path) {
     FMOD::Studio::EventDescription* event_description = nullptr;
     fmod_system->getEvent(event_path.c_str(), &event_description);
@@ -321,6 +326,30 @@ void PlayEvent(const std::string& event_path) {
     }
     fmod_system->update();
 }
+
+bool isAddingMarker = false;
+
+void AddMarkerWithLastFMODEvent() {
+    if (isAddingMarker) return; // Prevent re-entrant calls
+    isAddingMarker = true;
+
+    if (lastTriggeredFMODEvent.empty()) {
+        PostMsg("No FMOD event has been triggered yet.\n");
+        return;
+    }
+
+    // Get the current edit cursor position
+    double cursorPosition = GetCursorPosition();
+
+    // Create a new marker at the cursor position with the event's full path as the name
+    int color = 0; // Use default color
+    AddProjectMarker2(nullptr, false, cursorPosition, 0.0, lastTriggeredFMODEvent.c_str(), -1, color);
+
+    DebugMsg("Marker added for last FMOD event: %s\n", lastTriggeredFMODEvent.c_str());
+
+    isAddingMarker = false; // Reset flag after completion
+}
+
 
 // Function to stop all FMOD events
 void StopAllEvents() {
@@ -411,6 +440,8 @@ void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
 
         // Trigger the FMOD event when the button is clicked
         PlayEvent(event_path);
+        // Update the last triggered event path
+        lastTriggeredFMODEvent = event_path;
     }
 
     // Use ImGui::MouseButton_Right for the right mouse button check
@@ -644,24 +675,31 @@ void toggleReaMODWindow() {
 
 // Command hook function for Reaper custom action
 static bool commandHook(KbdSectionInfo *sec, const int command, const int val, const int valhw, const int relmode, HWND hwnd) {
-    // Check if the action ID matches
-    if (command != actionIdOpenCloseReaMODWindow) return false;
+    // Check if the action ID matches the registered actions
+    if (command == actionIdOpenCloseReaMODWindow) {
+        toggleReaMODWindow();
+        return true;
+    } else if (command == actionIdAddMarkerWithLastFMODEvent) {
+        AddMarkerWithLastFMODEvent();
+        return true;
+    }
 
-    // Call the toggle function to open/close the window
-    toggleReaMODWindow();
-
-    return true;
+    return false;
 }
 
-// Register custom Reaper actions
-void RegisterActions(){
 
+void RegisterActions() {
     plugin_register("hookcommand2", reinterpret_cast<void*>(&commandHook));  // Hook the action
     
-    // Register custom actions
+    // Register the existing custom action for toggling the ReaMOD window
     static custom_action_register_t actionOpenReaMODWindowReg = { 0, "ReaMOD_OpenCloseReaMODWindow", "ReaMOD: Open/Close Window" };
     actionIdOpenCloseReaMODWindow = plugin_register("custom_action", &actionOpenReaMODWindowReg);  // Assign the action ID to actionIdOpenCloseReaMODWindow
+
+    // Register the new custom action for adding a marker with the last FMOD event
+    static custom_action_register_t actionAddMarkerWithLastFMODEventReg = { 0, "ReaMOD_AddMarkerWithLastFMODEvent", "ReaMOD: Add Marker with Last FMOD Event" };
+    actionIdAddMarkerWithLastFMODEvent = plugin_register("custom_action", &actionAddMarkerWithLastFMODEventReg);
 }
+
 
 // Entry point function for the Reaper plugin
 extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT( REAPER_PLUGIN_HINSTANCE instance, reaper_plugin_info_t *rec) {
