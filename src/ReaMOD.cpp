@@ -50,6 +50,9 @@ double previousPlayPosition = 0.0;
 double lastCallTime = 0.0;
 int previousPlayState = 0;
 
+// Look-ahead time for marker triggering
+int lookAheadTimeMs = 60;  // Default look-ahead time set to 0 milliseconds
+
 // Task management
 std::unordered_map<int, std::function<void()>> taskMap;
 int nextTaskId = 0;
@@ -77,7 +80,6 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         GetCursorPosition = reinterpret_cast<decltype(GetCursorPosition)>(rec->GetFunc("GetCursorPosition"));
     }
 }
-
 
 // A function for showing debug messages in Reaper's console.
 void DebugMsg(const char* fmt, ...) {
@@ -216,7 +218,6 @@ void LoadBank(const std::string& bank_path, bool load_sample_data = true) {
     }
 }
 
-
 // Function to find all .bank files in the "Build/Desktop/" directory relative to the selected .fspro file
 void FindBankFiles(const std::string& fspro_dir) {
     std::string bank_directory = fspro_dir + "/Build/Desktop/";
@@ -275,7 +276,6 @@ void FindBankFiles(const std::string& fspro_dir) {
         }
     }
 }
-
 
 // Function to open the file dialog and extract file name
 void OpenFileDialog() {
@@ -349,7 +349,6 @@ void AddMarkerWithLastFMODEvent() {
 
     isAddingMarker = false; // Reset flag after completion
 }
-
 
 // Function to stop all FMOD events
 void StopAllEvents() {
@@ -429,7 +428,6 @@ void CopyToClipboard(const std::string& text) {
     }
 }
 
-
 // Use the ReaImGui MouseButton_Right enum or value
 const int RightMouseButton = ImGui::MouseButton_Right;
 
@@ -464,6 +462,9 @@ void CheckMarkers(double playPosition) {
     double checkAheadWindow = 1.0;  // Check markers 1 second ahead of play position
     double tolerance = 0.04;        // Small tolerance to account for floating-point inaccuracies
 
+    // Convert lookAheadTimeMs to seconds
+    double lookAheadTimeSeconds = lookAheadTimeMs / 1000.0;
+
     for (int i = 0; i < totalMarkersAndRegions; ++i) {
         bool isRegion = false;
         double markerPosition = 0.0, regionEnd = 0.0;
@@ -476,12 +477,15 @@ void CheckMarkers(double playPosition) {
 
             std::string markerName(name);
 
+            // Adjust marker position by look-ahead time
+            double adjustedMarkerPosition = markerPosition - lookAheadTimeSeconds;
+
             // Only check markers that are within the 1-second window ahead of the play position
-            if (markerPosition >= playPosition && markerPosition <= playPosition + checkAheadWindow) {
+            if (adjustedMarkerPosition >= playPosition && adjustedMarkerPosition <= playPosition + checkAheadWindow) {
                 DebugMsg("Checking marker %d: %s at position %.2f\n", markerIndex, markerName.c_str(), markerPosition);
 
                 // Trigger the event when the playhead reaches or passes the marker's position (with tolerance)
-                if (playPosition >= markerPosition - tolerance && playPosition <= markerPosition + tolerance) {
+                if (playPosition >= adjustedMarkerPosition - tolerance && playPosition <= adjustedMarkerPosition + tolerance) {
                     // Check if this marker was already triggered
                     if (!triggeredMarkers[markerIndex]) {
                         DebugMsg("Triggering event for marker: %s at position %.2f\n", markerName.c_str(), markerPosition);
@@ -617,6 +621,12 @@ void RenderGUI() {
                 }
             }
         }
+
+        ImGui::Separator(reaMOD_ImGui_Context);
+        ImGui::Text(reaMOD_ImGui_Context, "Look Ahead Time (ms):");
+        ImGui::SetNextItemWidth(reaMOD_ImGui_Context, 90);
+        ImGui::InputInt(reaMOD_ImGui_Context, "##look_ahead_time_ms", &lookAheadTimeMs);
+        // lookAheadTimeMs = std::max(0, lookAheadTimeMs);  // Prevent negative values
 
         ImGui::End(reaMOD_ImGui_Context);
     }
