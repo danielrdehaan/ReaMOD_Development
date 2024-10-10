@@ -10,10 +10,13 @@
 #include <functional>
 #include <chrono>
 #include <thread>
+#include <fstream> // Include for file I/O operations
 #include "fmod_studio.hpp"
 #include "fmod.hpp"
 #include "fmod_errors.h"
 #include "reaper_plugin.h"
+#include "tinyfiledialogs.h"
+
 
 #define REAPERAPI_IMPLEMENT
 #include "reaper_plugin_functions.h"
@@ -91,7 +94,6 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         GetSetMediaItemInfo_String = reinterpret_cast<decltype(GetSetMediaItemInfo_String)>(rec->GetFunc("GetSetMediaItemInfo_String"));
     }
 }
-
 
 // A function for showing debug messages in Reaper's console.
 void DebugMsg(const char* fmt, ...) {
@@ -602,7 +604,6 @@ void CheckItems(double playPosition) {
     }
 }
 
-
 void MonitorPlayback() {
     if (!IsFMODInitialized()) {
         DebugMsg("FMOD system is not initialized. Skipping playback monitoring.\n");
@@ -647,12 +648,167 @@ void MonitorPlayback() {
     previousPlayState = playState;
 }
 
+// Function to save the extension's current state to a file
+void SaveStateToFile(const std::string& filePath) {
+    std::ofstream outFile(filePath);
+    if (!outFile) {
+        DebugMsg("Failed to open file for saving: %s\n", filePath.c_str());
+        return;
+    }
+
+    // Save relevant state information
+    outFile << "fspro_file=" << selected_file_path << "\n";
+    outFile << "lookahead_time_ms=" << lookAheadTimeMs << "\n";
+
+    outFile << "<bank_files>\n";
+    for (size_t i = 0; i < bank_files.size(); ++i) {
+        outFile << "bank_file=" << bank_files[i] << "\n";
+        outFile << "load_state=" << (bank_load_states[i] ? 1 : 0) << "\n";
+    }
+    outFile << "</bank_files>\n";
+
+    outFile.close();
+    DebugMsg("State saved successfully to: %s\n", filePath.c_str());
+}
+
+// Function to load the extension state from a .txt file
+void LoadStateFromFile(const std::string& filePath) {
+    // Check if the FMOD system is initialized
+    if (!IsFMODInitialized()) {
+        DebugMsg("FMOD system is not initialized. Cannot load state from file.\n");
+        return;
+    }
+
+    std::ifstream inFile(filePath);
+    if (!inFile.is_open()) {
+        DebugMsg("Failed to open file for loading: %s\n", filePath.c_str());
+        return;
+    }
+
+    // Clear the current state to avoid duplication
+    bank_files.clear();
+    bank_load_states.clear();
+    bank_events.clear();
+    loaded_banks.clear();
+    std::strncpy(selected_file_name, "No project selected.", FILE_PATH_BUFFER_SIZE - 1);
+
+    std::string line;
+    std::string fsproDirectory;
+    bool masterStringsBankLoaded = false;
+
+    while (std::getline(inFile, line)) {
+        if (line.rfind("fspro_file=", 0) == 0) {
+            // Load .fspro file path
+            std::strncpy(selected_file_path, line.substr(11).c_str(), FILE_PATH_BUFFER_SIZE - 1);
+            selected_file_path[FILE_PATH_BUFFER_SIZE - 1] = '\0';
+            DebugMsg("Loaded fspro_file: %s\n", selected_file_path);
+
+            // Extract the .fspro directory
+            std::string file_path(selected_file_path);
+            size_t last_slash_pos = file_path.find_last_of("/\\");
+            std::string file_name = file_path.substr(last_slash_pos + 1);
+            std::strncpy(selected_file_name, file_name.c_str(), FILE_PATH_BUFFER_SIZE - 1);
+            fsproDirectory = file_path.substr(0, last_slash_pos);
+
+            // Attempt to load the Master.strings.bank file immediately
+            std::string masterStringsBankPath = fsproDirectory + "/Build/Desktop/Master.strings.bank";
+            if (fs::exists(masterStringsBankPath)) {
+                LoadBank(masterStringsBankPath, false); // Load without sample data
+                masterStringsBankLoaded = true;
+                DebugMsg("Master.strings.bank loaded from: %s\n", masterStringsBankPath.c_str());
+            } else {
+                DebugMsg("Master.strings.bank not found in: %s\n", masterStringsBankPath.c_str());
+            }
+        } else if (line.rfind("lookahead_time_ms=", 0) == 0) {
+            lookAheadTimeMs = std::stoi(line.substr(18));
+            DebugMsg("Loaded lookahead_time_ms: %d\n", lookAheadTimeMs);
+        } else if (line == "<bank_files>") {
+            while (std::getline(inFile, line) && line != "</bank_files>") {
+                if (line.rfind("bank_file=", 0) == 0) {
+                    bank_files.push_back(line.substr(10));
+                } else if (line.rfind("load_state=", 0) == 0) {
+                    bank_load_states.push_back(std::stoi(line.substr(11)) != 0);
+                    DebugMsg("Loaded bank_file: %s, load_state: %d\n", bank_files.back().c_str(), bank_load_states.back());
+                }
+            }
+        }
+    }
+
+    inFile.close();
+
+    // Load other bank files if the Master.strings.bank was successfully loaded
+    if (masterStringsBankLoaded) {
+        for (size_t i = 0; i < bank_files.size(); ++i) {
+            if (bank_load_states[i] && bank_files[i].find("Master.strings.bank") == std::string::npos) {
+                LoadBank(bank_files[i]);
+            }
+        }
+    }
+
+    DebugMsg("State loaded from file: %s\n", filePath.c_str());
+}
+
+
+
+void SaveStateDialog() {
+    const char* filterPatterns[2] = { "*.ReaMOD", "*.*" };
+    const char* savePath = tinyfd_saveFileDialog(
+        "Save State As",  // Dialog title
+        "state.ReaMOD",   // Default filename with .ReaMOD extension
+        2,                // Number of filter patterns
+        filterPatterns,   // Filter patterns array
+        "ReaMOD files (*.ReaMOD)" // Filter description
+    );
+
+    if (savePath) {
+        // If the file name doesn't end with .ReaMOD, add the extension
+        std::string savePathStr(savePath);
+        if (savePathStr.find(".ReaMOD") == std::string::npos) {
+            savePathStr += ".ReaMOD";
+        }
+        SaveStateToFile(savePathStr);
+        DebugMsg("State saved successfully to: %s\n", savePathStr.c_str());
+    } else {
+        DebugMsg("Save operation canceled or invalid file name.\n");
+    }
+}
+
+void LoadStateDialog() {
+    const char* filterPatterns[2] = { "*.ReaMOD", "*.*" };
+    const char* loadPath = tinyfd_openFileDialog(
+        "Load State",         // Dialog title
+        "",                   // Default path
+        2,                    // Number of filter patterns
+        filterPatterns,       // Filter patterns array
+        "ReaMOD files (*.ReaMOD)", // Filter description
+        0                     // Allow multiple selection (0 = single file)
+    );
+
+    if (loadPath) {
+        LoadStateFromFile(loadPath);
+        DebugMsg("State loaded successfully from: %s\n", loadPath);
+    } else {
+        DebugMsg("Load operation canceled or invalid file name.\n");
+    }
+}
+
 // Update the RenderGUI function to include the right-click clipboard feature
 void RenderGUI() {
     ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
     bool open = true;  // Open flag for the window
     if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open)) {
+        // Add Save and Load State buttons
+        if (ImGui::Button(reaMOD_ImGui_Context, "Save")) {
+            SaveStateDialog();
+        }
+        ImGui::SameLine(reaMOD_ImGui_Context);
+        if (ImGui::Button(reaMOD_ImGui_Context, "Load")) {
+            LoadStateDialog();
+        }
+
+        ImGui::Separator(reaMOD_ImGui_Context);
+
         ImGui::Text(reaMOD_ImGui_Context, "FMOD Project:");
 
         // Move the "Select" button to the left of the selected .fspro file
@@ -802,6 +958,7 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
     return false;
 }
 
+
 void RegisterActions() {
     plugin_register("hookcommand2", reinterpret_cast<void*>(&commandHook));  // Hook the action
     
@@ -829,6 +986,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT( REAPER_PLUGIN_
 
 // Exit point function for the Reaper plugin
 extern "C" REAPER_PLUGIN_DLL_EXPORT void REAPER_PLUGIN_EXIT() {
+    // Unregister the project state extension
     // Unregister the timer when the plugin is unloaded
     RemoveTask(playbackTaskId);
     plugin_register("-timer", reinterpret_cast<void*>(&OnTimer));

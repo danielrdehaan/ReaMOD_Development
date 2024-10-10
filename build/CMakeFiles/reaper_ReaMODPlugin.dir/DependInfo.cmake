@@ -8,6 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
+  "/Users/danielrdehaan/Documents/GitHub/ReaMOD/tinyfiledialogs/tinyfiledialogs.c" "CMakeFiles/reaper_ReaMODPlugin.dir/tinyfiledialogs/tinyfiledialogs.c.o" "gcc" "CMakeFiles/reaper_ReaMODPlugin.dir/tinyfiledialogs/tinyfiledialogs.c.o.d"
   "/Users/danielrdehaan/Documents/GitHub/ReaMOD/src/ReaMOD.cpp" "CMakeFiles/reaper_ReaMODPlugin.dir/src/ReaMOD.cpp.o" "gcc" "CMakeFiles/reaper_ReaMODPlugin.dir/src/ReaMOD.cpp.o.d"
   )
 

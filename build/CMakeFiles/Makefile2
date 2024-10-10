@@ -81,12 +81,12 @@ clean: CMakeFiles/reaper_ReaMODPlugin.dir/clean
 CMakeFiles/reaper_ReaMODPlugin.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles --progress-num=1,2 "Built target reaper_ReaMODPlugin"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles --progress-num=1,2,3 "Built target reaper_ReaMODPlugin"
 .PHONY : CMakeFiles/reaper_ReaMODPlugin.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/reaper_ReaMODPlugin.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles 2
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles 3
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/reaper_ReaMODPlugin.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles 0
 .PHONY : CMakeFiles/reaper_ReaMODPlugin.dir/rule

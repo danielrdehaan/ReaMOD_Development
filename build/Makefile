@@ -153,6 +153,30 @@ src/ReaMOD.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/src/ReaMOD.cpp.s
 .PHONY : src/ReaMOD.cpp.s
 
+tinyfiledialogs/tinyfiledialogs.o: tinyfiledialogs/tinyfiledialogs.c.o
+.PHONY : tinyfiledialogs/tinyfiledialogs.o
+
+# target to build an object file
+tinyfiledialogs/tinyfiledialogs.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/tinyfiledialogs/tinyfiledialogs.c.o
+.PHONY : tinyfiledialogs/tinyfiledialogs.c.o
+
+tinyfiledialogs/tinyfiledialogs.i: tinyfiledialogs/tinyfiledialogs.c.i
+.PHONY : tinyfiledialogs/tinyfiledialogs.i
+
+# target to preprocess a source file
+tinyfiledialogs/tinyfiledialogs.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/tinyfiledialogs/tinyfiledialogs.c.i
+.PHONY : tinyfiledialogs/tinyfiledialogs.c.i
+
+tinyfiledialogs/tinyfiledialogs.s: tinyfiledialogs/tinyfiledialogs.c.s
+.PHONY : tinyfiledialogs/tinyfiledialogs.s
+
+# target to generate assembly for a file
+tinyfiledialogs/tinyfiledialogs.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/tinyfiledialogs/tinyfiledialogs.c.s
+.PHONY : tinyfiledialogs/tinyfiledialogs.c.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -165,6 +189,9 @@ help:
 	@echo "... src/ReaMOD.o"
 	@echo "... src/ReaMOD.i"
 	@echo "... src/ReaMOD.s"
+	@echo "... tinyfiledialogs/tinyfiledialogs.o"
+	@echo "... tinyfiledialogs/tinyfiledialogs.i"
+	@echo "... tinyfiledialogs/tinyfiledialogs.s"
 .PHONY : help
 
 
