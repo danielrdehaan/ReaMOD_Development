@@ -512,6 +512,22 @@ void CheckMarkers(double playPosition) {
     }
 }
 
+// Function to split a string by a delimiter into a vector of strings
+std::vector<std::string> SplitString(const std::string& str, const std::string& delimiter) {
+    size_t start = 0;
+    size_t end = str.find(delimiter);
+    std::vector<std::string> tokens;
+
+    while (end != std::string::npos) {
+        tokens.push_back(str.substr(start, end - start));
+        start = end + delimiter.length();
+        end = str.find(delimiter, start);
+    }
+
+    tokens.push_back(str.substr(start));
+    return tokens;
+}
+
 // Function to check items on tracks named "FMOD" or "fmod" for event or snapshot item notes
 void CheckItems(double playPosition) {
     int trackCount = CountTracks(nullptr); // Get total number of tracks in the project
@@ -538,6 +554,12 @@ void CheckItems(double playPosition) {
             for (int j = 0; j < itemCount; ++j) {
                 MediaItem* item = GetTrackMediaItem(track, j);
                 
+                // Skip if this item has already been triggered
+                if (triggeredItems[item]) {
+                    DebugMsg("Item %d on track %d has already been fully triggered. Skipping.\n", j, i);
+                    continue;
+                }
+                
                 // Retrieve the item note using GetSetMediaItemInfo_String
                 char itemNotes[4096];
                 bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
@@ -547,27 +569,33 @@ void CheckItems(double playPosition) {
                     continue; // Skip if no notes
                 }
 
-                std::string noteStr(itemNotes);
-                // Check if the item note starts with "event:" or "snapshot:"
-                if (noteStr.rfind("event:", 0) == 0 || noteStr.rfind("snapshot:", 0) == 0) {
-                    double itemPosition = *(double*)GetSetMediaItemInfo(item, "D_POSITION", nullptr);
-                    double itemLength = *(double*)GetSetMediaItemInfo(item, "D_LENGTH", nullptr);
-                    double itemEndPosition = itemPosition + itemLength;
+                // Split item notes into individual lines
+                std::vector<std::string> noteLines = SplitString(itemNotes, "\n");
+                double itemPosition = *(double*)GetSetMediaItemInfo(item, "D_POSITION", nullptr);
+                double itemLength = *(double*)GetSetMediaItemInfo(item, "D_LENGTH", nullptr);
+                double itemEndPosition = itemPosition + itemLength;
 
-                    DebugMsg("Item %d on track %d: Position=%.2f, Length=%.2f, End=%.2f, Note=%s\n",
-                             j, i, itemPosition, itemLength, itemEndPosition, itemNotes);
+                DebugMsg("Item %d on track %d: Position=%.2f, Length=%.2f, End=%.2f\n", j, i, itemPosition, itemLength, itemEndPosition);
 
-                    // Check if the play position is within the item range
-                    if (playPosition >= itemPosition - tolerance && playPosition <= itemEndPosition + tolerance) {
-                        // Check if this item was already triggered
-                        if (!triggeredItems[item]) {
-                            DebugMsg("Triggering event for item note: %s at position %.2f\n", noteStr.c_str(), itemPosition);
-                            PlayEvent(noteStr); // Pass the full item note as the event path
-                            triggeredItems[item] = true; // Mark this item as triggered
-                        } else {
-                            DebugMsg("Item %d on track %d has already been triggered. Skipping.\n", j, i);
+                // Check if the play position is within the item range
+                if (playPosition >= itemPosition - tolerance && playPosition <= itemEndPosition + tolerance) {
+                    // Trigger all events or snapshots listed in the item's notes
+                    for (const std::string& line : noteLines) {
+                        // Trim whitespace from the line
+                        std::string trimmedLine = line;
+                        trimmedLine.erase(0, trimmedLine.find_first_not_of(" \t\n\r\f\v"));
+                        trimmedLine.erase(trimmedLine.find_last_not_of(" \t\n\r\f\v") + 1);
+
+                        // Check if the line starts with "event:" or "snapshot:"
+                        if (trimmedLine.rfind("event:", 0) == 0 || trimmedLine.rfind("snapshot:", 0) == 0) {
+                            DebugMsg("Triggering event for item note: %s at position %.2f\n", trimmedLine.c_str(), itemPosition);
+                            PlayEvent(trimmedLine); // Pass the event or snapshot path
                         }
                     }
+
+                    // Mark the item as triggered after processing all events
+                    DebugMsg("Marking item %d on track %d as triggered.\n", j, i);
+                    triggeredItems[item] = true;
                 }
             }
         }
