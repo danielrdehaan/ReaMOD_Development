@@ -26,7 +26,7 @@
 
 #define FILE_PATH_BUFFER_SIZE 1024
 
-#define DEBUG true
+#define DEBUG false
 
 namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
 
@@ -242,8 +242,9 @@ void FindBankFiles(const std::string& fspro_dir) {
     bank_events.clear();
     loaded_banks.clear();
 
-    // Temporary vectors for holding other bank files
+    // Temporary vector for holding other bank files
     std::vector<std::string> other_bank_files;
+    std::string master_bank_file;
 
     // Check if the bank directory exists
     if (fs::exists(bank_directory) && fs::is_directory(bank_directory)) {
@@ -258,20 +259,18 @@ void FindBankFiles(const std::string& fspro_dir) {
             }
         }
 
-        // Second pass: Load Master.bank
+        // Second pass: Find Master.bank and store it separately
         for (const auto& entry : fs::directory_iterator(bank_directory)) {
             std::string bank_file = entry.path().string();
             std::string bank_file_name = entry.path().filename().string();
 
             if (bank_file_name == "Master.bank") {
-                LoadBank(bank_file);  // Load Master.bank with sample data
-                bank_files.push_back(bank_file);  // Show in the list
-                bank_load_states.push_back(true);  // Mark as loaded by default
-                DebugMsg("Loading Master.bank file.\n");
+                master_bank_file = bank_file;  // Store Master.bank path
+                DebugMsg("Found Master.bank file.\n");
             }
         }
 
-        // Third pass: Add remaining bank files
+        // Third pass: Add remaining bank files to the list
         for (const auto& entry : fs::directory_iterator(bank_directory)) {
             std::string bank_file = entry.path().string();
             std::string bank_file_name = entry.path().filename().string();
@@ -281,12 +280,27 @@ void FindBankFiles(const std::string& fspro_dir) {
                 continue;
             }
 
-            // Add other .bank files to the list
+            // Add other .bank files to the temporary list
             if (entry.path().extension() == ".bank") {
-                DebugMsg("Adding %s to bank list.\n", bank_file.c_str());
-                bank_files.push_back(bank_file);
-                bank_load_states.push_back(false);  // False means not loaded
+                other_bank_files.push_back(bank_file);
+                DebugMsg("Adding %s to temporary bank list.\n", bank_file.c_str());
             }
+        }
+
+        // Sort the other bank files alphabetically
+        std::sort(other_bank_files.begin(), other_bank_files.end());
+
+        // Add Master.bank to the beginning of the list if it exists
+        if (!master_bank_file.empty()) {
+            bank_files.push_back(master_bank_file);
+            bank_load_states.push_back(true);  // Mark as loaded by default
+            DebugMsg("Adding Master.bank to the bank list.\n");
+        }
+
+        // Add the sorted other bank files to the main list
+        for (const auto& bank_file : other_bank_files) {
+            bank_files.push_back(bank_file);
+            bank_load_states.push_back(false);  // Mark as not loaded by default
         }
     }
 }
@@ -413,11 +427,18 @@ std::map<std::string, std::map<std::string, std::vector<std::pair<std::string, s
 
         // Split the stripped event into folder and event name
         size_t last_slash_pos = stripped_event.find_last_of('/');
-        std::string folder = stripped_event.substr(0, last_slash_pos);  // Folder path
-        std::string event_name = stripped_event.substr(last_slash_pos + 1);  // Event name
+        std::string folder;
+        std::string event_name;
 
-        // Strip prefix from subfolders (if any) in the path
-        folder = StripPathPrefix(folder);
+        if (last_slash_pos != std::string::npos) {
+            // If there is a slash, separate into folder and event name
+            folder = stripped_event.substr(0, last_slash_pos);
+            event_name = stripped_event.substr(last_slash_pos + 1);
+        } else {
+            // No slash means it's a top-level event or snapshot
+            folder = ""; // Use an empty string to represent the top-level
+            event_name = stripped_event;
+        }
 
         // Store both the stripped name for display and the full path for playback
         grouped_folders[type_folder][folder].emplace_back(event_name, event);  // (display_name, full_path)
@@ -695,6 +716,10 @@ void LoadStateFromFile(const std::string& filePath) {
     std::string line;
     std::string fsproDirectory;
     bool masterStringsBankLoaded = false;
+    std::vector<std::string> other_bank_files;
+    std::vector<bool> other_bank_load_states;
+    std::string master_bank_file;
+    bool master_bank_loaded = false;
 
     while (std::getline(inFile, line)) {
         if (line.rfind("fspro_file=", 0) == 0) {
@@ -725,16 +750,48 @@ void LoadStateFromFile(const std::string& filePath) {
         } else if (line == "<bank_files>") {
             while (std::getline(inFile, line) && line != "</bank_files>") {
                 if (line.rfind("bank_file=", 0) == 0) {
-                    bank_files.push_back(line.substr(10));
+                    std::string bank_file = line.substr(10);
+                    if (bank_file.find("Master.bank") != std::string::npos) {
+                        master_bank_file = bank_file; // Store Master.bank path separately
+                    } else {
+                        other_bank_files.push_back(bank_file); // Store other banks
+                    }
                 } else if (line.rfind("load_state=", 0) == 0) {
-                    bank_load_states.push_back(std::stoi(line.substr(11)) != 0);
-                    DebugMsg("Loaded bank_file: %s, load_state: %d\n", bank_files.back().c_str(), bank_load_states.back());
+                    bool load_state = std::stoi(line.substr(11)) != 0;
+                    if (!master_bank_file.empty() && other_bank_files.size() == other_bank_load_states.size()) {
+                        master_bank_loaded = load_state; // Store Master.bank load state separately
+                    } else {
+                        other_bank_load_states.push_back(load_state);
+                    }
+                    DebugMsg("Loaded bank_file: %s, load_state: %d\n",
+                             (other_bank_files.size() > 0 ? other_bank_files.back().c_str() : master_bank_file.c_str()),
+                             load_state);
                 }
             }
         }
     }
 
     inFile.close();
+
+    // Sort other bank files alphabetically
+    std::vector<std::pair<std::string, bool>> sorted_banks;
+    for (size_t i = 0; i < other_bank_files.size(); ++i) {
+        sorted_banks.emplace_back(other_bank_files[i], other_bank_load_states[i]);
+    }
+    std::sort(sorted_banks.begin(), sorted_banks.end());
+
+    // Add Master.bank to the beginning of the list if it exists
+    if (!master_bank_file.empty()) {
+        bank_files.push_back(master_bank_file);
+        bank_load_states.push_back(master_bank_loaded);
+        DebugMsg("Adding Master.bank to the bank list.\n");
+    }
+
+    // Add the sorted other bank files to the main list
+    for (const auto& bank_pair : sorted_banks) {
+        bank_files.push_back(bank_pair.first);
+        bank_load_states.push_back(bank_pair.second);
+    }
 
     // Load other bank files if the Master.strings.bank was successfully loaded
     if (masterStringsBankLoaded) {
@@ -747,7 +804,6 @@ void LoadStateFromFile(const std::string& filePath) {
 
     DebugMsg("State loaded from file: %s\n", filePath.c_str());
 }
-
 
 
 void SaveStateDialog() {
@@ -855,25 +911,33 @@ void RenderGUI() {
                             // Iterate over "Events" and "Snapshots"
                             for (const auto& folder_type : grouped_folders) {
                                 if (ImGui::TreeNode(reaMOD_ImGui_Context, folder_type.first.c_str())) {  // "Events" or "Snapshots"
-                                    // Iterate over subfolders
-                                    for (const auto& folder : folder_type.second) {
-                                        if (ImGui::TreeNode(reaMOD_ImGui_Context, folder.first.c_str())) {
-                                            // Display events inside the folder
-                                            for (size_t j = 0; j < folder.second.size(); ++j) {
-                                                std::string event_label = "Play##" + std::to_string(i) + "_" + std::to_string(j);
-                                                const std::string& display_name = folder.second[j].first; // Stripped name for display
-                                                const std::string& full_path = folder.second[j].second;   // Full path for playback
-
-                                                // Render the play button and pass the full event path to PlayEvent
-                                                RenderPlayButton(reaMOD_ImGui_Context, event_label, full_path);
-
-                                                ImGui::SameLine(reaMOD_ImGui_Context);
-                                                ImGui::Text(reaMOD_ImGui_Context, display_name.c_str());
-                                            }
-                                            ImGui::TreePop(reaMOD_ImGui_Context);  // End the folder node
+                                    // First, display top-level events/snapshots (with an empty folder name)
+                                    auto top_level_folder = folder_type.second.find("");
+                                    if (top_level_folder != folder_type.second.end()) {
+                                        for (const auto& event_pair : top_level_folder->second) {
+                                            std::string event_label = "Play##" + event_pair.second;
+                                            RenderPlayButton(reaMOD_ImGui_Context, event_label, event_pair.second);
+                                            ImGui::SameLine(reaMOD_ImGui_Context);
+                                            ImGui::Text(reaMOD_ImGui_Context, event_pair.first.c_str());
                                         }
                                     }
-                                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the "Events"/"Snapshots" node
+
+                                    // Then display events/snapshots grouped by their folders
+                                    for (const auto& folder : folder_type.second) {
+                                        if (folder.first.empty()) {
+                                            continue; // Skip top-level, already handled
+                                        }
+                                        if (ImGui::TreeNode(reaMOD_ImGui_Context, folder.first.c_str())) {
+                                            for (const auto& event_pair : folder.second) {
+                                                std::string event_label = "Play##" + event_pair.second;
+                                                RenderPlayButton(reaMOD_ImGui_Context, event_label, event_pair.second);
+                                                ImGui::SameLine(reaMOD_ImGui_Context);
+                                                ImGui::Text(reaMOD_ImGui_Context, event_pair.first.c_str());
+                                            }
+                                            ImGui::TreePop(reaMOD_ImGui_Context);
+                                        }
+                                    }
+                                    ImGui::TreePop(reaMOD_ImGui_Context);
                                 }
                             }
                         }
