@@ -8,6 +8,8 @@
 #include <set>        // Use for sorted folder paths
 #include <filesystem> // C++17 file system operations
 #include <functional>
+#include <chrono>
+#include <thread>
 #include "fmod_studio.hpp"
 #include "fmod.hpp"
 #include "fmod_errors.h"
@@ -45,7 +47,6 @@ std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has 
 // Global variables to track playback
 double previousPlayPosition = 0.0;
 double lastCallTime = 0.0;
-double desiredInterval = 1.0;  // 10ms interval for monitoring playback
 int previousPlayState = 0;
 
 // Task management
@@ -57,20 +58,20 @@ int playbackTaskId = -1;
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
 
-// Load Reaper API functions
 void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
     if (rec && rec->GetFunc) {
         GetUserFileNameForRead = (bool (*)(char*, const char*, const char*))rec->GetFunc("GetUserFileNameForRead");
-        plugin_getapi   = reinterpret_cast<decltype(plugin_getapi)>(rec->GetFunc("plugin_getapi"));
+        plugin_getapi = reinterpret_cast<decltype(plugin_getapi)>(rec->GetFunc("plugin_getapi"));
         plugin_register = reinterpret_cast<decltype(plugin_register)>(rec->GetFunc("plugin_register"));
-        ShowMessageBox  = reinterpret_cast<decltype(ShowMessageBox)>(rec->GetFunc("ShowMessageBox"));
-        ShowConsoleMsg   = reinterpret_cast<decltype(ShowConsoleMsg)>(rec->GetFunc("ShowConsoleMsg"));
+        ShowMessageBox = reinterpret_cast<decltype(ShowMessageBox)>(rec->GetFunc("ShowMessageBox"));
+        ShowConsoleMsg = reinterpret_cast<decltype(ShowConsoleMsg)>(rec->GetFunc("ShowConsoleMsg"));
         GetPlayState = reinterpret_cast<decltype(GetPlayState)>(rec->GetFunc("GetPlayState"));
         GetPlayPosition = reinterpret_cast<decltype(GetPlayPosition)>(rec->GetFunc("GetPlayPosition"));
         EnumProjectMarkers = reinterpret_cast<decltype(EnumProjectMarkers)>(rec->GetFunc("EnumProjectMarkers"));
         CountProjectMarkers = reinterpret_cast<decltype(CountProjectMarkers)>(rec->GetFunc("CountProjectMarkers"));
     }
 }
+
 
 // A function for showing debug messages in Reaper's console.
 void DebugMsg(const char* fmt, ...) {
@@ -152,18 +153,22 @@ void PostMsg(const char* fmt, ...) {
 void InitializeFMOD() {
     FMOD::Studio::System::create(&fmod_system);
     fmod_system->initialize(512, FMOD_STUDIO_INIT_NORMAL, FMOD_INIT_NORMAL, 0);
+    DebugMsg("Initializing FMOD System.\n");
 }
 
 // Function to check if FMOD System is Initialzed
 bool IsFMODInitialized() {
     if (fmod_system) {
+        DebugMsg("Checking if FMOD System is initialized...\n");
         FMOD::System* coreSystem = nullptr;
         FMOD_RESULT result = fmod_system->getCoreSystem(&coreSystem);  // Get the core system
         
         if (result == FMOD_OK && coreSystem) {
+            DebugMsg("FMOD System is initialized.\n");
             return true;  // FMOD is initialized
         }
     }
+    DebugMsg("FMOD System is NOT initialized.\n");
     return false;  // FMOD is not initialized
 }
 
@@ -173,6 +178,9 @@ void LoadBank(const std::string& bank_path, bool load_sample_data = true) {
         FMOD::Studio::Bank* bank = nullptr;
         FMOD_RESULT result = fmod_system->loadBankFile(bank_path.c_str(), FMOD_STUDIO_LOAD_BANK_NORMAL, &bank);
         if (result == FMOD_OK) {
+            // Debug message to indicate that the bank is being loaded
+            DebugMsg("Loading bank: %s\n", bank_path.c_str());
+
             loaded_banks[bank_path] = bank;
             if (load_sample_data) {
                 // Load the sample data for the bank
@@ -195,9 +203,13 @@ void LoadBank(const std::string& bank_path, bool load_sample_data = true) {
 
                 bank_events[bank_path] = events;
             }
+        } else {
+            // Debug message for failure to load the bank
+            DebugMsg("Failed to load bank: %s\n", bank_path.c_str());
         }
     }
 }
+
 
 // Function to find all .bank files in the "Build/Desktop/" directory relative to the selected .fspro file
 void FindBankFiles(const std::string& fspro_dir) {
@@ -209,30 +221,55 @@ void FindBankFiles(const std::string& fspro_dir) {
     bank_events.clear();
     loaded_banks.clear();
 
+    // Temporary vectors for holding other bank files
+    std::vector<std::string> other_bank_files;
+
     // Check if the bank directory exists
     if (fs::exists(bank_directory) && fs::is_directory(bank_directory)) {
+        // First pass: Load Master.strings.bank
         for (const auto& entry : fs::directory_iterator(bank_directory)) {
             std::string bank_file = entry.path().string();
             std::string bank_file_name = entry.path().filename().string();
 
-            // Automatically load Master.strings.bank but do not display it
             if (bank_file_name == "Master.strings.bank") {
                 LoadBank(bank_file, false);  // No need to load sample data for strings bank
+                DebugMsg("Loading Master.strings.bank file.\n");
             }
-            // Automatically load Master.bank but show it in the list
-            else if (bank_file_name == "Master.bank") {
+        }
+
+        // Second pass: Load Master.bank
+        for (const auto& entry : fs::directory_iterator(bank_directory)) {
+            std::string bank_file = entry.path().string();
+            std::string bank_file_name = entry.path().filename().string();
+
+            if (bank_file_name == "Master.bank") {
                 LoadBank(bank_file);  // Load Master.bank with sample data
                 bank_files.push_back(bank_file);  // Show in the list
                 bank_load_states.push_back(true);  // Mark as loaded by default
+                DebugMsg("Loading Master.bank file.\n");
             }
+        }
+
+        // Third pass: Add remaining bank files
+        for (const auto& entry : fs::directory_iterator(bank_directory)) {
+            std::string bank_file = entry.path().string();
+            std::string bank_file_name = entry.path().filename().string();
+
+            // Skip Master.strings.bank and Master.bank as they are already processed
+            if (bank_file_name == "Master.strings.bank" || bank_file_name == "Master.bank") {
+                continue;
+            }
+
             // Add other .bank files to the list
-            else if (entry.path().extension() == ".bank") {
+            if (entry.path().extension() == ".bank") {
+                DebugMsg("Adding %s to bank list.\n", bank_file.c_str());
                 bank_files.push_back(bank_file);
                 bank_load_states.push_back(false);  // False means not loaded
             }
         }
     }
 }
+
 
 // Function to open the file dialog and extract file name
 void OpenFileDialog() {
@@ -347,7 +384,27 @@ std::map<std::string, std::map<std::string, std::vector<std::pair<std::string, s
     return grouped_folders;
 }
 
-// Function to render an arrow play button and trigger the FMOD event
+void CopyToClipboard(const std::string& text) {
+    if (!reaMOD_ImGui_Context) {
+        DebugMsg("ImGui context is not available, cannot copy to clipboard.\n");
+        return;
+    }
+
+    const char* clipboardText = text.c_str();
+    if (clipboardText && strlen(clipboardText) > 0) {
+        DebugMsg("Attempting to copy to clipboard using ImGui API: %s\n", clipboardText);
+        ImGui::SetClipboardText(reaMOD_ImGui_Context, clipboardText);
+        DebugMsg("Text successfully copied to clipboard: %s\n", clipboardText);
+    } else {
+        DebugMsg("Clipboard text is empty or null, cannot copy to clipboard.\n");
+    }
+}
+
+
+// Use the ReaImGui MouseButton_Right enum or value
+const int RightMouseButton = ImGui::MouseButton_Right;
+
+// Updated function to render an arrow play button and trigger the FMOD event
 void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const std::string& event_path) {
     if (ImGui::ArrowButton(ctx, ("##play_button_" + button_id).c_str(), ImGui::Dir_Right)) {
         DebugMsg("Play button clicked: Event Path - %s\n", event_path.c_str());  // Debugging event path
@@ -355,8 +412,13 @@ void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
         // Trigger the FMOD event when the button is clicked
         PlayEvent(event_path);
     }
-}
 
+    // Use ImGui::MouseButton_Right for the right mouse button check
+    if (ImGui::IsItemHovered(ctx) && ImGui::IsMouseReleased(ctx, ImGui::MouseButton_Right)) {
+        DebugMsg("Right-click detected on event: %s\n", event_path.c_str());
+        CopyToClipboard(event_path);  // Copy the full path to the clipboard
+    }
+}
 
 void CheckMarkers(double playPosition) {
     if (CountProjectMarkers == nullptr || EnumProjectMarkers == nullptr) {
@@ -445,7 +507,7 @@ void MonitorPlayback() {
 
 
 
-// GUI rendering function
+// Update the RenderGUI function to include the right-click clipboard feature
 void RenderGUI() {
     ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
