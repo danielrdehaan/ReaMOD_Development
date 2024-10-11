@@ -1167,7 +1167,28 @@ void OnTimer() {
     }
 }
 
-// Open/Close ReaMODWindow
+void AutoLoadReaMODFile() {
+    std::string reaperProjectName = GetCurrentReaperProjectName();
+    if (!reaperProjectName.empty() && reaperProjectName != "Untitled") {
+        char projectFilePath[256] = {0};
+        if (EnumProjects(-1, projectFilePath, sizeof(projectFilePath))) {
+            // Form the expected .ReaMOD file path
+            std::string projectDirectory = fs::path(projectFilePath).parent_path().string();
+            std::string reaMODFilePath = projectDirectory + "/" + reaperProjectName + ".ReaMOD";
+
+            // Check if the .ReaMOD file exists
+            if (fs::exists(reaMODFilePath)) {
+                DebugMsg("Auto-loading ReaMOD file: %s\n", reaMODFilePath.c_str());
+                LoadStateFromFile(reaMODFilePath);
+                currentReaMODFileName = fs::path(reaMODFilePath).filename().string(); // Update current session file name
+                currentDisplayedFileName = getReaMODFileName(reaMODFilePath); // Update the displayed file name
+            } else {
+                DebugMsg("No matching ReaMOD file found for project: %s\n", reaMODFilePath.c_str());
+            }
+        }
+    }
+}
+
 void toggleReaMODWindow() {
     if (!reaMOD_ImGui_Context) {
         // First-time setup: initialize ReaImGui and FMOD, and start rendering
@@ -1182,6 +1203,9 @@ void toggleReaMODWindow() {
 
         // Add the GUI rendering task and store its ID
         guiTaskId = AddTask(RenderGUI);
+
+        // Attempt to auto-load a .ReaMOD file if present
+        AutoLoadReaMODFile();
 
     } else {
         // Remove the GUI rendering task if the window is closed
