@@ -68,6 +68,9 @@ int playbackTaskId = -1;
 // Global variable to store the last triggered FMOD event path
 std::string lastTriggeredFMODEvent;
 
+int numFramesForItem = 10; // Default number of frames for the inserted item
+bool moveCursorAfterInsert = true; // Default to true, meaning the cursor moves forward by default
+
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
 
@@ -95,8 +98,15 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         GetSetMediaItemInfo_String = reinterpret_cast<decltype(GetSetMediaItemInfo_String)>(rec->GetFunc("GetSetMediaItemInfo_String"));
         AddMediaItemToTrack = reinterpret_cast<decltype(AddMediaItemToTrack)>(rec->GetFunc("AddMediaItemToTrack"));
         UpdateArrange = reinterpret_cast<decltype(UpdateArrange)>(rec->GetFunc("UpdateArrange"));
+        GetSetProjectGrid = reinterpret_cast<decltype(GetSetProjectGrid)>(rec->GetFunc("GetSetProjectGrid"));
+        GetTempoTimeSigMarker = reinterpret_cast<decltype(GetTempoTimeSigMarker)>(rec->GetFunc("GetTempoTimeSigMarker"));
+        Master_GetTempo = reinterpret_cast<decltype(Master_GetTempo)>(rec->GetFunc("Master_GetTempo"));
+        SetEditCurPos = reinterpret_cast<decltype(SetEditCurPos)>(rec->GetFunc("SetEditCurPos")); // Load SetEditCurPos
+        TimeMap_curFrameRate = reinterpret_cast<decltype(TimeMap_curFrameRate)>(rec->GetFunc("TimeMap_curFrameRate")); // Load TimeMap_curFrameRate
     }
 }
+
+
 
 // A function for showing debug messages in Reaper's console.
 void DebugMsg(const char* fmt, ...) {
@@ -418,8 +428,12 @@ void AddItemWithLastFMODEvent() {
     // Set the item position
     GetSetMediaItemInfo(newItem, "D_POSITION", &cursorPosition);
 
-    // Set the item length (optional)
-    double itemLength = 1.0; // Set default length to 1 second
+    // Calculate the item length based on the frame rate and the number of frames
+    bool dropFrame = false;
+    double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame);
+    double itemLength = numFramesForItem / frameRate; // Set the length to the specified number of frames
+
+    // Set the calculated length for the item
     GetSetMediaItemInfo(newItem, "D_LENGTH", &itemLength);
 
     // Set the lastTriggeredFMODEvent as the note for the item
@@ -427,6 +441,12 @@ void AddItemWithLastFMODEvent() {
 
     // Update the arrangement view
     UpdateArrange();
+
+    if (moveCursorAfterInsert) {
+        // Move the edit cursor forward by the number of frames
+        double newCursorPosition = cursorPosition + itemLength;
+        SetEditCurPos(newCursorPosition, true, false);
+    }
 
     DebugMsg("Empty item added at position %.2f with note: %s\n", cursorPosition, lastTriggeredFMODEvent.c_str());
 }
@@ -859,7 +879,6 @@ void LoadStateFromFile(const std::string& filePath) {
     DebugMsg("State loaded from file: %s\n", filePath.c_str());
 }
 
-
 void SaveStateDialog() {
     const char* filterPatterns[2] = { "*.ReaMOD", "*.*" };
     const char* savePath = tinyfd_saveFileDialog(
@@ -910,7 +929,6 @@ std::string RemoveBankExtension(const std::string& filename) {
     return filename;  // Return original if no ".bank" extension is found
 }
 
-// Update the RenderGUI function to include the right-click clipboard feature
 void RenderGUI() {
     ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
@@ -932,7 +950,6 @@ void RenderGUI() {
             ImGui::Text(reaMOD_ImGui_Context, "FMOD Bank Files:");
 
             for (size_t i = 0; i < bank_files.size(); ++i) {
-                // Use RemoveBankExtension to strip ".bank" from the name for display purposes
                 std::string bank_file_name = RemoveBankExtension(fs::path(bank_files[i]).filename().string());
                 std::string button_label = bank_load_states[i] ? "Unload##" + std::to_string(i) : "Load##" + std::to_string(i);
 
@@ -1008,6 +1025,15 @@ void RenderGUI() {
         ImGui::SameLine(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context, "Look Ahead Time (ms)");
 
+        // Add the InputInt control for number of frames
+        ImGui::SetNextItemWidth(reaMOD_ImGui_Context, 90);
+        ImGui::InputInt(reaMOD_ImGui_Context, "##num_frames_for_item", &numFramesForItem);
+        ImGui::SameLine(reaMOD_ImGui_Context);
+        ImGui::Text(reaMOD_ImGui_Context, "Number of Frames for Item");
+
+        // Add the checkbox for moving the cursor after inserting an item
+        ImGui::Checkbox(reaMOD_ImGui_Context, "Move Edit Cursor After Insert", &moveCursorAfterInsert);
+
         ImGui::Separator(reaMOD_ImGui_Context);
 
         // Add Save and Load State buttons
@@ -1027,7 +1053,6 @@ void RenderGUI() {
         reaMOD_ImGui_Context = nullptr;
     }
 }
-
 
 // Add task and return its ID
 int AddTask(std::function<void()> task) {
@@ -1093,7 +1118,6 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
 
     return false;
 }
-
 
 void RegisterActions() {
     plugin_register("hookcommand2", reinterpret_cast<void*>(&commandHook));  // Hook the action
