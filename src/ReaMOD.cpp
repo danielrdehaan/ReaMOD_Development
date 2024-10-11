@@ -80,6 +80,18 @@ bool moveCursorAfterInsert = true; // Default to true, meaning the cursor moves 
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
 
+// Map to store the FMOD event instances and their lifecycle
+struct EventInstanceData {
+    FMOD::Studio::EventInstance* instance;
+    double startPosition;
+    double endPosition;
+};
+
+std::unordered_map<std::string, EventInstanceData> activeEventInstances;
+
+// Declare the function pointer for BR_GetMediaItemGUID
+void (*BR_GetMediaItemGUID)(MediaItem* item, char* guidStringOut, int guidStringOut_sz) = nullptr;
+
 void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
     if (rec && rec->GetFunc) {
         GetUserFileNameForRead = (bool (*)(char*, const char*, const char*))rec->GetFunc("GetUserFileNameForRead");
@@ -110,6 +122,9 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         SetEditCurPos = reinterpret_cast<decltype(SetEditCurPos)>(rec->GetFunc("SetEditCurPos")); // Load SetEditCurPos
         TimeMap_curFrameRate = reinterpret_cast<decltype(TimeMap_curFrameRate)>(rec->GetFunc("TimeMap_curFrameRate")); // Load TimeMap_curFrameRate
         EnumProjects = reinterpret_cast<decltype(EnumProjects)>(rec->GetFunc("EnumProjects"));
+        BR_GetMediaItemGUID = reinterpret_cast<decltype(BR_GetMediaItemGUID)>(rec->GetFunc("BR_GetMediaItemGUID"));
+        GetSetMediaItemTakeInfo_String = reinterpret_cast<decltype(GetSetMediaItemTakeInfo_String)>(rec->GetFunc("GetSetMediaItemTakeInfo_String"));
+        AddTakeToMediaItem = reinterpret_cast<decltype(AddTakeToMediaItem)>(rec->GetFunc("AddTakeToMediaItem"));
     }
 }
 
@@ -408,7 +423,7 @@ void AddItemWithLastFMODEvent() {
     // Get the currently selected track
     MediaTrack* selectedTrack = GetTrack(nullptr, 0); // Assume track 0 if no track is selected
     int numSelectedTracks = CountTracks(nullptr);
-    
+
     // Find the first selected track
     for (int i = 0; i < numSelectedTracks; ++i) {
         MediaTrack* track = GetTrack(nullptr, i);
@@ -441,8 +456,15 @@ void AddItemWithLastFMODEvent() {
     // Set the calculated length for the item
     GetSetMediaItemInfo(newItem, "D_LENGTH", &itemLength);
 
-    // Set the lastTriggeredFMODEvent as the note for the item
-    GetSetMediaItemInfo_String(newItem, "P_NOTES", const_cast<char*>(lastTriggeredFMODEvent.c_str()), true);
+    // Add a new take to the item
+    MediaItem_Take* newTake = AddTakeToMediaItem(newItem);
+    if (!newTake) {
+        PostMsg("Failed to create a new take for the item.\n");
+        return;
+    }
+
+    // Set the lastTriggeredFMODEvent as the name for the take
+    GetSetMediaItemTakeInfo_String(newTake, "P_NAME", const_cast<char*>(lastTriggeredFMODEvent.c_str()), true);
 
     // Update the arrangement view
     UpdateArrange();
@@ -453,7 +475,7 @@ void AddItemWithLastFMODEvent() {
         SetEditCurPos(newCursorPosition, true, false);
     }
 
-    DebugMsg("Empty item added at position %.2f with note: %s\n", cursorPosition, lastTriggeredFMODEvent.c_str());
+    DebugMsg("Item added at position %.2f with take name: %s\n", cursorPosition, lastTriggeredFMODEvent.c_str());
 }
 
 // Function to stop all FMOD events
@@ -554,12 +576,18 @@ void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
         // Update the last triggered event path
         lastTriggeredFMODEvent = event_path;
     }
-
-    // Use ImGui::MouseButton_Right for the right mouse button check
     if (ImGui::IsItemHovered(ctx) && ImGui::IsMouseReleased(ctx, ImGui::MouseButton_Right)) {
         DebugMsg("Right-click detected on event: %s\n", event_path.c_str());
-        CopyToClipboard(event_path);  // Copy the full path to the clipboard
+
+        // Ensure the prefix is lowercase "event:" before copying to clipboard
+        std::string adjustedEventPath = event_path;
+        if (adjustedEventPath.rfind("Event:", 0) == 0) {
+            adjustedEventPath[0] = 'e'; // Convert "Event:" to "event:"
+        }
+
+        CopyToClipboard(adjustedEventPath);  // Copy the adjusted path to the clipboard
     }
+
 }
 
 void CheckMarkers(double playPosition) {
@@ -614,93 +642,282 @@ void CheckMarkers(double playPosition) {
 }
 
 // Function to split a string by a delimiter into a vector of strings
+std::string GetItemGUID(MediaItem* item) {
+    if (!item) {
+        DebugMsg("GetItemGUID: MediaItem is null.\n");
+        return "";
+    }
+
+    char guidStr[64] = {0}; // Buffer to hold the GUID string
+    bool success = GetSetMediaItemInfo_String(item, "GUID", guidStr, false); // Retrieve the GUID as a string
+
+    if (!success || strlen(guidStr) == 0) {
+        DebugMsg("GetItemGUID: Failed to retrieve GUID for MediaItem.\n");
+        return ""; // Return an empty string if retrieval fails or GUID is empty
+    }
+
+    return std::string(guidStr);
+}
+
+void ParseAndApplyNotes(FMOD::Studio::EventInstance* eventInstance, const std::vector<std::string>& noteLines) {
+    if (!eventInstance) {
+        DebugMsg("ParseAndApplyNotes: eventInstance is null, skipping.\n");
+        return;
+    }
+
+    DebugMsg("ParseAndApplyNotes: Number of note lines to process: %d\n", static_cast<int>(noteLines.size()));
+
+    for (const auto& line : noteLines) {
+        if (line.empty()) {
+            DebugMsg("ParseAndApplyNotes: Skipping empty line.\n");
+            continue; // Skip empty lines
+        }
+
+        // Handling parameter setting
+        if (line.rfind("parameter:", 0) == 0) {
+            auto equalPos = line.find('=');
+            if (equalPos != std::string::npos) {
+                std::string paramName = line.substr(10, equalPos - 10);
+                std::string paramValueStr = line.substr(equalPos + 1);
+
+                if (paramName.empty() || paramValueStr.empty()) {
+                    DebugMsg("ParseAndApplyNotes: Parameter name or value is empty in line: %s\n", line.c_str());
+                    continue;
+                }
+
+                try {
+                    float value = std::stof(paramValueStr);
+                    FMOD_RESULT result = eventInstance->setParameterByName(paramName.c_str(), value);
+                    if (result != FMOD_OK) {
+                        DebugMsg("ParseAndApplyNotes: Failed to set parameter '%s', FMOD result: %d\n", paramName.c_str(), result);
+                    } else {
+                        DebugMsg("ParseAndApplyNotes: Set parameter '%s' to value %.2f\n", paramName.c_str(), value);
+                    }
+                } catch (const std::invalid_argument&) {
+                    DebugMsg("ParseAndApplyNotes: Invalid parameter value for '%s': %s\n", paramName.c_str(), paramValueStr.c_str());
+                } catch (const std::out_of_range&) {
+                    DebugMsg("ParseAndApplyNotes: Parameter value out of range for '%s': %s\n", paramName.c_str(), paramValueStr.c_str());
+                }
+            } else {
+                DebugMsg("ParseAndApplyNotes: Parameter line does not contain '=': %s\n", line.c_str());
+            }
+        }
+        // Handling snapshot triggering
+        else if (line.rfind("snapshot:", 0) == 0) {
+            std::string snapshotPath = line.substr(9);
+            if (snapshotPath.empty()) {
+                DebugMsg("ParseAndApplyNotes: Snapshot path is empty in line: %s\n", line.c_str());
+                continue;
+            }
+
+            FMOD::Studio::EventDescription* snapshotDesc = nullptr;
+            FMOD_RESULT result = fmod_system->getEvent(snapshotPath.c_str(), &snapshotDesc);
+            if (result != FMOD_OK || !snapshotDesc) {
+                DebugMsg("ParseAndApplyNotes: Failed to get snapshot description for '%s', FMOD result: %d\n", snapshotPath.c_str(), result);
+                continue;
+            }
+
+            FMOD::Studio::EventInstance* snapshotInstance = nullptr;
+            result = snapshotDesc->createInstance(&snapshotInstance);
+            if (result != FMOD_OK || !snapshotInstance) {
+                DebugMsg("ParseAndApplyNotes: Failed to create snapshot instance for '%s', FMOD result: %d\n", snapshotPath.c_str(), result);
+                continue;
+            }
+
+            result = snapshotInstance->start();
+            if (result != FMOD_OK) {
+                DebugMsg("ParseAndApplyNotes: Failed to start snapshot instance for '%s', FMOD result: %d\n", snapshotPath.c_str(), result);
+            } else {
+                DebugMsg("ParseAndApplyNotes: Snapshot '%s' started successfully.\n", snapshotPath.c_str());
+            }
+
+            // Release the snapshot instance after starting it
+            snapshotInstance->release();
+        }
+        // Unknown line format
+        else {
+            DebugMsg("ParseAndApplyNotes: Unknown note line format: %s\n", line.c_str());
+        }
+    }
+}
+
+// Function to split a string by a delimiter into a vector of strings
 std::vector<std::string> SplitString(const std::string& str, const std::string& delimiter) {
+    std::vector<std::string> tokens;
     size_t start = 0;
     size_t end = str.find(delimiter);
-    std::vector<std::string> tokens;
-
+    
     while (end != std::string::npos) {
         tokens.push_back(str.substr(start, end - start));
         start = end + delimiter.length();
         end = str.find(delimiter, start);
     }
-
+    
+    // Add the last token
     tokens.push_back(str.substr(start));
+    
     return tokens;
 }
 
-// Function to check items on tracks named "FMOD" or "fmod" for event or snapshot item notes
+void ProcessItemNotes(MediaItem* item, int itemIndex, int trackIndex, FMOD::Studio::EventInstance* eventInstance) {
+    if (!item) {
+        DebugMsg("ProcessItemNotes: Item is null, skipping.\n");
+        return;
+    }
+
+    // Buffer to hold the item notes
+    char itemNotes[4096];
+    // Attempt to retrieve the item notes using GetSetMediaItemInfo_String
+    bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
+
+    if (!hasNotes || strlen(itemNotes) == 0) {
+        DebugMsg("Item %d on track %d has no notes or failed to retrieve notes. Skipping.\n", itemIndex, trackIndex);
+        return; // Skip if no notes are available
+    } else {
+        DebugMsg("Item %d on track %d, notes retrieved: '%s'\n", itemIndex, trackIndex, itemNotes);
+    }
+
+    // Split item notes into individual lines
+    std::vector<std::string> noteLines = SplitString(itemNotes, "\n");
+    DebugMsg("ParseAndApplyNotes: Number of note lines to process: %d\n", static_cast<int>(noteLines.size()));
+
+    if (noteLines.empty()) {
+        DebugMsg("ParseAndApplyNotes: No valid note lines found, skipping item.\n");
+        return; // No lines to process
+    }
+
+    // Process the note lines
+    ParseAndApplyNotes(eventInstance, noteLines);
+}
+
+void CreateFMODEventInstance(const std::string& eventPath, MediaItem* item, double startPosition, double endPosition) {
+    if (!fmod_system) {
+        DebugMsg("FMOD system is not initialized. Cannot create event instance.\n");
+        return;
+    }
+
+    FMOD::Studio::EventDescription* eventDesc = nullptr;
+    std::string fullEventPath = eventPath;
+
+    // Ensure the event path starts with "event:" prefix, ignoring case
+    if (eventPath.rfind("event:", 0) != 0 && eventPath.rfind("Event:", 0) != 0) {
+        fullEventPath = "event:" + eventPath;
+    } else if (eventPath.rfind("Event:", 0) == 0) {
+        fullEventPath = "event:" + eventPath.substr(6); // Replace "Event:" with "event:"
+    }
+
+    // Log the full event path being used
+    DebugMsg("Attempting to get event description for: %s\n", fullEventPath.c_str());
+
+    // Try to get the event description
+    FMOD_RESULT result = fmod_system->getEvent(fullEventPath.c_str(), &eventDesc);
+    if (result != FMOD_OK || !eventDesc) {
+        DebugMsg("Failed to get event description for event: %s, FMOD result: %d\n", fullEventPath.c_str(), result);
+        return; // Exit the function if the event description couldn't be retrieved
+    }
+
+    // Create the event instance
+    FMOD::Studio::EventInstance* eventInstance = nullptr;
+    result = eventDesc->createInstance(&eventInstance);
+    if (result != FMOD_OK || !eventInstance) {
+        DebugMsg("Failed to create event instance for event: %s, FMOD result: %d\n", fullEventPath.c_str(), result);
+        return; // Exit the function if the event instance couldn't be created
+    }
+
+    // Apply any parameters or snapshots from the item notes using ProcessItemNotes
+    ProcessItemNotes(item, 0, 0, eventInstance);
+
+    // Start the event instance
+    result = eventInstance->start();
+    if (result != FMOD_OK) {
+        DebugMsg("Failed to start event instance for event: %s, FMOD result: %d\n", fullEventPath.c_str(), result);
+        eventInstance->release(); // Ensure resources are released
+        return;
+    }
+
+    // Log the started event and associated GUID
+    std::string itemGUID = GetItemGUID(item);
+    DebugMsg("Started FMOD event instance for event: %s with GUID: %s\n", fullEventPath.c_str(), itemGUID.c_str());
+
+    // Store the active event instance for this item
+    activeEventInstances[itemGUID] = { eventInstance, startPosition, endPosition };
+
+    fmod_system->update();
+}
+
+void ReleaseFMODEventInstance(const std::string& itemGUID) {
+    DebugMsg("Releasing FMOD event instance for item GUID: %s\n", itemGUID.c_str());
+
+    auto it = activeEventInstances.find(itemGUID);
+    if (it != activeEventInstances.end()) {
+        FMOD_RESULT result = it->second.instance->stop(FMOD_STUDIO_STOP_ALLOWFADEOUT);
+        if (result != FMOD_OK) {
+            DebugMsg("Failed to stop event instance for item GUID: %s, FMOD result: %d\n", itemGUID.c_str(), result);
+        } else {
+            DebugMsg("Event instance stopped successfully for item GUID: %s\n", itemGUID.c_str());
+        }
+
+        result = it->second.instance->release();
+        if (result != FMOD_OK) {
+            DebugMsg("Failed to release event instance for item GUID: %s, FMOD result: %d\n", itemGUID.c_str());
+        } else {
+            DebugMsg("Event instance released successfully for item GUID: %s\n", itemGUID.c_str());
+        }
+
+        activeEventInstances.erase(it);
+        DebugMsg("Removed event instance from active instances for item GUID: %s\n", itemGUID.c_str());
+    } else {
+        DebugMsg("No active event instance found for item GUID: %s\n", itemGUID.c_str());
+    }
+    fmod_system->update();
+}
+
 void CheckItems(double playPosition) {
-    int trackCount = CountTracks(nullptr); // Get total number of tracks in the project
-    DebugMsg("Checking items. Total tracks: %d\n", trackCount);
+    int trackCount = CountTracks(nullptr);
+    double lookAheadTimeSeconds = lookAheadTimeMs / 1000.0; // Convert lookAheadTimeMs to seconds
+    double tolerance = 0.04; // Small tolerance for floating-point inaccuracies
 
-    double tolerance = 0.04; // Tolerance for play position checking
-
-    // Iterate over all tracks
     for (int i = 0; i < trackCount; ++i) {
-        MediaTrack* track = GetTrack(nullptr, i); // Get track by index
-        const char* trackName = (const char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
-        
-        // Log track name
-        DebugMsg("Track %d name: %s\n", i, trackName ? trackName : "(unnamed)");
+        MediaTrack* track = GetTrack(nullptr, i);
+        int itemCount = CountTrackMediaItems(track);
 
-        // Check if the track name is "FMOD" or "fmod" (case-insensitive comparison)
-        if (trackName && (strcasecmp(trackName, "FMOD") == 0 || strcasecmp(trackName, "fmod") == 0)) {
-            DebugMsg("Track %d is named 'FMOD'. Checking items...\n", i);
+        for (int j = 0; j < itemCount; ++j) {
+            MediaItem* item = GetTrackMediaItem(track, j);
+            MediaItem_Take* take = GetActiveTake(item);
 
-            int itemCount = CountTrackMediaItems(track); // Get number of items on the track
-            DebugMsg("Track %d has %d items.\n", i, itemCount);
+            if (!take) continue;
 
-            // Iterate over all items on the track
-            for (int j = 0; j < itemCount; ++j) {
-                MediaItem* item = GetTrackMediaItem(track, j);
-                
-                // Skip if this item has already been triggered
-                if (triggeredItems[item]) {
-                    DebugMsg("Item %d on track %d has already been fully triggered. Skipping.\n", j, i);
-                    continue;
-                }
-                
-                // Retrieve the item note using GetSetMediaItemInfo_String
-                char itemNotes[4096];
-                bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
-                
-                if (!hasNotes || strlen(itemNotes) == 0) {
-                    DebugMsg("Item %d on track %d has no notes. Skipping.\n", j, i);
-                    continue; // Skip if no notes
-                }
+            double itemStart = *(double*)GetSetMediaItemInfo(item, "D_POSITION", nullptr);
+            double itemEnd = itemStart + *(double*)GetSetMediaItemInfo(item, "D_LENGTH", nullptr);
+            std::string itemGUID = GetItemGUID(item);
 
-                // Split item notes into individual lines
-                std::vector<std::string> noteLines = SplitString(itemNotes, "\n");
-                double itemPosition = *(double*)GetSetMediaItemInfo(item, "D_POSITION", nullptr);
-                double itemLength = *(double*)GetSetMediaItemInfo(item, "D_LENGTH", nullptr);
-                double itemEndPosition = itemPosition + itemLength;
+            // If playPosition has moved backwards, clear active instances and reset state
+            if (playPosition < previousPlayPosition) {
+                activeEventInstances.clear();
+                DebugMsg("Playhead moved backward. Clearing active event instances.\n");
+            }
 
-                DebugMsg("Item %d on track %d: Position=%.2f, Length=%.2f, End=%.2f\n", j, i, itemPosition, itemLength, itemEndPosition);
-
-                // Check if the play position is within the item range
-                if (playPosition >= itemPosition - tolerance && playPosition <= itemEndPosition + tolerance) {
-                    // Trigger all events or snapshots listed in the item's notes
-                    for (const std::string& line : noteLines) {
-                        // Trim whitespace from the line
-                        std::string trimmedLine = line;
-                        trimmedLine.erase(0, trimmedLine.find_first_not_of(" \t\n\r\f\v"));
-                        trimmedLine.erase(trimmedLine.find_last_not_of(" \t\n\r\f\v") + 1);
-
-                        // Check if the line starts with "event:" or "snapshot:"
-                        if (trimmedLine.rfind("event:", 0) == 0 || trimmedLine.rfind("snapshot:", 0) == 0) {
-                            DebugMsg("Triggering event for item note: %s at position %.2f\n", trimmedLine.c_str(), itemPosition);
-                            PlayEvent(trimmedLine); // Pass the event or snapshot path
-                        }
+            // Check if the item should be triggered
+            if (itemStart <= playPosition + lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
+                // If the item's GUID is not in the activeEventInstances map, it hasn't been triggered yet
+                if (activeEventInstances.find(itemGUID) == activeEventInstances.end()) {
+                    char itemName[512] = "";
+                    if (GetSetMediaItemTakeInfo_String(take, "P_NAME", itemName, false) && strstr(itemName, "event:") == itemName) {
+                        DebugMsg("Item %d on track %d, name retrieved: '%s'\n", j, i, itemName);
+                        std::string eventPath = itemName + 6; // Skip "event:"
+                        CreateFMODEventInstance(eventPath, item, itemStart, itemEnd);
                     }
-
-                    // Mark the item as triggered after processing all events
-                    DebugMsg("Marking item %d on track %d as triggered.\n", j, i);
-                    triggeredItems[item] = true;
                 }
+            }
+            // Release the item if the play cursor has passed the item's end
+            else if (playPosition > itemEnd + tolerance && activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
+                ReleaseFMODEventInstance(itemGUID);
+                DebugMsg("Releasing item %d on track %d.\n", j, i);
             }
         }
     }
+
+    previousPlayPosition = playPosition; // Update previous play position
 }
 
 void MonitorPlayback() {
@@ -1308,6 +1525,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT( REAPER_PLUGIN_
 extern "C" REAPER_PLUGIN_DLL_EXPORT void REAPER_PLUGIN_EXIT() {
     // Unregister the project state extension
     // Unregister the timer when the plugin is unloaded
+    StopAllEvents();
     RemoveTask(playbackTaskId);
     plugin_register("-timer", reinterpret_cast<void*>(&OnTimer));
 }
