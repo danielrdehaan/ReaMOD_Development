@@ -11,6 +11,7 @@
 #include <chrono>
 #include <thread>
 #include <fstream> // Include for file I/O operations
+#include <ctime>
 #include "fmod_studio.hpp"
 #include "fmod.hpp"
 #include "fmod_errors.h"
@@ -69,6 +70,9 @@ int playbackTaskId = -1;
 
 // Global variable to store the last triggered FMOD event path
 std::string lastTriggeredFMODEvent;
+
+std::string lastSaveTimestamp; // Global variable to store the last modified timestamp
+std::string formattedLastSaveTimestamp; // Holds the formatted "Last Save" text
 
 int numFramesForItem = 10; // Default number of frames for the inserted item
 bool moveCursorAfterInsert = true; // Default to true, meaning the cursor moves forward by default
@@ -828,9 +832,23 @@ void SaveStateToFile(const std::string& filePath = "") {
 
     // Update the displayed file name
     currentDisplayedFileName = getReaMODFileName(finalFilePath);
+
+    // Get the last modification time and update formattedLastSaveTimestamp
+    std::error_code ec;
+    auto ftime = fs::last_write_time(finalFilePath, ec);
+    if (!ec) {
+        auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+            ftime - decltype(ftime)::clock::now() + std::chrono::system_clock::now());
+        std::time_t timeT = std::chrono::system_clock::to_time_t(sctp);
+        char buffer[128];
+        std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", std::localtime(&timeT));
+        formattedLastSaveTimestamp = "Last Save: " + std::string(buffer);
+    } else {
+        DebugMsg("Error retrieving last modification time: %s\n", ec.message().c_str());
+        formattedLastSaveTimestamp.clear();
+    }
 }
 
-// Function to load the extension state from a .ReaMOD file
 void LoadStateFromFile(const std::string& filePath) {
     if (!IsFMODInitialized()) {
         DebugMsg("FMOD system is not initialized. Cannot load state from file.\n");
@@ -943,7 +961,23 @@ void LoadStateFromFile(const std::string& filePath) {
 
     // Update the displayed file name
     currentDisplayedFileName = getReaMODFileName(filePath);
+
+    // Get the last modification time and format it
+    std::error_code ec;
+    auto ftime = fs::last_write_time(filePath, ec);
+    if (!ec) {
+        auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+            ftime - decltype(ftime)::clock::now() + std::chrono::system_clock::now());
+        std::time_t timeT = std::chrono::system_clock::to_time_t(sctp);
+        char buffer[128];
+        std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", std::localtime(&timeT));
+        formattedLastSaveTimestamp = "Last Save: " + std::string(buffer);
+    } else {
+        DebugMsg("Error retrieving last modification time: %s\n", ec.message().c_str());
+        formattedLastSaveTimestamp.clear();
+    }
 }
+
 
 void SaveStateDialog() {
     // Determine the default file name
@@ -1023,6 +1057,10 @@ void RenderGUI() {
         ImGui::SameLine(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context, currentDisplayedFileName.c_str());
 
+        // Display the formatted last save timestamp if available
+        if (!formattedLastSaveTimestamp.empty()) {
+            ImGui::Text(reaMOD_ImGui_Context, formattedLastSaveTimestamp.c_str());
+        }
 
         // Add Save and Load State buttons
         if (ImGui::Button(reaMOD_ImGui_Context, "Save")) {
