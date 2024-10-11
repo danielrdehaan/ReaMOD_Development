@@ -33,6 +33,7 @@ namespace fs = std::filesystem;  // Alias for easier use of filesystem operation
 // Declare the global variable to store the custom action ID
 static int actionIdOpenCloseReaMODWindow = 0;
 static int actionIdAddMarkerWithLastFMODEvent = 0;
+static int actionIdAddItemWithLastFMODEvent = 0;
 
 // ImGui context
 ImGui_Context* reaMOD_ImGui_Context = nullptr;
@@ -92,6 +93,8 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         GetSetMediaItemTakeInfo = reinterpret_cast<decltype(GetSetMediaItemTakeInfo)>(rec->GetFunc("GetSetMediaItemTakeInfo"));
         GetSetMediaItemInfo = reinterpret_cast<decltype(GetSetMediaItemInfo)>(rec->GetFunc("GetSetMediaItemInfo"));
         GetSetMediaItemInfo_String = reinterpret_cast<decltype(GetSetMediaItemInfo_String)>(rec->GetFunc("GetSetMediaItemInfo_String"));
+        AddMediaItemToTrack = reinterpret_cast<decltype(AddMediaItemToTrack)>(rec->GetFunc("AddMediaItemToTrack"));
+        UpdateArrange = reinterpret_cast<decltype(UpdateArrange)>(rec->GetFunc("UpdateArrange"));
     }
 }
 
@@ -377,6 +380,57 @@ void AddMarkerWithLastFMODEvent() {
 
     isAddingMarker = false; // Reset flag after completion
 }
+
+void AddItemWithLastFMODEvent() {
+    if (lastTriggeredFMODEvent.empty()) {
+        PostMsg("No FMOD event has been triggered yet.\n");
+        return;
+    }
+
+    // Get the current edit cursor position
+    double cursorPosition = GetCursorPosition();
+
+    // Get the currently selected track
+    MediaTrack* selectedTrack = GetTrack(nullptr, 0); // Assume track 0 if no track is selected
+    int numSelectedTracks = CountTracks(nullptr);
+    
+    // Find the first selected track
+    for (int i = 0; i < numSelectedTracks; ++i) {
+        MediaTrack* track = GetTrack(nullptr, i);
+        if (*(bool*)GetSetMediaTrackInfo(track, "I_SELECTED", nullptr)) {
+            selectedTrack = track;
+            break;
+        }
+    }
+
+    if (!selectedTrack) {
+        PostMsg("No track is selected.\n");
+        return;
+    }
+
+    // Add an empty media item at the cursor position on the selected track
+    MediaItem* newItem = AddMediaItemToTrack(selectedTrack);
+    if (!newItem) {
+        PostMsg("Failed to create a new item.\n");
+        return;
+    }
+
+    // Set the item position
+    GetSetMediaItemInfo(newItem, "D_POSITION", &cursorPosition);
+
+    // Set the item length (optional)
+    double itemLength = 1.0; // Set default length to 1 second
+    GetSetMediaItemInfo(newItem, "D_LENGTH", &itemLength);
+
+    // Set the lastTriggeredFMODEvent as the note for the item
+    GetSetMediaItemInfo_String(newItem, "P_NOTES", const_cast<char*>(lastTriggeredFMODEvent.c_str()), true);
+
+    // Update the arrangement view
+    UpdateArrange();
+
+    DebugMsg("Empty item added at position %.2f with note: %s\n", cursorPosition, lastTriggeredFMODEvent.c_str());
+}
+
 
 // Function to stop all FMOD events
 void StopAllEvents() {
@@ -848,23 +902,20 @@ void LoadStateDialog() {
     }
 }
 
+// Function to remove the ".bank" extension from a filename for display purposes
+std::string RemoveBankExtension(const std::string& filename) {
+    if (filename.size() >= 5 && filename.substr(filename.size() - 5) == ".bank") {
+        return filename.substr(0, filename.size() - 5);
+    }
+    return filename;  // Return original if no ".bank" extension is found
+}
+
 // Update the RenderGUI function to include the right-click clipboard feature
 void RenderGUI() {
     ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
     bool open = true;  // Open flag for the window
     if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open)) {
-        // Add Save and Load State buttons
-        if (ImGui::Button(reaMOD_ImGui_Context, "Save")) {
-            SaveStateDialog();
-        }
-        ImGui::SameLine(reaMOD_ImGui_Context);
-        if (ImGui::Button(reaMOD_ImGui_Context, "Load")) {
-            LoadStateDialog();
-        }
-
-        ImGui::Separator(reaMOD_ImGui_Context);
-
         ImGui::Text(reaMOD_ImGui_Context, "FMOD Project:");
 
         // Move the "Select" button to the left of the selected .fspro file
@@ -881,7 +932,8 @@ void RenderGUI() {
             ImGui::Text(reaMOD_ImGui_Context, "FMOD Bank Files:");
 
             for (size_t i = 0; i < bank_files.size(); ++i) {
-                std::string bank_file_name = fs::path(bank_files[i]).filename().string();
+                // Use RemoveBankExtension to strip ".bank" from the name for display purposes
+                std::string bank_file_name = RemoveBankExtension(fs::path(bank_files[i]).filename().string());
                 std::string button_label = bank_load_states[i] ? "Unload##" + std::to_string(i) : "Load##" + std::to_string(i);
 
                 // Render the toggle button for loading/unloading the bank on the left
@@ -948,10 +1000,24 @@ void RenderGUI() {
         }
 
         ImGui::Separator(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context, "Look Ahead Time (ms):");
+        ImGui::Text(reaMOD_ImGui_Context, "Settings:");
+
+        // Add the InputInt control for Look Ahead Time and keep the text on the same line
         ImGui::SetNextItemWidth(reaMOD_ImGui_Context, 90);
         ImGui::InputInt(reaMOD_ImGui_Context, "##look_ahead_time_ms", &lookAheadTimeMs);
-        // lookAheadTimeMs = std::max(0, lookAheadTimeMs);  // Prevent negative values
+        ImGui::SameLine(reaMOD_ImGui_Context);
+        ImGui::Text(reaMOD_ImGui_Context, "Look Ahead Time (ms)");
+
+        ImGui::Separator(reaMOD_ImGui_Context);
+
+        // Add Save and Load State buttons
+        if (ImGui::Button(reaMOD_ImGui_Context, "Save")) {
+            SaveStateDialog();
+        }
+        ImGui::SameLine(reaMOD_ImGui_Context);
+        if (ImGui::Button(reaMOD_ImGui_Context, "Load")) {
+            LoadStateDialog();
+        }
 
         ImGui::End(reaMOD_ImGui_Context);
     }
@@ -961,6 +1027,7 @@ void RenderGUI() {
         reaMOD_ImGui_Context = nullptr;
     }
 }
+
 
 // Add task and return its ID
 int AddTask(std::function<void()> task) {
@@ -1014,8 +1081,13 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
     if (command == actionIdOpenCloseReaMODWindow) {
         toggleReaMODWindow();
         return true;
-    } else if (command == actionIdAddMarkerWithLastFMODEvent) {
+    }
+    if (command == actionIdAddMarkerWithLastFMODEvent) {
         AddMarkerWithLastFMODEvent();
+        return true;
+    }
+    if (command == actionIdAddItemWithLastFMODEvent) {
+        AddItemWithLastFMODEvent();
         return true;
     }
 
@@ -1033,6 +1105,10 @@ void RegisterActions() {
     // Register the new custom action for adding a marker with the last FMOD event
     static custom_action_register_t actionAddMarkerWithLastFMODEventReg = { 0, "ReaMOD_AddMarkerWithLastFMODEvent", "ReaMOD: Add Marker with Last FMOD Event" };
     actionIdAddMarkerWithLastFMODEvent = plugin_register("custom_action", &actionAddMarkerWithLastFMODEventReg);
+
+    // Register the new custom action for adding a marker with the last FMOD event
+    static custom_action_register_t actionAddItemWithLastFMODEvent = { 0, "ReaMOD_AddItemWithLastFMODEvent", "ReaMOD: Add Empty Item with Last FMOD Event" };
+    actionIdAddItemWithLastFMODEvent = plugin_register("custom_action", &actionAddItemWithLastFMODEvent);
 }
 
 // Entry point function for the Reaper plugin
