@@ -1161,13 +1161,13 @@ void RenderGUI() {
         ImGui::SetNextItemWidth(reaMOD_ImGui_Context, 90);
         ImGui::InputInt(reaMOD_ImGui_Context, "##look_ahead_time_ms", &lookAheadTimeMs);
         ImGui::SameLine(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context, "Look Ahead Time (ms)");
+        ImGui::Text(reaMOD_ImGui_Context, "Event detection look ahead time (ms)");
 
         // Add the InputInt control for number of frames
         ImGui::SetNextItemWidth(reaMOD_ImGui_Context, 90);
         ImGui::InputInt(reaMOD_ImGui_Context, "##num_frames_for_item", &numFramesForItem);
         ImGui::SameLine(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context, "Number of Frames for Item");
+        ImGui::Text(reaMOD_ImGui_Context, "Number of frames for inserted item");
 
         // Add the checkbox for moving the cursor after inserting an item
         ImGui::Checkbox(reaMOD_ImGui_Context, "Move Edit Cursor After Insert", &moveCursorAfterInsert);
