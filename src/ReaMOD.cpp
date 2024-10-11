@@ -26,7 +26,7 @@
 
 #define FILE_PATH_BUFFER_SIZE 1024
 
-#define DEBUG false
+#define DEBUG true
 
 namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
 
@@ -40,6 +40,7 @@ ImGui_Context* reaMOD_ImGui_Context = nullptr;
 char selected_file_path[FILE_PATH_BUFFER_SIZE] = "";  // Full path of selected .fspro file
 char selected_file_name[FILE_PATH_BUFFER_SIZE] = "No project selected.";  // Initial text in the input box
 std::string currentReaMODFileName = " ";
+std::string currentDisplayedFileName = " ";
 bool reaModWindowOpen = true;
 
 // Store the list of found .bank files and their toggle states
@@ -104,10 +105,9 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         Master_GetTempo = reinterpret_cast<decltype(Master_GetTempo)>(rec->GetFunc("Master_GetTempo"));
         SetEditCurPos = reinterpret_cast<decltype(SetEditCurPos)>(rec->GetFunc("SetEditCurPos")); // Load SetEditCurPos
         TimeMap_curFrameRate = reinterpret_cast<decltype(TimeMap_curFrameRate)>(rec->GetFunc("TimeMap_curFrameRate")); // Load TimeMap_curFrameRate
+        EnumProjects = reinterpret_cast<decltype(EnumProjects)>(rec->GetFunc("EnumProjects"));
     }
 }
-
-
 
 // A function for showing debug messages in Reaper's console.
 void DebugMsg(const char* fmt, ...) {
@@ -744,11 +744,70 @@ void MonitorPlayback() {
     previousPlayState = playState;
 }
 
-// Function to save the extension's current state to a file
-void SaveStateToFile(const std::string& filePath) {
-    std::ofstream outFile(filePath);
+// Function to get the current Reaper project name without the .RPP extension
+std::string GetCurrentReaperProjectName() {
+    char projectFilePath[256] = {0};
+    if (!EnumProjects(-1, projectFilePath, sizeof(projectFilePath))) {
+        return "Untitled"; // Fallback name if the project name cannot be retrieved
+    }
+
+    std::string projectFileName = projectFilePath;
+
+    // Extract the base name without the directory path
+    size_t lastSlashPos = projectFileName.find_last_of("/\\");
+    if (lastSlashPos != std::string::npos) {
+        projectFileName = projectFileName.substr(lastSlashPos + 1);
+    }
+
+    // Remove the ".RPP" extension if present (Reaper project files have .RPP extension)
+    size_t extensionPos = projectFileName.rfind(".RPP");
+    if (extensionPos != std::string::npos) {
+        projectFileName = projectFileName.substr(0, extensionPos);
+    }
+
+    DebugMsg("Currently loaded Reaper project file: %s\n", projectFileName.c_str());
+
+    return projectFileName;
+}
+
+// Function to get the base file name without the ".ReaMOD" extension
+std::string getReaMODFileName(const std::string& filePath) {
+    // Find the last occurrence of a slash or backslash to get the base file name
+    size_t lastSlashPos = filePath.find_last_of("/\\");
+    std::string baseFileName = (lastSlashPos == std::string::npos) ? filePath : filePath.substr(lastSlashPos + 1);
+
+    // Remove the ".ReaMOD" extension if it exists
+    size_t extensionPos = baseFileName.rfind(".ReaMOD");
+    if (extensionPos != std::string::npos) {
+        baseFileName = baseFileName.substr(0, extensionPos);
+    }
+
+    return baseFileName;
+}
+
+void SaveStateToFile(const std::string& filePath = "") {
+    std::string finalFilePath;
+
+    // Determine the default file name
+    if (filePath.empty()) {
+        // If no file path is provided, determine the default name
+        if (!currentDisplayedFileName.empty() && currentDisplayedFileName != "No ReaMOD session loaded.") {
+            // If a .ReaMOD file is already loaded, use its name
+            finalFilePath = currentDisplayedFileName + ".ReaMOD";
+        } else {
+            // Otherwise, use the currently open Reaper project name
+            std::string reaperProjectName = GetCurrentReaperProjectName();
+            finalFilePath = reaperProjectName + ".ReaMOD";
+        }
+    } else {
+        // Use the provided file path
+        finalFilePath = filePath;
+    }
+
+    // Open the file for writing
+    std::ofstream outFile(finalFilePath);
     if (!outFile) {
-        DebugMsg("Failed to open file for saving: %s\n", filePath.c_str());
+        DebugMsg("Failed to open file for saving: %s\n", finalFilePath.c_str());
         return;
     }
 
@@ -764,12 +823,14 @@ void SaveStateToFile(const std::string& filePath) {
     outFile << "</bank_files>\n";
 
     outFile.close();
-    DebugMsg("State saved successfully to: %s\n", filePath.c_str());
+    DebugMsg("State saved successfully to: %s\n", finalFilePath.c_str());
+
+    // Update the displayed file name
+    currentDisplayedFileName = getReaMODFileName(finalFilePath);
 }
 
-// Function to load the extension state from a .txt file
+// Function to load the extension state from a .ReaMOD file
 void LoadStateFromFile(const std::string& filePath) {
-    // Check if the FMOD system is initialized
     if (!IsFMODInitialized()) {
         DebugMsg("FMOD system is not initialized. Cannot load state from file.\n");
         return;
@@ -798,22 +859,19 @@ void LoadStateFromFile(const std::string& filePath) {
 
     while (std::getline(inFile, line)) {
         if (line.rfind("fspro_file=", 0) == 0) {
-            // Load .fspro file path
             std::strncpy(selected_file_path, line.substr(11).c_str(), FILE_PATH_BUFFER_SIZE - 1);
             selected_file_path[FILE_PATH_BUFFER_SIZE - 1] = '\0';
             DebugMsg("Loaded fspro_file: %s\n", selected_file_path);
 
-            // Extract the .fspro directory
             std::string file_path(selected_file_path);
             size_t last_slash_pos = file_path.find_last_of("/\\");
             std::string file_name = file_path.substr(last_slash_pos + 1);
             std::strncpy(selected_file_name, file_name.c_str(), FILE_PATH_BUFFER_SIZE - 1);
             fsproDirectory = file_path.substr(0, last_slash_pos);
 
-            // Attempt to load the Master.strings.bank file immediately
             std::string masterStringsBankPath = fsproDirectory + "/Build/Desktop/Master.strings.bank";
             if (fs::exists(masterStringsBankPath)) {
-                LoadBank(masterStringsBankPath, false); // Load without sample data
+                LoadBank(masterStringsBankPath, false);
                 masterStringsBankLoaded = true;
                 DebugMsg("Master.strings.bank loaded from: %s\n", masterStringsBankPath.c_str());
             } else {
@@ -827,14 +885,14 @@ void LoadStateFromFile(const std::string& filePath) {
                 if (line.rfind("bank_file=", 0) == 0) {
                     std::string bank_file = line.substr(10);
                     if (bank_file.find("Master.bank") != std::string::npos) {
-                        master_bank_file = bank_file; // Store Master.bank path separately
+                        master_bank_file = bank_file;
                     } else {
-                        other_bank_files.push_back(bank_file); // Store other banks
+                        other_bank_files.push_back(bank_file);
                     }
                 } else if (line.rfind("load_state=", 0) == 0) {
                     bool load_state = std::stoi(line.substr(11)) != 0;
                     if (!master_bank_file.empty() && other_bank_files.size() == other_bank_load_states.size()) {
-                        master_bank_loaded = load_state; // Store Master.bank load state separately
+                        master_bank_loaded = load_state;
                     } else {
                         other_bank_load_states.push_back(load_state);
                     }
@@ -848,27 +906,24 @@ void LoadStateFromFile(const std::string& filePath) {
 
     inFile.close();
 
-    // Sort other bank files alphabetically
+    // Sort and manage the bank files
     std::vector<std::pair<std::string, bool>> sorted_banks;
     for (size_t i = 0; i < other_bank_files.size(); ++i) {
         sorted_banks.emplace_back(other_bank_files[i], other_bank_load_states[i]);
     }
     std::sort(sorted_banks.begin(), sorted_banks.end());
 
-    // Add Master.bank to the beginning of the list if it exists
     if (!master_bank_file.empty()) {
         bank_files.push_back(master_bank_file);
         bank_load_states.push_back(master_bank_loaded);
         DebugMsg("Adding Master.bank to the bank list.\n");
     }
 
-    // Add the sorted other bank files to the main list
     for (const auto& bank_pair : sorted_banks) {
         bank_files.push_back(bank_pair.first);
         bank_load_states.push_back(bank_pair.second);
     }
 
-    // Load other bank files if the Master.strings.bank was successfully loaded
     if (masterStringsBankLoaded) {
         for (size_t i = 0; i < bank_files.size(); ++i) {
             if (bank_load_states[i] && bank_files[i].find("Master.strings.bank") == std::string::npos) {
@@ -878,15 +933,33 @@ void LoadStateFromFile(const std::string& filePath) {
     }
 
     DebugMsg("State loaded from file: %s\n", filePath.c_str());
+
+    // Update the displayed file name
+    currentDisplayedFileName = getReaMODFileName(filePath);
 }
 
 void SaveStateDialog() {
+    // Determine the default file name
+    std::string defaultFileName;
+    if (!currentDisplayedFileName.empty() && currentDisplayedFileName != "No ReaMOD session loaded." && currentDisplayedFileName != " ") {
+        // If a .ReaMOD file is already loaded, use its name
+        defaultFileName = currentDisplayedFileName + ".ReaMOD";
+    } else {
+        // Otherwise, use the currently open Reaper project name
+        std::string reaperProjectName = GetCurrentReaperProjectName();
+        if (reaperProjectName.empty()) {
+            reaperProjectName = "Untitled"; // Fallback to "Untitled" if no Reaper project name is available
+        }
+        defaultFileName = reaperProjectName + ".ReaMOD";
+    }
+
+    // Set up the file dialog
     const char* filterPatterns[2] = { "*.ReaMOD", "*.*" };
     const char* savePath = tinyfd_saveFileDialog(
-        "Save State As",  // Dialog title
-        "state.ReaMOD",   // Default filename with .ReaMOD extension
-        2,                // Number of filter patterns
-        filterPatterns,   // Filter patterns array
+        "Save State As",      // Dialog title
+        defaultFileName.c_str(), // Default filename
+        2,                    // Number of filter patterns
+        filterPatterns,       // Filter patterns array
         "ReaMOD files (*.ReaMOD)" // Filter description
     );
 
@@ -898,11 +971,13 @@ void SaveStateDialog() {
         }
         SaveStateToFile(savePathStr);
         currentReaMODFileName = fs::path(savePathStr).filename().string(); // Update current session file name
+        currentDisplayedFileName = getReaMODFileName(savePathStr); // Update the displayed file name
         DebugMsg("State saved successfully to: %s\n", savePathStr.c_str());
     } else {
         DebugMsg("Save operation canceled or invalid file name.\n");
     }
 }
+
 
 void LoadStateDialog() {
     const char* filterPatterns[2] = { "*.ReaMOD", "*.*" };
@@ -937,19 +1012,10 @@ void RenderGUI() {
 
     bool open = true;  // Open flag for the window
     if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open)) {
-        // Display the current .ReaMOD file name
-        // Get the current file name without the ".ReaMOD" extension
-        std::string displayedFileName = currentReaMODFileName;
-        size_t extensionPos = displayedFileName.rfind(".ReaMOD");
-        if (extensionPos != std::string::npos) {
-            displayedFileName = displayedFileName.substr(0, extensionPos);
-        }
-
-        // Format the session text
-        char sessionText[256];
-        snprintf(sessionText, sizeof(sessionText), "ReaMOD Session: %s", displayedFileName.c_str());
-        ImGui::Text(reaMOD_ImGui_Context, sessionText);
-
+        // Display the formatted ReaMOD session text
+        ImGui::Text(reaMOD_ImGui_Context,"ReaMOD Session: ");
+        ImGui::SameLine(reaMOD_ImGui_Context);
+        ImGui::Text(reaMOD_ImGui_Context, currentDisplayedFileName.c_str());
 
 
         // Add Save and Load State buttons
