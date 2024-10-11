@@ -452,7 +452,6 @@ void AddItemWithLastFMODEvent() {
     DebugMsg("Empty item added at position %.2f with note: %s\n", cursorPosition, lastTriggeredFMODEvent.c_str());
 }
 
-
 // Function to stop all FMOD events
 void StopAllEvents() {
     FMOD::Studio::Bus* masterBus = nullptr;
@@ -814,6 +813,8 @@ void SaveStateToFile(const std::string& filePath = "") {
     // Save relevant state information
     outFile << "fspro_file=" << selected_file_path << "\n";
     outFile << "lookahead_time_ms=" << lookAheadTimeMs << "\n";
+    outFile << "move_cursor_after_insert=" << (moveCursorAfterInsert ? 1 : 0) << "\n"; // Save the checkbox state
+    outFile << "num_frames_for_item=" << numFramesForItem << "\n"; // Save the number of frames for the item
 
     outFile << "<bank_files>\n";
     for (size_t i = 0; i < bank_files.size(); ++i) {
@@ -880,6 +881,12 @@ void LoadStateFromFile(const std::string& filePath) {
         } else if (line.rfind("lookahead_time_ms=", 0) == 0) {
             lookAheadTimeMs = std::stoi(line.substr(18));
             DebugMsg("Loaded lookahead_time_ms: %d\n", lookAheadTimeMs);
+        } else if (line.rfind("move_cursor_after_insert=", 0) == 0) {
+            moveCursorAfterInsert = std::stoi(line.substr(25)) != 0;
+            DebugMsg("Loaded move_cursor_after_insert: %d\n", moveCursorAfterInsert);
+        } else if (line.rfind("num_frames_for_item=", 0) == 0) {
+            numFramesForItem = std::stoi(line.substr(20));
+            DebugMsg("Loaded num_frames_for_item: %d\n", numFramesForItem);
         } else if (line == "<bank_files>") {
             while (std::getline(inFile, line) && line != "</bank_files>") {
                 if (line.rfind("bank_file=", 0) == 0) {
@@ -977,7 +984,6 @@ void SaveStateDialog() {
         DebugMsg("Save operation canceled or invalid file name.\n");
     }
 }
-
 
 void LoadStateDialog() {
     const char* filterPatterns[2] = { "*.ReaMOD", "*.*" };
