@@ -39,6 +39,7 @@ static int actionIdAddItemWithLastFMODEvent = 0;
 ImGui_Context* reaMOD_ImGui_Context = nullptr;
 char selected_file_path[FILE_PATH_BUFFER_SIZE] = "";  // Full path of selected .fspro file
 char selected_file_name[FILE_PATH_BUFFER_SIZE] = "No project selected.";  // Initial text in the input box
+std::string currentReaMODFileName = " ";
 bool reaModWindowOpen = true;
 
 // Store the list of found .bank files and their toggle states
@@ -896,6 +897,7 @@ void SaveStateDialog() {
             savePathStr += ".ReaMOD";
         }
         SaveStateToFile(savePathStr);
+        currentReaMODFileName = fs::path(savePathStr).filename().string(); // Update current session file name
         DebugMsg("State saved successfully to: %s\n", savePathStr.c_str());
     } else {
         DebugMsg("Save operation canceled or invalid file name.\n");
@@ -915,6 +917,7 @@ void LoadStateDialog() {
 
     if (loadPath) {
         LoadStateFromFile(loadPath);
+        currentReaMODFileName = fs::path(loadPath).filename().string(); // Update current session file name
         DebugMsg("State loaded successfully from: %s\n", loadPath);
     } else {
         DebugMsg("Load operation canceled or invalid file name.\n");
@@ -934,6 +937,31 @@ void RenderGUI() {
 
     bool open = true;  // Open flag for the window
     if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open)) {
+        // Display the current .ReaMOD file name
+        // Get the current file name without the ".ReaMOD" extension
+        std::string displayedFileName = currentReaMODFileName;
+        size_t extensionPos = displayedFileName.rfind(".ReaMOD");
+        if (extensionPos != std::string::npos) {
+            displayedFileName = displayedFileName.substr(0, extensionPos);
+        }
+
+        // Format the session text
+        char sessionText[256];
+        snprintf(sessionText, sizeof(sessionText), "ReaMOD Session: %s", displayedFileName.c_str());
+        ImGui::Text(reaMOD_ImGui_Context, sessionText);
+
+
+
+        // Add Save and Load State buttons
+        if (ImGui::Button(reaMOD_ImGui_Context, "Save")) {
+            SaveStateDialog();
+        }
+        ImGui::SameLine(reaMOD_ImGui_Context);
+        if (ImGui::Button(reaMOD_ImGui_Context, "Load")) {
+            LoadStateDialog();
+        }
+
+        ImGui::Separator(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context, "FMOD Project:");
 
         // Move the "Select" button to the left of the selected .fspro file
@@ -1035,15 +1063,9 @@ void RenderGUI() {
         ImGui::Checkbox(reaMOD_ImGui_Context, "Move Edit Cursor After Insert", &moveCursorAfterInsert);
 
         ImGui::Separator(reaMOD_ImGui_Context);
-
-        // Add Save and Load State buttons
-        if (ImGui::Button(reaMOD_ImGui_Context, "Save")) {
-            SaveStateDialog();
-        }
-        ImGui::SameLine(reaMOD_ImGui_Context);
-        if (ImGui::Button(reaMOD_ImGui_Context, "Load")) {
-            LoadStateDialog();
-        }
+        ImGui::Text(reaMOD_ImGui_Context,"ReaMOD v0.1");
+        ImGui::Text(reaMOD_ImGui_Context,"Created by Daniel Dehaan");
+        ImGui::Text(reaMOD_ImGui_Context, "www.danielrdehaan.com");
 
         ImGui::End(reaMOD_ImGui_Context);
     }
