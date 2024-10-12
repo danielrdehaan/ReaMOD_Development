@@ -872,53 +872,94 @@ void ReleaseFMODEventInstance(const std::string& itemGUID) {
     fmod_system->update();
 }
 
+std::unordered_map<int, MediaTrack*> fmodTracks;
+int cachedTrackCount = 0;
+
+void UpdateTrackCache() {
+    int currentTrackCount = CountTracks(nullptr);
+    if (currentTrackCount != cachedTrackCount) {
+        // Update cached track list if track count changes
+        fmodTracks.clear();
+        for (int i = 0; i < currentTrackCount; ++i) {
+            MediaTrack* track = GetTrack(nullptr, i);
+            if (!track) continue;
+
+            // Get the track name
+            char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+            if (trackName && (strstr(trackName, "FMOD") || strstr(trackName, "fmod"))) {
+                // If the track name contains "FMOD" or "fmod", add it to the map
+                fmodTracks[i] = track;
+            }
+        }
+        cachedTrackCount = currentTrackCount;
+    } else {
+        // Check for name changes
+        for (auto it = fmodTracks.begin(); it != fmodTracks.end();) {
+            MediaTrack* track = it->second;
+            char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+            if (!trackName || (!strstr(trackName, "FMOD") && !strstr(trackName, "fmod"))) {
+                // If track name no longer matches, remove it from the map
+                it = fmodTracks.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        // Look for any new tracks that should be added to the map
+        for (int i = 0; i < currentTrackCount; ++i) {
+            if (fmodTracks.find(i) == fmodTracks.end()) {
+                MediaTrack* track = GetTrack(nullptr, i);
+                if (!track) continue;
+
+                char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+                if (trackName && (strstr(trackName, "FMOD") || strstr(trackName, "fmod"))) {
+                    fmodTracks[i] = track;
+                }
+            }
+        }
+    }
+}
+
 void CheckItems(double playPosition) {
-    int trackCount = CountTracks(nullptr);
-    double lookAheadTimeSeconds = lookAheadTimeMs / 1000.0; // Convert lookAheadTimeMs to seconds
-    double tolerance = 0.04; // Small tolerance for floating-point inaccuracies
+    UpdateTrackCache(); // Refresh the track cache before checking items
 
-    for (int i = 0; i < trackCount; ++i) {
-        MediaTrack* track = GetTrack(nullptr, i);
+    double lookAheadTimeSeconds = lookAheadTimeMs / 1000.0;
+    double tolerance = 0.04;
+
+    for (const auto& pair : fmodTracks) {
+        MediaTrack* track = pair.second;
         int itemCount = CountTrackMediaItems(track);
-
         for (int j = 0; j < itemCount; ++j) {
             MediaItem* item = GetTrackMediaItem(track, j);
             MediaItem_Take* take = GetActiveTake(item);
-
             if (!take) continue;
 
             double itemStart = *(double*)GetSetMediaItemInfo(item, "D_POSITION", nullptr);
             double itemEnd = itemStart + *(double*)GetSetMediaItemInfo(item, "D_LENGTH", nullptr);
             std::string itemGUID = GetItemGUID(item);
 
-            // If playPosition has moved backwards, clear active instances and reset state
             if (playPosition < previousPlayPosition) {
                 activeEventInstances.clear();
-                DebugMsg("Playhead moved backward. Clearing active event instances.\n");
             }
 
-            // Check if the item should be triggered
             if (itemStart <= playPosition + lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
-                // If the item's GUID is not in the activeEventInstances map, it hasn't been triggered yet
                 if (activeEventInstances.find(itemGUID) == activeEventInstances.end()) {
                     char itemName[512] = "";
                     if (GetSetMediaItemTakeInfo_String(take, "P_NAME", itemName, false) && strstr(itemName, "event:") == itemName) {
-                        DebugMsg("Item %d on track %d, name retrieved: '%s'\n", j, i, itemName);
-                        std::string eventPath = itemName + 6; // Skip "event:"
+                        std::string eventPath = itemName + 6;
                         CreateFMODEventInstance(eventPath, item, itemStart, itemEnd);
                     }
                 }
-            }
-            // Release the item if the play cursor has passed the item's end
-            else if (playPosition > itemEnd + tolerance && activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
+            } else if (playPosition > itemEnd + tolerance && activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
                 ReleaseFMODEventInstance(itemGUID);
-                DebugMsg("Releasing item %d on track %d.\n", j, i);
             }
         }
     }
 
-    previousPlayPosition = playPosition; // Update previous play position
+    previousPlayPosition = playPosition;
 }
+
+bool trackCacheUpdatedDuringPlayback = false; // Flag to track if the cache has been updated during playback
 
 void MonitorPlayback() {
     if (!IsFMODInitialized()) {
@@ -937,6 +978,12 @@ void MonitorPlayback() {
     // Check if REAPER is playing or recording
     if (playState & 1) {  // REAPER is playing
         DebugMsg("Playback running. Current position: %.2f\n", playPosition);
+
+        // If this is the first time during this playback session, update the track cache
+        if (!trackCacheUpdatedDuringPlayback) {
+            UpdateTrackCache(); // Refresh the track cache once when playback starts
+            trackCacheUpdatedDuringPlayback = true; // Set flag to indicate cache has been updated
+        }
 
         // If playhead moved backward (looping, scrubbing, or jump)
         if (playPosition < previousPlayPosition) {
@@ -958,6 +1005,7 @@ void MonitorPlayback() {
         DebugMsg("Playback stopped. Cleaning up any lingering state.\n");
         triggeredMarkers.clear();  // Clear all triggered markers when playback stops
         triggeredItems.clear();    // Clear all triggered items when playback stops
+        trackCacheUpdatedDuringPlayback = false; // Reset the flag when playback stops
     }
 
     // Update previous play state to track state changes
@@ -1194,7 +1242,6 @@ void LoadStateFromFile(const std::string& filePath) {
         formattedLastSaveTimestamp.clear();
     }
 }
-
 
 void SaveStateDialog() {
     // Determine the default file name
