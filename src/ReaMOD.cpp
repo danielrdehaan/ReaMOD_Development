@@ -961,6 +961,38 @@ void CheckItems(double playPosition) {
 
 bool trackCacheUpdatedDuringPlayback = false; // Flag to track if the cache has been updated during playback
 
+void ReleaseAllEventInstances() {
+    DebugMsg("Releasing all active FMOD event instances.\n");
+
+    // Iterate through activeEventInstances and safely release them
+    for (auto it = activeEventInstances.begin(); it != activeEventInstances.end();) {
+        if (it->second.instance != nullptr) {
+            FMOD_RESULT result = it->second.instance->stop(FMOD_STUDIO_STOP_ALLOWFADEOUT);
+            if (result == FMOD_OK) {
+                DebugMsg("Successfully stopped event instance.\n");
+            } else {
+                DebugMsg("Failed to stop event instance, FMOD result: %d\n", result);
+            }
+
+            result = it->second.instance->release();
+            if (result == FMOD_OK) {
+                DebugMsg("Successfully released event instance.\n");
+            } else {
+                DebugMsg("Failed to release event instance, FMOD result: %d\n", result);
+            }
+
+            it = activeEventInstances.erase(it);  // Safely erase the entry and update the iterator
+        } else {
+            ++it;  // Move to the next item if no instance is found
+        }
+    }
+
+    triggeredItems.clear();  // Clear the triggered items map
+    DebugMsg("All FMOD event instances released.\n");
+
+    fmod_system->update();  // Ensure FMOD processes all the release calls
+}
+
 void MonitorPlayback() {
     if (!IsFMODInitialized()) {
         DebugMsg("FMOD system is not initialized. Skipping playback monitoring.\n");
@@ -1001,11 +1033,13 @@ void MonitorPlayback() {
         // Check items on tracks named "FMOD" or "fmod" for event or snapshot notes
         CheckItems(playPosition);
 
-    } else if (previousPlayState & 1) {  // REAPER was playing but now stopped
+    } else if (previousPlayState & 1) {  // REAPER was playing but now 
+        ReleaseAllEventInstances();  // Release all unreleased FMOD event instances
         DebugMsg("Playback stopped. Cleaning up any lingering state.\n");
-        triggeredMarkers.clear();  // Clear all triggered markers when playback stops
-        triggeredItems.clear();    // Clear all triggered items when playback stops
-        trackCacheUpdatedDuringPlayback = false; // Reset the flag when playback stops
+        // triggeredMarkers.clear();  // Clear all triggered markers when playback stops
+        // triggeredItems.clear();    // Clear all triggered items when playback stops
+        // trackCacheUpdatedDuringPlayback = false; // Reset the flag when playback stops
+        // StopAllEvents();
     }
 
     // Update previous play state to track state changes
