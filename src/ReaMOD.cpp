@@ -48,11 +48,6 @@ std::string currentReaMODFileName = " ";
 std::string currentDisplayedFileName = " ";
 bool reaModWindowOpen = true;
 
-// Create a global variable to store the ImGui context for the FMOD event selection window
-ImGui_Context* fmodEventSelectionContext = nullptr;
-int fmodEventSelectionTaskId = -1;  // Store the task ID for the event selection window
-bool isFMODEventWindowOpen = false;  // Track if the FMOD Event Window is open
-
 std::string selectedFMODEvent = "";  // Global or static variable to store the selected event
 
 // Store the list of found .bank files and their toggle states
@@ -62,8 +57,6 @@ std::unordered_map<std::string, FMOD::Studio::Bank*> loaded_banks;  // Map of lo
 std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map of events in each bank
 std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
 std::unordered_map<MediaItem*, bool> triggeredItems; // Global variable to store whether an item has already triggered
-
-
 
 // Global variables to track playback
 double previousPlayPosition = 0.0;
@@ -412,11 +405,11 @@ void PlayEvent(const std::string& event_path) {
 
 bool isAddingMarker = false;
 
-void AddMarkerWithLastFMODEvent() {
+void AddMarkerWithSelectedFMODEvent() {
     if (isAddingMarker) return; // Prevent re-entrant calls
     isAddingMarker = true;
 
-    if (lastTriggeredFMODEvent.empty()) {
+    if (selectedFMODEvent.empty()) {
         PostMsg("No FMOD event has been triggered yet.\n");
         return;
     }
@@ -426,15 +419,15 @@ void AddMarkerWithLastFMODEvent() {
 
     // Create a new marker at the cursor position with the event's full path as the name
     int color = 0; // Use default color
-    AddProjectMarker2(nullptr, false, cursorPosition, 0.0, lastTriggeredFMODEvent.c_str(), -1, color);
+    AddProjectMarker2(nullptr, false, cursorPosition, 0.0, selectedFMODEvent.c_str(), -1, color);
 
-    DebugMsg("Marker added for last FMOD event: %s\n", lastTriggeredFMODEvent.c_str());
+    DebugMsg("Marker added for last FMOD event: %s\n", selectedFMODEvent.c_str());
 
     isAddingMarker = false; // Reset flag after completion
 }
 
-void AddItemWithLastFMODEvent() {
-    if (lastTriggeredFMODEvent.empty()) {
+void AddItemWithSelectedFMODEvent() {
+    if (selectedFMODEvent.empty()) {
         PostMsg("No FMOD event has been triggered yet.\n");
         return;
     }
@@ -486,7 +479,7 @@ void AddItemWithLastFMODEvent() {
     }
 
     // Set the lastTriggeredFMODEvent as the name for the take
-    GetSetMediaItemTakeInfo_String(newTake, "P_NAME", const_cast<char*>(lastTriggeredFMODEvent.c_str()), true);
+    GetSetMediaItemTakeInfo_String(newTake, "P_NAME", const_cast<char*>(selectedFMODEvent.c_str()), true);
 
     // Update the arrangement view
     UpdateArrange();
@@ -497,7 +490,7 @@ void AddItemWithLastFMODEvent() {
         SetEditCurPos(newCursorPosition, true, false);
     }
 
-    DebugMsg("Item added at position %.2f with take name: %s\n", cursorPosition, lastTriggeredFMODEvent.c_str());
+    DebugMsg("Item added at position %.2f with take name: %s\n", cursorPosition, selectedFMODEvent.c_str());
 }
 
 // Function to stop all FMOD events
@@ -596,7 +589,7 @@ void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
         // Trigger the FMOD event when the button is clicked
         PlayEvent(event_path);
         // Update the last triggered event path
-        lastTriggeredFMODEvent = event_path;
+        selectedFMODEvent = event_path;
     }
     if (ImGui::IsItemHovered(ctx) && ImGui::IsMouseReleased(ctx, ImGui::MouseButton_Right)) {
         DebugMsg("Right-click detected on event: %s\n", event_path.c_str());
@@ -609,7 +602,6 @@ void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
 
         CopyToClipboard(adjustedEventPath);  // Copy the adjusted path to the clipboard
     }
-
 }
 
 void CheckMarkers(double playPosition) {
@@ -939,6 +931,170 @@ void UpdateTrackCache() {
                 }
             }
         }
+    }
+}
+
+void PostFMODEventParameters() {
+    if (selectedFMODEvent.empty()) {
+        PostMsg("No FMOD event selected.\n");
+        return;
+    }
+
+    // Get the event description for the selected event
+    FMOD::Studio::EventDescription* eventDescription = nullptr;
+    FMOD_RESULT result = fmod_system->getEvent(selectedFMODEvent.c_str(), &eventDescription);
+    
+    if (result != FMOD_OK || !eventDescription) {
+        PostMsg("Failed to get event description for event: %s\n", selectedFMODEvent.c_str());
+        return;
+    }
+
+    // Get the number of parameters for the event
+    int parameterCount = 0;
+    result = eventDescription->getParameterDescriptionCount(&parameterCount);
+    
+    if (result != FMOD_OK || parameterCount == 0) {
+        PostMsg("No parameters found for the event: %s\n", selectedFMODEvent.c_str());
+        return;
+    }
+
+    // Iterate through each parameter and post its details to the console
+    for (int i = 0; i < parameterCount; ++i) {
+        FMOD_STUDIO_PARAMETER_DESCRIPTION paramDesc;
+        result = eventDescription->getParameterDescriptionByIndex(i, &paramDesc);
+        
+        if (result != FMOD_OK) {
+            PostMsg("Failed to retrieve parameter %d for event: %s\n", i, selectedFMODEvent.c_str());
+            continue;
+        }
+
+        // Display the parameter name and default value
+        PostMsg("Parameter %d: %s (Min: %.2f, Max: %.2f, Default: %.2f)\n",
+                i, paramDesc.name, paramDesc.minimum, paramDesc.maximum, paramDesc.defaultvalue);
+    }
+}
+
+// Utility function to remove the first '/' and replace any subsequent '/' with '-'
+std::string SanitizeFileName(const std::string& eventPath) {
+    std::string sanitized = eventPath;
+
+    // Remove the first occurrence of '/'
+    size_t firstSlashPos = sanitized.find('/');
+    if (firstSlashPos != std::string::npos) {
+        sanitized.erase(firstSlashPos, 1);  // Remove the first '/'
+    }
+
+    // Replace all remaining '/' with '-'
+    std::replace(sanitized.begin(), sanitized.end(), '/', '-');
+
+    return sanitized;
+}
+
+void InsertReaMODParameterControlJSFXforSelectedEventOnSelectedTrack() {
+    if (selectedFMODEvent.empty()) {
+        PostMsg("No FMOD event selected.\n");
+        return;
+    }
+
+    // Get the event description for the selected event
+    FMOD::Studio::EventDescription* eventDescription = nullptr;
+    FMOD_RESULT result = fmod_system->getEvent(selectedFMODEvent.c_str(), &eventDescription);
+
+    if (result != FMOD_OK || !eventDescription) {
+        PostMsg("Failed to get event description for event: %s\n", selectedFMODEvent.c_str());
+        return;
+    }
+
+    // Get the number of parameters for the event
+    int parameterCount = 0;
+    result = eventDescription->getParameterDescriptionCount(&parameterCount);
+
+    if (result != FMOD_OK || parameterCount == 0) {
+        PostMsg("No parameters found for the event: %s\n", selectedFMODEvent.c_str());
+        return;
+    }
+
+    // Prepare the JSFX file content
+    std::string jsfxContent = "desc: Custom FMOD Parameter Control\n\n";
+
+    // Generate sliders based on the FMOD parameters
+    for (int i = 0; i < parameterCount; ++i) {
+        FMOD_STUDIO_PARAMETER_DESCRIPTION paramDesc;
+        result = eventDescription->getParameterDescriptionByIndex(i, &paramDesc);
+
+        if (result != FMOD_OK) {
+            PostMsg("Failed to retrieve parameter %d for event: %s\n", i, selectedFMODEvent.c_str());
+            continue;
+        }
+
+        // Add a slider for each FMOD parameter, using its name, range, and default value
+        jsfxContent += "slider" + std::to_string(i + 1) + ": " + 
+                        std::to_string(paramDesc.defaultvalue) + "<" +
+                        std::to_string(paramDesc.minimum) + "," +
+                        std::to_string(paramDesc.maximum) + ",0.01>" +
+                        std::string(paramDesc.name) + "\n";
+    }
+
+    jsfxContent += "\n@init\n";
+    jsfxContent += "// Initialization code\n\n";
+    jsfxContent += "@slider\n";
+    jsfxContent += "// This block runs when a slider is adjusted\n";
+    jsfxContent += "// Map slider values to FMOD parameters\n";
+
+    // Write logic to map each slider to the corresponding FMOD parameter
+    for (int i = 0; i < parameterCount; ++i) {
+        jsfxContent += "param" + std::to_string(i + 1) + "_value = slider" + std::to_string(i + 1) + ";\n";
+    }
+
+    jsfxContent += "\n@sample\n";
+    jsfxContent += "// Sample processing code (optional)\n";
+
+    // Sanitize the event path for the JSFX file name
+    std::string sanitizedEventName = SanitizeFileName(StripPathPrefix(selectedFMODEvent));
+
+    // Determine the path for the JSFX file
+    const char* resourcePath = GetResourcePath();
+    fs::path jsfxFolderPath = fs::path(resourcePath) / "Effects" / "ReaMOD";
+    
+    // Ensure the folder exists
+    if (!fs::exists(jsfxFolderPath)) {
+        std::error_code ec;
+        fs::create_directory(jsfxFolderPath, ec);
+        if (ec) {
+            PostMsg("Failed to create ReaMOD JSFX folder: %s\n", ec.message().c_str());
+            return;
+        }
+    }
+
+    // Construct the full path for the JSFX file
+    std::string jsfxFileName = "ReaMOD Parameter Control - " + sanitizedEventName + ".jsfx";
+    fs::path jsfxFilePath = jsfxFolderPath / jsfxFileName;
+
+    // Write the JSFX file
+    std::ofstream jsfxFile(jsfxFilePath);
+    if (jsfxFile.is_open()) {
+        jsfxFile << jsfxContent;
+        jsfxFile.close();
+        PostMsg("Custom FMOD JSFX created successfully at: %s\n", jsfxFilePath.string().c_str());
+
+        // Now add the JSFX to the selected track in Reaper
+        MediaTrack* selectedTrack = GetSelectedTrack(nullptr, 0);  // Get the currently selected track
+        if (!selectedTrack) {
+            PostMsg("No track selected to add JSFX.\n");
+            return;
+        }
+
+        // Add the JSFX to the selected track
+        int fxIndex = TrackFX_AddByName(selectedTrack, jsfxFileName.c_str(), false, 1);
+        if (fxIndex >= 0) {
+            PostMsg("Successfully added %s to the selected track.\n", jsfxFileName.c_str());
+            // Optionally, show the FX window for the user
+            TrackFX_Show(selectedTrack, fxIndex, 3);  // 3 shows the FX window
+        } else {
+            PostMsg("Failed to add JSFX to the selected track.\n");
+        }
+    } else {
+        PostMsg("Failed to create JSFX file at: %s\n", jsfxFilePath.string().c_str());
     }
 }
 
@@ -1539,7 +1695,7 @@ void RenderGUI() {
     bool open = true;  // Open flag for the window
     if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open)) {
         // Display the formatted ReaMOD session text
-        ImGui::Text(reaMOD_ImGui_Context,"ReaMOD Session: ");
+        ImGui::Text(reaMOD_ImGui_Context, "ReaMOD Session: ");
         ImGui::SameLine(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context, currentDisplayedFileName.c_str());
 
@@ -1608,10 +1764,20 @@ void RenderGUI() {
                                     auto top_level_folder = folder_type.second.find("");
                                     if (top_level_folder != folder_type.second.end()) {
                                         for (const auto& event_pair : top_level_folder->second) {
+                                            // Render the play button next to the selectable event
                                             std::string event_label = "Play##" + event_pair.second;
                                             RenderPlayButton(reaMOD_ImGui_Context, event_label, event_pair.second);
-                                            ImGui::SameLine(reaMOD_ImGui_Context);
-                                            ImGui::Text(reaMOD_ImGui_Context, event_pair.first.c_str());
+
+                                            ImGui::SameLine(reaMOD_ImGui_Context);  // Keep play button on the same line
+                                            
+                                            // Highlight the selected event
+                                            bool isSelected = (selectedFMODEvent == event_pair.second);
+
+                                            // Pass the address of isSelected to ImGui::Selectable
+                                            if (ImGui::Selectable(reaMOD_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
+                                                selectedFMODEvent = event_pair.second;  // Update selected event
+                                                DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
+                                            }
                                         }
                                     }
 
@@ -1622,10 +1788,20 @@ void RenderGUI() {
                                         }
                                         if (ImGui::TreeNode(reaMOD_ImGui_Context, folder.first.c_str())) {
                                             for (const auto& event_pair : folder.second) {
+                                                // Render the play button next to the selectable event
                                                 std::string event_label = "Play##" + event_pair.second;
                                                 RenderPlayButton(reaMOD_ImGui_Context, event_label, event_pair.second);
-                                                ImGui::SameLine(reaMOD_ImGui_Context);
-                                                ImGui::Text(reaMOD_ImGui_Context, event_pair.first.c_str());
+
+                                                ImGui::SameLine(reaMOD_ImGui_Context);  // Keep play button on the same line
+                                            
+                                                // Highlight the selected event
+                                                bool isSelected = (selectedFMODEvent == event_pair.second);
+
+                                                // Pass the address of isSelected to ImGui::Selectable
+                                                if (ImGui::Selectable(reaMOD_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
+                                                    selectedFMODEvent = event_pair.second;  // Update selected event
+                                                    DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
+                                                }
                                             }
                                             ImGui::TreePop(reaMOD_ImGui_Context);
                                         }
@@ -1744,70 +1920,6 @@ void toggleReaMODWindow() {
     }
 }
 
-bool closeRequested = false;  // Add a flag to track if the window should be closed
-
-void RenderFMODEventWindow() {
-    if (!fmodEventSelectionContext) return;
-
-    ImGui::SetNextWindowSize(fmodEventSelectionContext, 375, 400, ImGui::Cond_FirstUseEver);
-
-    if (ImGui::Begin(fmodEventSelectionContext, "FMOD Event Selection", &isFMODEventWindowOpen)) {
-        if (!bank_events.empty()) {
-            std::vector<std::string> all_events;
-
-            for (const auto& bank_pair : bank_events) {
-                for (const auto& event : bank_pair.second) {
-                    if (event.find("snapshot:") != 0) {
-                        all_events.push_back(event);
-                    }
-                }
-            }
-
-            auto grouped_folders = GroupEventsAndSnapshotsByPath(all_events);
-            for (const auto& folder : grouped_folders["Events"]) {
-                if (ImGui::TreeNode(fmodEventSelectionContext, folder.first.c_str())) {
-                    for (const auto& event_pair : folder.second) {
-                        if (ImGui::Selectable(fmodEventSelectionContext, event_pair.first.c_str())) {
-                            selectedFMODEvent = event_pair.second;
-                            closeRequested = true;  // Mark window to be closed after rendering
-                        }
-                    }
-                    ImGui::TreePop(fmodEventSelectionContext);
-                }
-            }
-        } else {
-            ImGui::Text(fmodEventSelectionContext, "No FMOD events available. Please load an FMOD project.");
-        }
-
-        ImGui::End(fmodEventSelectionContext);
-    }
-
-    if (closeRequested || !isFMODEventWindowOpen) {
-        closeRequested = false;
-        RemoveTask(fmodEventSelectionTaskId);
-        fmodEventSelectionTaskId = -1;
-        fmodEventSelectionContext = nullptr;  // Deallocate context after window is fully closed
-    }
-}
-
-// Function to toggle the FMOD Event Selection window
-void toggleFMODEventWindow() {
-    if (!fmodEventSelectionContext) {
-        // Create and initialize a new ImGui context for the FMOD Event Selection window
-        fmodEventSelectionContext = ImGui::CreateContext("FMOD Event Selection");
-
-        // Add a task to render the FMOD Event Selection window
-        fmodEventSelectionTaskId = AddTask(RenderFMODEventWindow);
-
-    } else {
-        // If the context already exists, close the window and clean up
-        RemoveTask(fmodEventSelectionTaskId);  // Remove the rendering task
-        fmodEventSelectionTaskId = -1;
-
-        fmodEventSelectionContext = nullptr;  // Set context to null, disabling rendering
-    }
-}
-
 // Command hook function for Reaper custom action
 static bool commandHook(KbdSectionInfo *sec, const int command, const int val, const int valhw, const int relmode, HWND hwnd) {
     // Check if the action ID matches the registered actions
@@ -1816,15 +1928,15 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         return true;
     }
     if (command == actionIdAddMarkerWithLastFMODEvent) {
-        AddMarkerWithLastFMODEvent();
+        AddMarkerWithSelectedFMODEvent();
         return true;
     }
     if (command == actionIdAddItemWithLastFMODEvent) {
-        AddItemWithLastFMODEvent();
+        AddItemWithSelectedFMODEvent();
         return true;
     }
     if (command == actionIdInsertFMODAutomationLane) {
-        toggleFMODEventWindow();
+        InsertReaMODParameterControlJSFXforSelectedEventOnSelectedTrack();
         return true;
     }
 
@@ -1847,7 +1959,7 @@ void RegisterActions() {
     actionIdAddItemWithLastFMODEvent = plugin_register("custom_action", &actionAddItemWithLastFMODEvent);
 
     // Register the new custom action for inserting FMOD automation lane
-    static custom_action_register_t actionInsertFMODAutomationLaneReg = { 0, "ReaMOD_InsertFMODAutomationLane", "ReaMOD: Insert FMOD Automation Lane on all FMOD Tracks" };
+    static custom_action_register_t actionInsertFMODAutomationLaneReg = { 0, "ReaMOD_InsertParameterControlJSFX", "ReaMOD: Insert ReaMOD Parameter Control JSFX for Selected FMOD Event on Selected Track." };
     actionIdInsertFMODAutomationLane = plugin_register("custom_action", &actionInsertFMODAutomationLaneReg);  // Correct struct usage
 }
 
