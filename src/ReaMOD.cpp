@@ -29,20 +29,31 @@
 
 #define DEBUG true
 
-namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
+namespace fs = std::filesystem;  // Alias for easier use of filesystem 
+
+const char* CONFIG_FILE_NAME = "reaMOD_config.txt";  // Configuration file to store paths
 
 // Declare the global variable to store the custom action ID
 static int actionIdOpenCloseReaMODWindow = 0;
 static int actionIdAddMarkerWithLastFMODEvent = 0;
 static int actionIdAddItemWithLastFMODEvent = 0;
+static int actionIdInsertFMODAutomationLane = 0;
 
 // ImGui context
 ImGui_Context* reaMOD_ImGui_Context = nullptr;
 char selected_file_path[FILE_PATH_BUFFER_SIZE] = "";  // Full path of selected .fspro file
 char selected_file_name[FILE_PATH_BUFFER_SIZE] = "No project selected.";  // Initial text in the input box
+char jsfx_folder_path[FILE_PATH_BUFFER_SIZE] = "";  // Ful path to user's jsfx folder
 std::string currentReaMODFileName = " ";
 std::string currentDisplayedFileName = " ";
 bool reaModWindowOpen = true;
+
+// Create a global variable to store the ImGui context for the FMOD event selection window
+ImGui_Context* fmodEventSelectionContext = nullptr;
+int fmodEventSelectionTaskId = -1;  // Store the task ID for the event selection window
+bool isFMODEventWindowOpen = false;  // Track if the FMOD Event Window is open
+
+std::string selectedFMODEvent = "";  // Global or static variable to store the selected event
 
 // Store the list of found .bank files and their toggle states
 std::vector<std::string> bank_files;
@@ -76,6 +87,9 @@ std::string formattedLastSaveTimestamp; // Holds the formatted "Last Save" text
 
 int numFramesForItem = 10; // Default number of frames for the inserted item
 bool moveCursorAfterInsert = true; // Default to true, meaning the cursor moves forward by default
+
+// Declare a global variable to store the JSFX folder path
+std::string jsfxFolderPath = "";
 
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
@@ -125,6 +139,14 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         BR_GetMediaItemGUID = reinterpret_cast<decltype(BR_GetMediaItemGUID)>(rec->GetFunc("BR_GetMediaItemGUID"));
         GetSetMediaItemTakeInfo_String = reinterpret_cast<decltype(GetSetMediaItemTakeInfo_String)>(rec->GetFunc("GetSetMediaItemTakeInfo_String"));
         AddTakeToMediaItem = reinterpret_cast<decltype(AddTakeToMediaItem)>(rec->GetFunc("AddTakeToMediaItem"));
+        GetSetEnvelopeInfo_String = reinterpret_cast<decltype(GetSetEnvelopeInfo_String)>(rec->GetFunc("GetSetEnvelopeInfo_String"));
+        UpdateArrange = reinterpret_cast<decltype(UpdateArrange)>(rec->GetFunc("UpdateArrange"));
+        TrackFX_AddByName = reinterpret_cast<decltype(TrackFX_AddByName)>(rec->GetFunc("TrackFX_AddByName"));
+        TrackFX_SetNamedConfigParm = reinterpret_cast<decltype(TrackFX_SetNamedConfigParm)>(rec->GetFunc("TrackFX_SetNamedConfigParm"));
+        GetFXEnvelope = reinterpret_cast<decltype(GetFXEnvelope)>(rec->GetFunc("GetFXEnvelope"));
+        GetSelectedTrack = reinterpret_cast<decltype(GetSelectedTrack)>(rec->GetFunc("GetSelectedTrack"));
+        GetResourcePath = reinterpret_cast<decltype(GetResourcePath)>(rec->GetFunc("GetResourcePath"));
+        TrackFX_Show = reinterpret_cast<decltype(TrackFX_Show)>(rec->GetFunc("TrackFX_Show")); // To show the FX window
     }
 }
 
@@ -920,6 +942,95 @@ void UpdateTrackCache() {
     }
 }
 
+void CreateSimpleFMODJSFX() {
+    // Get Reaper's resource path
+    const char* resourcePath = GetResourcePath();
+
+    // Construct the full path to the "ReaMOD" folder inside "Effects"
+    fs::path jsfxFolderPath = fs::path(resourcePath) / "Effects" / "ReaMOD";
+
+    // Ensure the "ReaMOD" folder exists, create it if necessary
+    if (!fs::exists(jsfxFolderPath)) {
+        std::error_code ec;
+        bool created = fs::create_directory(jsfxFolderPath, ec);
+        if (!created || ec) {
+            DebugMsg("Failed to create ReaMOD folder: %s\n", ec.message().c_str());
+            return;
+        }
+    }
+
+    // Path for the new JSFX file
+    fs::path jsfxFilePath = jsfxFolderPath / "FMODParameterControl.jsfx";
+
+    // Create and open the JSFX file for writing
+    std::ofstream jsfxFile(jsfxFilePath);
+    if (jsfxFile.is_open()) {
+        // Write simple JSFX code into the file
+        jsfxFile << R"(desc: FMOD Parameter Control
+
+slider1:0<0,1,0.01>FMOD Parameter 1
+slider2:0<0,1,0.01>FMOD Parameter 2
+slider3:0<0,1,0.01>FMOD Parameter 3
+
+@init
+// Initialization code here
+
+@slider
+// This block runs when a slider is adjusted
+// Here we can map sliders to parameters or outputs
+
+// Output values for each slider (can be linked to FMOD or other Reaper parameters)
+param1_value = slider1;
+param2_value = slider2;
+param3_value = slider3;
+
+@sample
+// Sample processing code, usually for audio effects
+// For a parameter controller, you might leave this empty
+)";
+
+        // Close the file after writing
+        jsfxFile.close();
+        DebugMsg("Simple FMOD Parameter Control JSFX created successfully at: %s\n", jsfxFilePath.string().c_str());
+    } else {
+        DebugMsg("Failed to create JSFX file at: %s\n", jsfxFilePath.string().c_str());
+    }
+}
+
+// Function to add the JSFX to the currently selected track
+void AddFMODAutomationJSFxToSelectedTrack() {
+    // Get the currently selected track
+    MediaTrack* selectedTrack = GetSelectedTrack(nullptr, 0);
+    if (!selectedTrack) {
+        DebugMsg("No track selected.\n");
+        return;
+    }
+
+    // Get Reaper's resource path
+    const char* resourcePath = GetResourcePath();
+
+    // Construct the path to the JSFX file in the "ReaMOD" folder
+    fs::path jsfxFilePath = fs::path(resourcePath) / "Effects" / "ReaMOD" / "FMODParameterControl.jsfx";
+
+    // Ensure the JSFX file exists before trying to add it
+    if (!fs::exists(jsfxFilePath)) {
+        DebugMsg("JSFX file does not exist: %s\n", jsfxFilePath.string().c_str());
+        DebugMsg("Creating FMODParameterControl.jsfx...\n");
+        CreateSimpleFMODJSFX();
+    }
+
+    // Add the JSFX to the selected track
+    int fxIndex = TrackFX_AddByName(selectedTrack, "FMOD Parameter Control", false, 1);
+    if (fxIndex >= 0) {
+        DebugMsg("Successfully added FMODParameterControl.jsfx to the selected track.\n");
+
+        // Optionally, show the FX window for the user
+        TrackFX_Show(selectedTrack, fxIndex, 3);  // 3 shows the FX window
+    } else {
+        DebugMsg("Failed to add FMODParameterControl.jsfx to the selected track.\n");
+    }
+}
+
 void CheckItems(double playPosition) {
     UpdateTrackCache(); // Refresh the track cache before checking items
 
@@ -1345,6 +1456,83 @@ std::string RemoveBankExtension(const std::string& filename) {
     return filename;  // Return original if no ".bank" extension is found
 }
 
+std::string GetConfigFilePath() {
+    // Get Reaper's resource path
+    const char* resourcePath = GetResourcePath();
+
+    // Construct the ReaMOD folder path
+    fs::path reaMODFolderPath = fs::path(resourcePath) / "ReaMOD";
+
+    // Check if the ReaMOD folder exists, and create it if necessary
+    if (!fs::exists(reaMODFolderPath)) {
+        std::error_code ec;
+        bool created = fs::create_directory(reaMODFolderPath, ec);
+        if (!created || ec) {
+            DebugMsg("Failed to create ReaMOD folder: %s\n", ec.message().c_str());
+            return "";  // Return an empty string if folder creation failed
+        }
+    }
+
+    // Append the config file name to the ReaMOD folder path
+    std::string configFilePath = (reaMODFolderPath / "reaMOD_config.txt").string();
+    return configFilePath;
+}
+
+void CheckJSFxFolderPath() {
+    // Get Reaper's resource path
+    const char* resourcePath = GetResourcePath();
+
+    // Construct the full path to the "ReaMOD" folder inside the "Effects" subdirectory
+    fs::path reaMODFolderPath = fs::path(resourcePath) / "Effects" / "ReaMOD";
+
+    // Check if the "ReaMOD" folder exists
+    if (fs::exists(reaMODFolderPath)) {
+        if (fs::is_directory(reaMODFolderPath)) {
+            DebugMsg("ReaMOD folder already exists at: %s\n", reaMODFolderPath.string().c_str());
+        } else {
+            DebugMsg("A file named 'ReaMOD' exists, but it is not a directory. Please check the folder.\n");
+            return;  // Do not proceed if it's not a directory
+        }
+    } else {
+        // Create the "ReaMOD" folder if it doesn't exist
+        std::error_code ec;
+        bool created = fs::create_directory(reaMODFolderPath, ec);
+        if (created && !ec) {
+            DebugMsg("Successfully created ReaMOD folder at: %s\n", reaMODFolderPath.string().c_str());
+        } else {
+            DebugMsg("Failed to create ReaMOD folder. Error: %s\n", ec.message().c_str());
+            return;
+        }
+    }
+
+    // Set jsfx_folder_path to point to the "ReaMOD" folder
+    std::string newPath = reaMODFolderPath.string();
+    std::strncpy(jsfx_folder_path, newPath.c_str(), FILE_PATH_BUFFER_SIZE - 1);
+    jsfx_folder_path[FILE_PATH_BUFFER_SIZE - 1] = '\0';  // Ensure null-termination
+
+    DebugMsg("jsfx_folder_path automatically set to: %s\n", jsfx_folder_path);
+}
+
+void CheckConfigFilePath() {
+    std::string configFilePath = GetConfigFilePath();
+    if (!fs::exists(configFilePath)) {
+        DebugMsg("Config file does not exist, creating reaMOD_config.txt...\n");
+        std::ofstream configFile(configFilePath);
+        if (configFile.is_open()) {
+            configFile << "";  // Write an empty config file
+            configFile.close();
+            DebugMsg("reaMOD_config.txt created successfully at: %s\n", configFilePath.c_str());
+        } else {
+            DebugMsg("Failed to create reaMOD_config.txt at: %s\n", configFilePath.c_str());
+        }
+    }
+}
+
+void InitializeReaMOD() {
+    CheckConfigFilePath();
+    CheckJSFxFolderPath();
+}
+
 void RenderGUI() {
     ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
@@ -1531,6 +1719,8 @@ void toggleReaMODWindow() {
         ImGui::init(plugin_getapi);
         reaMOD_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
 
+        InitializeReaMOD();
+
         // Initialize FMOD only if it's not already initialized
         if (!IsFMODInitialized()) {
             InitializeFMOD();  // Initialize the FMOD system
@@ -1554,6 +1744,70 @@ void toggleReaMODWindow() {
     }
 }
 
+bool closeRequested = false;  // Add a flag to track if the window should be closed
+
+void RenderFMODEventWindow() {
+    if (!fmodEventSelectionContext) return;
+
+    ImGui::SetNextWindowSize(fmodEventSelectionContext, 375, 400, ImGui::Cond_FirstUseEver);
+
+    if (ImGui::Begin(fmodEventSelectionContext, "FMOD Event Selection", &isFMODEventWindowOpen)) {
+        if (!bank_events.empty()) {
+            std::vector<std::string> all_events;
+
+            for (const auto& bank_pair : bank_events) {
+                for (const auto& event : bank_pair.second) {
+                    if (event.find("snapshot:") != 0) {
+                        all_events.push_back(event);
+                    }
+                }
+            }
+
+            auto grouped_folders = GroupEventsAndSnapshotsByPath(all_events);
+            for (const auto& folder : grouped_folders["Events"]) {
+                if (ImGui::TreeNode(fmodEventSelectionContext, folder.first.c_str())) {
+                    for (const auto& event_pair : folder.second) {
+                        if (ImGui::Selectable(fmodEventSelectionContext, event_pair.first.c_str())) {
+                            selectedFMODEvent = event_pair.second;
+                            closeRequested = true;  // Mark window to be closed after rendering
+                        }
+                    }
+                    ImGui::TreePop(fmodEventSelectionContext);
+                }
+            }
+        } else {
+            ImGui::Text(fmodEventSelectionContext, "No FMOD events available. Please load an FMOD project.");
+        }
+
+        ImGui::End(fmodEventSelectionContext);
+    }
+
+    if (closeRequested || !isFMODEventWindowOpen) {
+        closeRequested = false;
+        RemoveTask(fmodEventSelectionTaskId);
+        fmodEventSelectionTaskId = -1;
+        fmodEventSelectionContext = nullptr;  // Deallocate context after window is fully closed
+    }
+}
+
+// Function to toggle the FMOD Event Selection window
+void toggleFMODEventWindow() {
+    if (!fmodEventSelectionContext) {
+        // Create and initialize a new ImGui context for the FMOD Event Selection window
+        fmodEventSelectionContext = ImGui::CreateContext("FMOD Event Selection");
+
+        // Add a task to render the FMOD Event Selection window
+        fmodEventSelectionTaskId = AddTask(RenderFMODEventWindow);
+
+    } else {
+        // If the context already exists, close the window and clean up
+        RemoveTask(fmodEventSelectionTaskId);  // Remove the rendering task
+        fmodEventSelectionTaskId = -1;
+
+        fmodEventSelectionContext = nullptr;  // Set context to null, disabling rendering
+    }
+}
+
 // Command hook function for Reaper custom action
 static bool commandHook(KbdSectionInfo *sec, const int command, const int val, const int valhw, const int relmode, HWND hwnd) {
     // Check if the action ID matches the registered actions
@@ -1567,6 +1821,10 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
     }
     if (command == actionIdAddItemWithLastFMODEvent) {
         AddItemWithLastFMODEvent();
+        return true;
+    }
+    if (command == actionIdInsertFMODAutomationLane) {
+        toggleFMODEventWindow();
         return true;
     }
 
@@ -1587,6 +1845,10 @@ void RegisterActions() {
     // Register the new custom action for adding a marker with the last FMOD event
     static custom_action_register_t actionAddItemWithLastFMODEvent = { 0, "ReaMOD_AddItemWithLastFMODEvent", "ReaMOD: Add Empty Item with Last FMOD Event" };
     actionIdAddItemWithLastFMODEvent = plugin_register("custom_action", &actionAddItemWithLastFMODEvent);
+
+    // Register the new custom action for inserting FMOD automation lane
+    static custom_action_register_t actionInsertFMODAutomationLaneReg = { 0, "ReaMOD_InsertFMODAutomationLane", "ReaMOD: Insert FMOD Automation Lane on all FMOD Tracks" };
+    actionIdInsertFMODAutomationLane = plugin_register("custom_action", &actionInsertFMODAutomationLaneReg);  // Correct struct usage
 }
 
 // Entry point function for the Reaper plugin
