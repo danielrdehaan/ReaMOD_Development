@@ -1100,7 +1100,6 @@ void InsertReaMODParameterControlJSFXforSelectedEventOnSelectedTrack() {
     }
 }
 
-
 void CheckItems(double playPosition) {
     UpdateTrackCache(); // Refresh the track cache before checking items
 
