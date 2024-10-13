@@ -1014,8 +1014,10 @@ void InsertReaMODParameterControlJSFXforSelectedEventOnSelectedTrack() {
         return;
     }
 
-    // Prepare the JSFX file content
-    std::string jsfxContent = "desc: Custom FMOD Parameter Control\n\n";
+    // Use the FMOD event path as the JSFX description and file name
+    std::string sanitizedEventName = SanitizeFileName(StripPathPrefix(selectedFMODEvent));
+    std::string fxName = "ReaMOD Control - " + sanitizedEventName;
+    std::string jsfxContent = "desc: " + fxName + "\n\n";
 
     // Generate sliders based on the FMOD parameters
     for (int i = 0; i < parameterCount; ++i) {
@@ -1050,12 +1052,12 @@ void InsertReaMODParameterControlJSFXforSelectedEventOnSelectedTrack() {
     jsfxContent += "// Sample processing code (optional)\n";
 
     // Sanitize the event path for the JSFX file name
-    std::string sanitizedEventName = SanitizeFileName(StripPathPrefix(selectedFMODEvent));
+    std::string sanitizedFileName = SanitizeFileName(sanitizedEventName);
 
-    // Determine the path for the JSFX file
+    // Determine the path for the JSFX file (simplified to just ReaMOD folder)
     const char* resourcePath = GetResourcePath();
     fs::path jsfxFolderPath = fs::path(resourcePath) / "Effects" / "ReaMOD";
-    
+
     // Ensure the folder exists
     if (!fs::exists(jsfxFolderPath)) {
         std::error_code ec;
@@ -1067,7 +1069,7 @@ void InsertReaMODParameterControlJSFXforSelectedEventOnSelectedTrack() {
     }
 
     // Construct the full path for the JSFX file
-    std::string jsfxFileName = "ReaMOD Parameter Control - " + sanitizedEventName + ".jsfx";
+    std::string jsfxFileName = "ReaMOD Control - " + sanitizedFileName + ".jsfx";
     fs::path jsfxFilePath = jsfxFolderPath / jsfxFileName;
 
     // Write the JSFX file
@@ -1084,8 +1086,8 @@ void InsertReaMODParameterControlJSFXforSelectedEventOnSelectedTrack() {
             return;
         }
 
-        // Add the JSFX to the selected track
-        int fxIndex = TrackFX_AddByName(selectedTrack, jsfxFileName.c_str(), false, 1);
+        // Add the JSFX to the selected track using the simplified name
+        int fxIndex = TrackFX_AddByName(selectedTrack, fxName.c_str(), false, 1);
         if (fxIndex >= 0) {
             PostMsg("Successfully added %s to the selected track.\n", jsfxFileName.c_str());
             // Optionally, show the FX window for the user
@@ -1098,94 +1100,6 @@ void InsertReaMODParameterControlJSFXforSelectedEventOnSelectedTrack() {
     }
 }
 
-void CreateSimpleFMODJSFX() {
-    // Get Reaper's resource path
-    const char* resourcePath = GetResourcePath();
-
-    // Construct the full path to the "ReaMOD" folder inside "Effects"
-    fs::path jsfxFolderPath = fs::path(resourcePath) / "Effects" / "ReaMOD";
-
-    // Ensure the "ReaMOD" folder exists, create it if necessary
-    if (!fs::exists(jsfxFolderPath)) {
-        std::error_code ec;
-        bool created = fs::create_directory(jsfxFolderPath, ec);
-        if (!created || ec) {
-            DebugMsg("Failed to create ReaMOD folder: %s\n", ec.message().c_str());
-            return;
-        }
-    }
-
-    // Path for the new JSFX file
-    fs::path jsfxFilePath = jsfxFolderPath / "FMODParameterControl.jsfx";
-
-    // Create and open the JSFX file for writing
-    std::ofstream jsfxFile(jsfxFilePath);
-    if (jsfxFile.is_open()) {
-        // Write simple JSFX code into the file
-        jsfxFile << R"(desc: FMOD Parameter Control
-
-slider1:0<0,1,0.01>FMOD Parameter 1
-slider2:0<0,1,0.01>FMOD Parameter 2
-slider3:0<0,1,0.01>FMOD Parameter 3
-
-@init
-// Initialization code here
-
-@slider
-// This block runs when a slider is adjusted
-// Here we can map sliders to parameters or outputs
-
-// Output values for each slider (can be linked to FMOD or other Reaper parameters)
-param1_value = slider1;
-param2_value = slider2;
-param3_value = slider3;
-
-@sample
-// Sample processing code, usually for audio effects
-// For a parameter controller, you might leave this empty
-)";
-
-        // Close the file after writing
-        jsfxFile.close();
-        DebugMsg("Simple FMOD Parameter Control JSFX created successfully at: %s\n", jsfxFilePath.string().c_str());
-    } else {
-        DebugMsg("Failed to create JSFX file at: %s\n", jsfxFilePath.string().c_str());
-    }
-}
-
-// Function to add the JSFX to the currently selected track
-void AddFMODAutomationJSFxToSelectedTrack() {
-    // Get the currently selected track
-    MediaTrack* selectedTrack = GetSelectedTrack(nullptr, 0);
-    if (!selectedTrack) {
-        DebugMsg("No track selected.\n");
-        return;
-    }
-
-    // Get Reaper's resource path
-    const char* resourcePath = GetResourcePath();
-
-    // Construct the path to the JSFX file in the "ReaMOD" folder
-    fs::path jsfxFilePath = fs::path(resourcePath) / "Effects" / "ReaMOD" / "FMODParameterControl.jsfx";
-
-    // Ensure the JSFX file exists before trying to add it
-    if (!fs::exists(jsfxFilePath)) {
-        DebugMsg("JSFX file does not exist: %s\n", jsfxFilePath.string().c_str());
-        DebugMsg("Creating FMODParameterControl.jsfx...\n");
-        CreateSimpleFMODJSFX();
-    }
-
-    // Add the JSFX to the selected track
-    int fxIndex = TrackFX_AddByName(selectedTrack, "FMOD Parameter Control", false, 1);
-    if (fxIndex >= 0) {
-        DebugMsg("Successfully added FMODParameterControl.jsfx to the selected track.\n");
-
-        // Optionally, show the FX window for the user
-        TrackFX_Show(selectedTrack, fxIndex, 3);  // 3 shows the FX window
-    } else {
-        DebugMsg("Failed to add FMODParameterControl.jsfx to the selected track.\n");
-    }
-}
 
 void CheckItems(double playPosition) {
     UpdateTrackCache(); // Refresh the track cache before checking items
