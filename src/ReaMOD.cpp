@@ -37,6 +37,8 @@ static int actionIdAddMarkerWithSelectedEvent = 0;
 static int actionIdAddItemWithSelectedEventAtEditCursor = 0;
 static int actionIdAddItemWithSelectedEventWithinTimeSelection = 0;
 static int actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = 0;
+static int actionIDStopAndReleaseAllFmodEventInstances = 0;
+static int actionIDCopySelectedMediaItemsGUIDtoClipboard = 0;
 
 // ImGui context
 ImGui_Context* reaMOD_ImGui_Context = nullptr;
@@ -78,6 +80,7 @@ std::string formattedLastSaveTimestamp; // Holds the formatted "Last Save" text
 
 int numFramesForItem = 10; // Default number of frames for the inserted item
 bool moveCursorAfterInsert = true; // Default to true, meaning the cursor moves forward by default
+bool updateItemInsertionLength = true; 
 
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
@@ -93,6 +96,7 @@ std::unordered_map<std::string, EventInstanceData> activeEventInstances;
 
 // Declare the function pointer for BR_GetMediaItemGUID
 void (*BR_GetMediaItemGUID)(MediaItem* item, char* guidStringOut, int guidStringOut_sz) = nullptr;
+
 
 void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
     if (rec && rec->GetFunc) {
@@ -128,6 +132,7 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         GetSetMediaItemTakeInfo_String = reinterpret_cast<decltype(GetSetMediaItemTakeInfo_String)>(rec->GetFunc("GetSetMediaItemTakeInfo_String"));
         AddTakeToMediaItem = reinterpret_cast<decltype(AddTakeToMediaItem)>(rec->GetFunc("AddTakeToMediaItem"));
         GetSet_LoopTimeRange = reinterpret_cast<decltype(GetSet_LoopTimeRange)>(rec->GetFunc("GetSet_LoopTimeRange")); // Load GetSet_LoopTimeRange
+        GetSelectedMediaItem = reinterpret_cast<decltype(GetSelectedMediaItem)>(rec->GetFunc("GetSelectedMediaItem"));
     }
 }
 
@@ -528,6 +533,15 @@ void AddItemWithSelectedEventWithinTimeSelection() {
     double itemLength = timeSelEnd - timeSelStart;
     GetSetMediaItemInfo(newItem, "D_LENGTH", &itemLength);
 
+    // Update the numFramesForItem if the checkbox is checked
+    if (updateItemInsertionLength == true) {
+        bool dropFrame = false;
+        double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame); // Get the project frame rate
+
+        // Convert the item length (in seconds) to frames based on the frame rate
+        numFramesForItem = static_cast<int>(itemLength * frameRate);
+    }
+
     // Add a new take to the item
     MediaItem_Take* newTake = AddTakeToMediaItem(newItem);
     if (!newTake) {
@@ -577,7 +591,6 @@ void UpdateNumFramesForItemInsertionFromCurrentTimeSelection() {
     // Output a message to confirm the number of frames has been updated
     DebugMsg("numFramesForItem updated based on time selection: %d frames (%.2f seconds)\n", numFramesForItem, timeSelectionLength);
 }
-
 
 // Function to stop all FMOD events
 void StopAllEvents() {
@@ -688,7 +701,6 @@ void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
 
         CopyToClipboard(adjustedEventPath);  // Copy the adjusted path to the clipboard
     }
-
 }
 
 void CheckMarkers(double playPosition) {
@@ -758,6 +770,30 @@ std::string GetItemGUID(MediaItem* item) {
     }
 
     return std::string(guidStr);
+}
+
+void CopySelectedMediaItemGUIDToClipboard() {
+    // Get the first selected media item (ignoring track selection)
+    MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0); // Pass 0 to get the first selected item
+
+    if (!selectedItem) {
+        PostMsg("No media item is selected.\n");
+        return;
+    }
+
+    // Retrieve the GUID of the selected media item using the existing function
+    std::string guidStr = GetItemGUID(selectedItem);
+
+    // Check if the GUID is valid
+    if (guidStr.empty()) {
+        PostMsg("Failed to retrieve GUID for the selected media item.\n");
+        return;
+    }
+
+    // Copy the GUID to the clipboard using the existing CopyToClipboard function
+    CopyToClipboard(guidStr);
+
+    DebugMsg("Copied selected media item GUID to clipboard: %s\n", guidStr.c_str());
 }
 
 void ParseAndApplyNotes(FMOD::Studio::EventInstance* eventInstance, const std::vector<std::string>& noteLines) {
@@ -1040,19 +1076,75 @@ void CheckItems(double playPosition) {
             std::string itemGUID = GetItemGUID(item);
 
             if (playPosition < previousPlayPosition) {
-                activeEventInstances.clear();
+                activeEventInstances.clear();  // Reset instances if playhead moved backward
             }
 
-            if (itemStart <= playPosition + lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
-                if (activeEventInstances.find(itemGUID) == activeEventInstances.end()) {
-                    char itemName[512] = "";
-                    if (GetSetMediaItemTakeInfo_String(take, "P_NAME", itemName, false) && strstr(itemName, "event:") == itemName) {
-                        std::string eventPath = itemName + 6;
-                        CreateFMODEventInstance(eventPath, item, itemStart, itemEnd);
+            // Get the item name
+            char itemName[512] = "";
+            if (GetSetMediaItemTakeInfo_String(take, "P_NAME", itemName, false)) {
+                std::string nameStr(itemName);
+
+                // Handle "event:" items
+                if (nameStr.find("event:") == 0) {
+                    std::string eventPath = nameStr.substr(6);  // Strip the "event:" prefix
+                    if (playPosition >= itemStart - lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
+                        if (activeEventInstances.find(itemGUID) == activeEventInstances.end()) {
+                            CreateFMODEventInstance(eventPath, item, itemStart, itemEnd);
+                        }
+                    } else if (playPosition > itemEnd + tolerance && activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
+                        ReleaseFMODEventInstance(itemGUID);
                     }
                 }
-            } else if (playPosition > itemEnd + tolerance && activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
-                ReleaseFMODEventInstance(itemGUID);
+
+                // Handle "param:" items
+                else if (nameStr.find("param:") == 0) {
+                    // Parse "param:Note=1"
+                    size_t equalPos = nameStr.find('=');
+                    if (equalPos != std::string::npos) {
+                        std::string paramName = nameStr.substr(6, equalPos - 6); // Get parameter name
+                        std::string paramValueStr = nameStr.substr(equalPos + 1); // Get parameter value
+                        float paramValue = std::stof(paramValueStr); // Convert value to float
+
+                        // Check if playPosition is within the item's time range
+                        if (playPosition >= itemStart - lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
+                            DebugMsg("Found param item: %s with value: %s\n", paramName.c_str(), paramValueStr.c_str());
+
+                            // Check for a GUID in the item's notes
+                            char itemNotes[4096];
+                            bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
+                            if (hasNotes && strstr(itemNotes, "GUID=")) {
+                                // Extract GUID from notes
+                                std::string guidStr(itemNotes);
+                                size_t start = guidStr.find("GUID=") + 5;
+                                size_t end = guidStr.find("\n", start);
+                                std::string extractedGUID = guidStr.substr(start, end - start);
+
+                                // Add curly braces to the extracted GUID
+                                // std::string formattedGUID = "{" + extractedGUID + "}";
+
+                                // Debug message for the extracted GUID
+                                DebugMsg("Extracted and formatted GUID from item notes: %s\n", extractedGUID.c_str());
+
+                                // Find the specific event instance by GUID
+                                if (activeEventInstances.find(extractedGUID) != activeEventInstances.end()) {
+                                    FMOD::Studio::EventInstance* instance = activeEventInstances[extractedGUID].instance;
+                                    if (instance) {
+                                        instance->setParameterByName(paramName.c_str(), paramValue);
+                                        fmod_system->update();
+                                        DebugMsg("Updated parameter '%s' to value %.2f for instance with GUID: %s\n", paramName.c_str(), paramValue, extractedGUID.c_str());
+                                    }
+                                } else {
+                                    DebugMsg("No active instance found for GUID: %s\n", extractedGUID.c_str());
+                                }
+                            } else {
+                                // If no GUID, assume it's a global parameter
+                                fmod_system->setParameterByName(paramName.c_str(), paramValue);
+                                fmod_system->update();
+                                DebugMsg("Updated global parameter '%s' to value %.2f\n", paramName.c_str(), paramValue);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1092,6 +1184,12 @@ void ReleaseAllEventInstances() {
     DebugMsg("All FMOD event instances released.\n");
 
     fmod_system->update();  // Ensure FMOD processes all the release calls
+}
+
+void stopReleaseALLFMODEventInstances()
+{
+    ReleaseAllEventInstances();
+    StopAllEvents();
 }
 
 void MonitorPlayback() {
@@ -1451,6 +1549,7 @@ void RenderGUI() {
 
     bool open = true;  // Open flag for the window
     if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open)) {
+
         // Display the formatted ReaMOD session text
         ImGui::Text(reaMOD_ImGui_Context, "ReaMOD Session: ");
         ImGui::SameLine(reaMOD_ImGui_Context);
@@ -1590,6 +1689,7 @@ void RenderGUI() {
 
         // Add the checkbox for moving the cursor after inserting an item
         ImGui::Checkbox(reaMOD_ImGui_Context, "Move Edit Cursor After Insert", &moveCursorAfterInsert);
+        ImGui::Checkbox(reaMOD_ImGui_Context, "Update item length from current time selection following insertion", &updateItemInsertionLength);
 
         ImGui::Separator(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context,"ReaMOD v0.1");
@@ -1648,6 +1748,7 @@ void AutoLoadReaMODFile() {
 
 void toggleReaMODWindow() {
     if (!reaMOD_ImGui_Context) {
+
         // First-time setup: initialize ReaImGui and FMOD, and start rendering
         ImGui::init(plugin_getapi);
         reaMOD_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
@@ -1698,6 +1799,14 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         UpdateNumFramesForItemInsertionFromCurrentTimeSelection();
         return true;
     }
+    if (command == actionIDStopAndReleaseAllFmodEventInstances) {
+        stopReleaseALLFMODEventInstances();
+        return true;
+    }
+    if (command == actionIDCopySelectedMediaItemsGUIDtoClipboard) {
+        CopySelectedMediaItemGUIDToClipboard();
+        return true;
+    }
 
     return false;
 }
@@ -1724,6 +1833,14 @@ void RegisterActions() {
     // Register the new custom action for updating the item insertion length based upon the current time selection
     static custom_action_register_t actionUpdateNumFramesForItemInsertionFromCurrentTimeSelection = { 0, "ReaMOD_actionUpdateNumFramesForItemInsertionFromCurrentTimeSelection", "ReaMOD: Update number of frames for item insertion from current time selection" };
     actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = plugin_register("custom_action", &actionUpdateNumFramesForItemInsertionFromCurrentTimeSelection);
+
+    // Register the new custom action for updating the item insertion length based upon the current time selection
+    static custom_action_register_t actionStopAndReleaseAllFmodEventInstances = { 0, "ReaMOD_actionStopAndReleaseAllFmodEventInstances", "ReaMOD: Stop/Release All FMOD Event Instances" };
+    actionIDStopAndReleaseAllFmodEventInstances = plugin_register("custom_action", &actionStopAndReleaseAllFmodEventInstances);
+
+    // Register the new custom action for updating the item insertion length based upon the current time selection
+    static custom_action_register_t actionCopySelectedMediaItemsGUIDtoClipboard = { 0, "ReaMOD_actionCopySelectedMediaItemsGUIDtoClipboard", "ReaMOD: Copy selected media item's GUID to clipboard" };
+    actionIDCopySelectedMediaItemsGUIDtoClipboard = plugin_register("custom_action", &actionCopySelectedMediaItemsGUIDtoClipboard);
 }
 
 // Entry point function for the Reaper plugin
