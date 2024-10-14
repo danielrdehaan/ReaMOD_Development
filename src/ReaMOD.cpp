@@ -27,7 +27,7 @@
 
 #define FILE_PATH_BUFFER_SIZE 1024
 
-#define DEBUG true
+#define DEBUG false
 
 namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
 
@@ -38,7 +38,7 @@ static int actionIdAddItemWithSelectedEventAtEditCursor = 0;
 static int actionIdAddItemWithSelectedEventWithinTimeSelection = 0;
 static int actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = 0;
 static int actionIDStopAndReleaseAllFmodEventInstances = 0;
-static int actionIDCopySelectedMediaItemsGUIDtoClipboard = 0;
+static int actionIDInsertParamUpdateItemForSelectedMediaItem = 0;
 
 // ImGui context
 ImGui_Context* reaMOD_ImGui_Context = nullptr;
@@ -794,6 +794,90 @@ void CopySelectedMediaItemGUIDToClipboard() {
     CopyToClipboard(guidStr);
 
     DebugMsg("Copied selected media item GUID to clipboard: %s\n", guidStr.c_str());
+}
+
+void InsertParamUpdateItemForSelectedMediaItem() {
+    // Get the first selected media item (ignoring track selection)
+    MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0); // Pass 0 to get the first selected item
+
+    if (!selectedItem) {
+        PostMsg("No media item is selected.\n");
+        return;
+    }
+
+    // Retrieve the GUID of the selected media item using the existing function
+    std::string guidStr = GetItemGUID(selectedItem);
+
+    // Check if the GUID is valid
+    if (guidStr.empty()) {
+        PostMsg("Failed to retrieve GUID for the selected media item.\n");
+        return;
+    }
+
+    // Get the current edit cursor position
+    double cursorPosition = GetCursorPosition();
+
+    // Get the currently selected track
+    MediaTrack* selectedTrack = GetTrack(nullptr, 0); // Assume track 0 if no track is selected
+    int numSelectedTracks = CountTracks(nullptr);
+
+    // Find the first selected track
+    for (int i = 0; i < numSelectedTracks; ++i) {
+        MediaTrack* track = GetTrack(nullptr, i);
+        if (*(bool*)GetSetMediaTrackInfo(track, "I_SELECTED", nullptr)) {
+            selectedTrack = track;
+            break;
+        }
+    }
+
+    if (!selectedTrack) {
+        PostMsg("No track is selected.\n");
+        return;
+    }
+
+    // Add a media item on the selected track at the cursor position
+    MediaItem* newItem = AddMediaItemToTrack(selectedTrack);
+    if (!newItem) {
+        PostMsg("Failed to create a new item.\n");
+        return;
+    }
+
+    // Set the item position to the cursor
+    GetSetMediaItemInfo(newItem, "D_POSITION", &cursorPosition);
+
+    // Calculate the item length based on the frame rate and the number of frames
+    bool dropFrame = false;
+    double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame);
+    double itemLength = numFramesForItem / frameRate; // Set the length to the specified number of frames
+
+    // Set the calculated length for the item
+    GetSetMediaItemInfo(newItem, "D_LENGTH", &itemLength);
+
+    // Add a new take to the item
+    MediaItem_Take* newTake = AddTakeToMediaItem(newItem);
+    if (!newTake) {
+        PostMsg("Failed to create a new take for the item.\n");
+        return;
+    }
+
+    // Set the default parameter name for the take
+    std::string paramName = "param:Name=Value";
+    GetSetMediaItemTakeInfo_String(newTake, "P_NAME", const_cast<char*>(paramName.c_str()), true);
+
+    // Add the GUID to the item's notes
+    std::string itemNotes = "GUID=" + guidStr;
+    GetSetMediaItemInfo_String(newItem, "P_NOTES", const_cast<char*>(itemNotes.c_str()), true);
+
+    // Update the arrangement view
+    UpdateArrange();
+
+    if (moveCursorAfterInsert) {
+        // Move the edit cursor forward by the number of frames
+        double newCursorPosition = cursorPosition + itemLength;
+        SetEditCurPos(newCursorPosition, true, false);
+    }
+
+    DebugMsg("Inserted param update item at position %.2f with GUID: %s\n", cursorPosition, guidStr.c_str());
 }
 
 void ParseAndApplyNotes(FMOD::Studio::EventInstance* eventInstance, const std::vector<std::string>& noteLines) {
@@ -1803,8 +1887,8 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         stopReleaseALLFMODEventInstances();
         return true;
     }
-    if (command == actionIDCopySelectedMediaItemsGUIDtoClipboard) {
-        CopySelectedMediaItemGUIDToClipboard();
+    if (command == actionIDInsertParamUpdateItemForSelectedMediaItem) {
+        InsertParamUpdateItemForSelectedMediaItem();
         return true;
     }
 
@@ -1839,8 +1923,8 @@ void RegisterActions() {
     actionIDStopAndReleaseAllFmodEventInstances = plugin_register("custom_action", &actionStopAndReleaseAllFmodEventInstances);
 
     // Register the new custom action for updating the item insertion length based upon the current time selection
-    static custom_action_register_t actionCopySelectedMediaItemsGUIDtoClipboard = { 0, "ReaMOD_actionCopySelectedMediaItemsGUIDtoClipboard", "ReaMOD: Copy selected media item's GUID to clipboard" };
-    actionIDCopySelectedMediaItemsGUIDtoClipboard = plugin_register("custom_action", &actionCopySelectedMediaItemsGUIDtoClipboard);
+    static custom_action_register_t actionInsertParamUpdateItemForSelectedMediaItem = { 0, "ReaMOD_actionIDInsertParamUpdateItemForSelectedMediaItem", "ReaMOD: Insert default parameter update item for selected media item on selected track at edit cursor" };
+    actionIDInsertParamUpdateItemForSelectedMediaItem = plugin_register("custom_action", &actionInsertParamUpdateItemForSelectedMediaItem);
 }
 
 // Entry point function for the Reaper plugin
