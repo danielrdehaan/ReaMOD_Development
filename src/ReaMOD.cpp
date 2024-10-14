@@ -12,7 +12,6 @@
 #include <thread>
 #include <fstream> // Include for file I/O operations
 #include <ctime>
-#include <cstdio>
 #include "fmod_studio.hpp"
 #include "fmod.hpp"
 #include "fmod_errors.h"
@@ -30,26 +29,22 @@
 
 #define DEBUG true
 
-namespace fs = std::filesystem;  // Alias for easier use of filesystem 
-
-const char* CONFIG_FILE_NAME = "reaMOD_config.txt";  // Configuration file to store paths
+namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
 
 // Declare the global variable to store the custom action ID
 static int actionIdOpenCloseReaMODWindow = 0;
-static int actionIdAddMarkerWithLastFMODEvent = 0;
-static int actionIdAddItemWithLastFMODEvent = 0;
-static int actionIdInsertFMODAutomationLane = 0;
+static int actionIdAddMarkerWithSelectedEvent = 0;
+static int actionIdAddItemWithSelectedEventAtEditCursor = 0;
+static int actionIdAddItemWithSelectedEventWithinTimeSelection = 0;
+static int actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = 0;
 
 // ImGui context
 ImGui_Context* reaMOD_ImGui_Context = nullptr;
 char selected_file_path[FILE_PATH_BUFFER_SIZE] = "";  // Full path of selected .fspro file
 char selected_file_name[FILE_PATH_BUFFER_SIZE] = "No project selected.";  // Initial text in the input box
-char jsfx_folder_path[FILE_PATH_BUFFER_SIZE] = "";  // Ful path to user's jsfx folder
 std::string currentReaMODFileName = " ";
 std::string currentDisplayedFileName = " ";
 bool reaModWindowOpen = true;
-
-std::string selectedFMODEvent = "";  // Global or static variable to store the selected event
 
 // Store the list of found .bank files and their toggle states
 std::vector<std::string> bank_files;
@@ -58,6 +53,8 @@ std::unordered_map<std::string, FMOD::Studio::Bank*> loaded_banks;  // Map of lo
 std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map of events in each bank
 std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
 std::unordered_map<MediaItem*, bool> triggeredItems; // Global variable to store whether an item has already triggered
+
+std::string selectedFMODEvent = "";  // Global or static variable to store the selected event
 
 // Global variables to track playback
 double previousPlayPosition = 0.0;
@@ -82,9 +79,6 @@ std::string formattedLastSaveTimestamp; // Holds the formatted "Last Save" text
 int numFramesForItem = 10; // Default number of frames for the inserted item
 bool moveCursorAfterInsert = true; // Default to true, meaning the cursor moves forward by default
 
-// Declare a global variable to store the JSFX folder path
-std::string jsfxFolderPath = "";
-
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
 
@@ -99,10 +93,6 @@ std::unordered_map<std::string, EventInstanceData> activeEventInstances;
 
 // Declare the function pointer for BR_GetMediaItemGUID
 void (*BR_GetMediaItemGUID)(MediaItem* item, char* guidStringOut, int guidStringOut_sz) = nullptr;
-
-// Declare function pointers for gmem_attach and gmem_get
-void (*gmem_attach)(const char* blockname) = nullptr;
-int* (*gmem_get)() = nullptr;
 
 void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
     if (rec && rec->GetFunc) {
@@ -137,16 +127,7 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         BR_GetMediaItemGUID = reinterpret_cast<decltype(BR_GetMediaItemGUID)>(rec->GetFunc("BR_GetMediaItemGUID"));
         GetSetMediaItemTakeInfo_String = reinterpret_cast<decltype(GetSetMediaItemTakeInfo_String)>(rec->GetFunc("GetSetMediaItemTakeInfo_String"));
         AddTakeToMediaItem = reinterpret_cast<decltype(AddTakeToMediaItem)>(rec->GetFunc("AddTakeToMediaItem"));
-        GetSetEnvelopeInfo_String = reinterpret_cast<decltype(GetSetEnvelopeInfo_String)>(rec->GetFunc("GetSetEnvelopeInfo_String"));
-        UpdateArrange = reinterpret_cast<decltype(UpdateArrange)>(rec->GetFunc("UpdateArrange"));
-        TrackFX_AddByName = reinterpret_cast<decltype(TrackFX_AddByName)>(rec->GetFunc("TrackFX_AddByName"));
-        TrackFX_SetNamedConfigParm = reinterpret_cast<decltype(TrackFX_SetNamedConfigParm)>(rec->GetFunc("TrackFX_SetNamedConfigParm"));
-        GetFXEnvelope = reinterpret_cast<decltype(GetFXEnvelope)>(rec->GetFunc("GetFXEnvelope"));
-        GetSelectedTrack = reinterpret_cast<decltype(GetSelectedTrack)>(rec->GetFunc("GetSelectedTrack"));
-        GetResourcePath = reinterpret_cast<decltype(GetResourcePath)>(rec->GetFunc("GetResourcePath"));
-        TrackFX_Show = reinterpret_cast<decltype(TrackFX_Show)>(rec->GetFunc("TrackFX_Show")); // To show the FX window
-        GetNumTakeMarkers = reinterpret_cast<decltype(GetNumTakeMarkers)>(rec->GetFunc("GetNumTakeMarkers"));
-        GetTakeMarker = reinterpret_cast<decltype(GetTakeMarker)>(rec->GetFunc("GetTakeMarker"));
+        GetSet_LoopTimeRange = reinterpret_cast<decltype(GetSet_LoopTimeRange)>(rec->GetFunc("GetSet_LoopTimeRange")); // Load GetSet_LoopTimeRange
     }
 }
 
@@ -412,7 +393,7 @@ void PlayEvent(const std::string& event_path) {
 
 bool isAddingMarker = false;
 
-void AddMarkerWithSelectedFMODEvent() {
+void AddMarkerWithSelectedEvent() {
     if (isAddingMarker) return; // Prevent re-entrant calls
     isAddingMarker = true;
 
@@ -433,7 +414,7 @@ void AddMarkerWithSelectedFMODEvent() {
     isAddingMarker = false; // Reset flag after completion
 }
 
-void AddItemWithSelectedFMODEvent() {
+void AddItemWithSelectedEventAtEditCursor() {
     if (selectedFMODEvent.empty()) {
         PostMsg("No FMOD event has been triggered yet.\n");
         return;
@@ -460,14 +441,14 @@ void AddItemWithSelectedFMODEvent() {
         return;
     }
 
-    // Add an empty media item at the cursor position on the selected track
+    // Add a media item on the selected track at the cursor position
     MediaItem* newItem = AddMediaItemToTrack(selectedTrack);
     if (!newItem) {
         PostMsg("Failed to create a new item.\n");
         return;
     }
 
-    // Set the item position
+    // Set the item position to the cursor
     GetSetMediaItemInfo(newItem, "D_POSITION", &cursorPosition);
 
     // Calculate the item length based on the frame rate and the number of frames
@@ -485,7 +466,7 @@ void AddItemWithSelectedFMODEvent() {
         return;
     }
 
-    // Set the lastTriggeredFMODEvent as the name for the take
+    // Set the selectedFMODEvent as the name for the take
     GetSetMediaItemTakeInfo_String(newTake, "P_NAME", const_cast<char*>(selectedFMODEvent.c_str()), true);
 
     // Update the arrangement view
@@ -499,6 +480,104 @@ void AddItemWithSelectedFMODEvent() {
 
     DebugMsg("Item added at position %.2f with take name: %s\n", cursorPosition, selectedFMODEvent.c_str());
 }
+
+void AddItemWithSelectedEventWithinTimeSelection() {
+    if (selectedFMODEvent.empty()) {
+        PostMsg("No FMOD event has been triggered yet.\n");
+        return;
+    }
+
+    // Get the currently selected track
+    MediaTrack* selectedTrack = GetTrack(nullptr, 0); // Assume track 0 if no track is selected
+    int numSelectedTracks = CountTracks(nullptr);
+
+    // Find the first selected track
+    for (int i = 0; i < numSelectedTracks; ++i) {
+        MediaTrack* track = GetTrack(nullptr, i);
+        if (*(bool*)GetSetMediaTrackInfo(track, "I_SELECTED", nullptr)) {
+            selectedTrack = track;
+            break;
+        }
+    }
+
+    if (!selectedTrack) {
+        PostMsg("No track is selected.\n");
+        return;
+    }
+
+    // Check if a time selection exists
+    double timeSelStart, timeSelEnd;
+    GetSet_LoopTimeRange(false, false, &timeSelStart, &timeSelEnd, false); // Retrieve the time selection
+
+    if (timeSelEnd <= timeSelStart) {
+        PostMsg("No valid time selection exists.\n");
+        return;
+    }
+
+    // Add a media item on the selected track within the time selection
+    MediaItem* newItem = AddMediaItemToTrack(selectedTrack);
+    if (!newItem) {
+        PostMsg("Failed to create a new item.\n");
+        return;
+    }
+
+    // Set the item start position to the time selection start
+    GetSetMediaItemInfo(newItem, "D_POSITION", &timeSelStart);
+
+    // Set the item length to match the time selection
+    double itemLength = timeSelEnd - timeSelStart;
+    GetSetMediaItemInfo(newItem, "D_LENGTH", &itemLength);
+
+    // Add a new take to the item
+    MediaItem_Take* newTake = AddTakeToMediaItem(newItem);
+    if (!newTake) {
+        PostMsg("Failed to create a new take for the item.\n");
+        return;
+    }
+
+    // Set the selectedFMODEvent as the name for the take
+    GetSetMediaItemTakeInfo_String(newTake, "P_NAME", const_cast<char*>(selectedFMODEvent.c_str()), true);
+
+    // Update the arrangement view
+    UpdateArrange();
+
+    if (moveCursorAfterInsert) {
+        // Move the edit cursor forward to the end of the inserted item
+        SetEditCurPos(timeSelEnd, true, false);
+    }
+
+    DebugMsg("Item added within time selection from %.2f to %.2f with take name: %s\n", timeSelStart, timeSelEnd, selectedFMODEvent.c_str());
+}
+
+void UpdateNumFramesForItemInsertionFromCurrentTimeSelection() {
+    // Check if a time selection exists
+    double timeSelStart, timeSelEnd;
+    GetSet_LoopTimeRange(false, false, &timeSelStart, &timeSelEnd, false); // Retrieve the time selection
+
+    if (timeSelEnd <= timeSelStart) {
+        PostMsg("No valid time selection exists to update numFramesForItem.\n");
+        return;
+    }
+
+    // Get the frame rate
+    bool dropFrame = false;
+    double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame);
+
+    if (frameRate <= 0) {
+        PostMsg("Invalid frame rate detected.\n");
+        return;
+    }
+
+    // Calculate the time selection length in seconds
+    double timeSelectionLength = timeSelEnd - timeSelStart;
+
+    // Update numFramesForItem based on the time selection and frame rate
+    numFramesForItem = static_cast<int>(timeSelectionLength * frameRate);
+
+    // Output a message to confirm the number of frames has been updated
+    DebugMsg("numFramesForItem updated based on time selection: %d frames (%.2f seconds)\n", numFramesForItem, timeSelectionLength);
+}
+
 
 // Function to stop all FMOD events
 void StopAllEvents() {
@@ -609,6 +688,7 @@ void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
 
         CopyToClipboard(adjustedEventPath);  // Copy the adjusted path to the clipboard
     }
+
 }
 
 void CheckMarkers(double playPosition) {
@@ -941,283 +1021,44 @@ void UpdateTrackCache() {
     }
 }
 
-void PostFMODEventParameters() {
-    if (selectedFMODEvent.empty()) {
-        PostMsg("No FMOD event selected.\n");
-        return;
-    }
-
-    // Get the event description for the selected event
-    FMOD::Studio::EventDescription* eventDescription = nullptr;
-    FMOD_RESULT result = fmod_system->getEvent(selectedFMODEvent.c_str(), &eventDescription);
-    
-    if (result != FMOD_OK || !eventDescription) {
-        PostMsg("Failed to get event description for event: %s\n", selectedFMODEvent.c_str());
-        return;
-    }
-
-    // Get the number of parameters for the event
-    int parameterCount = 0;
-    result = eventDescription->getParameterDescriptionCount(&parameterCount);
-    
-    if (result != FMOD_OK || parameterCount == 0) {
-        PostMsg("No parameters found for the event: %s\n", selectedFMODEvent.c_str());
-        return;
-    }
-
-    // Iterate through each parameter and post its details to the console
-    for (int i = 0; i < parameterCount; ++i) {
-        FMOD_STUDIO_PARAMETER_DESCRIPTION paramDesc;
-        result = eventDescription->getParameterDescriptionByIndex(i, &paramDesc);
-        
-        if (result != FMOD_OK) {
-            PostMsg("Failed to retrieve parameter %d for event: %s\n", i, selectedFMODEvent.c_str());
-            continue;
-        }
-
-        // Display the parameter name and default value
-        PostMsg("Parameter %d: %s (Min: %.2f, Max: %.2f, Default: %.2f)\n",
-                i, paramDesc.name, paramDesc.minimum, paramDesc.maximum, paramDesc.defaultvalue);
-    }
-}
-
-// Utility function to remove the first '/' and replace any subsequent '/' with '-'
-std::string SanitizeFileName(const std::string& eventPath) {
-    std::string sanitized = eventPath;
-
-    // Remove the first occurrence of '/'
-    size_t firstSlashPos = sanitized.find('/');
-    if (firstSlashPos != std::string::npos) {
-        sanitized.erase(firstSlashPos, 1);  // Remove the first '/'
-    }
-
-    // Replace all remaining '/' with '-'
-    std::replace(sanitized.begin(), sanitized.end(), '/', '-');
-
-    return sanitized;
-}
-
-void InsertReaMODParameterControlJSFXforSelectedEventOnSelectedTrack() {
-    if (selectedFMODEvent.empty()) {
-        PostMsg("No FMOD event selected.\n");
-        return;
-    }
-
-    // Get the event description for the selected event
-    FMOD::Studio::EventDescription* eventDescription = nullptr;
-    FMOD_RESULT result = fmod_system->getEvent(selectedFMODEvent.c_str(), &eventDescription);
-
-    if (result != FMOD_OK || !eventDescription) {
-        PostMsg("Failed to get event description for event: %s\n", selectedFMODEvent.c_str());
-        return;
-    }
-
-    // Get the number of parameters for the event
-    int parameterCount = 0;
-    result = eventDescription->getParameterDescriptionCount(&parameterCount);
-
-    if (result != FMOD_OK || parameterCount == 0) {
-        PostMsg("No parameters found for the event: %s\n", selectedFMODEvent.c_str());
-        return;
-    }
-
-    // Use the FMOD event path as the JSFX description and file name
-    std::string sanitizedEventName = SanitizeFileName(StripPathPrefix(selectedFMODEvent));
-    std::string fxName = "ReaMOD Control - " + sanitizedEventName;
-    std::string jsfxContent = "desc: " + fxName + "\n\n";
-
-    // Get the selected track
-    MediaTrack* selectedTrack = GetSelectedTrack(nullptr, 0);
-    if (!selectedTrack) {
-        PostMsg("No track selected to add JSFX.\n");
-        return;
-    }
-
-    // Write JSFX slider logic
-    for (int i = 0; i < parameterCount; ++i) {
-        FMOD_STUDIO_PARAMETER_DESCRIPTION paramDesc;
-        result = eventDescription->getParameterDescriptionByIndex(i, &paramDesc);
-
-        if (result != FMOD_OK) {
-            PostMsg("Failed to retrieve parameter %d for event: %s\n", i, selectedFMODEvent.c_str());
-            continue;
-        }
-
-        // Add a slider for each FMOD parameter, using its name, range, and default value
-        jsfxContent += "slider" + std::to_string(i + 1) + ": " + 
-                        std::to_string(paramDesc.defaultvalue) + "<" +
-                        std::to_string(paramDesc.minimum) + "," +
-                        std::to_string(paramDesc.maximum) + ",0.01>" +
-                        std::string(paramDesc.name) + "\n";
-    }
-
-    jsfxContent += "\n@init\n";
-    jsfxContent += "// Initialization code\n\n";
-    jsfxContent += "@slider\n";
-    jsfxContent += "// Code for slider adjustments\n";
-
-    jsfxContent += "\n@sample\n";
-    jsfxContent += "// Sample processing code (optional)\n";
-
-    // Sanitize the event path for the JSFX file name
-    std::string sanitizedFileName = SanitizeFileName(sanitizedEventName);
-
-    // Determine the path for the JSFX file (simplified to just ReaMOD folder)
-    const char* resourcePath = GetResourcePath();
-    fs::path jsfxFolderPath = fs::path(resourcePath) / "Effects" / "ReaMOD";
-
-    // Ensure the folder exists
-    if (!fs::exists(jsfxFolderPath)) {
-        std::error_code ec;
-        fs::create_directory(jsfxFolderPath, ec);
-        if (ec) {
-            PostMsg("Failed to create ReaMOD JSFX folder: %s\n", ec.message().c_str());
-            return;
-        }
-    }
-
-    // Construct the full path for the JSFX file
-    std::string jsfxFileName = "ReaMOD Control - " + sanitizedFileName + ".jsfx";
-    fs::path jsfxFilePath = jsfxFolderPath / jsfxFileName;
-
-    // Write the JSFX file
-    std::ofstream jsfxFile(jsfxFilePath);
-    if (jsfxFile.is_open()) {
-        jsfxFile << jsfxContent;
-        jsfxFile.close();
-        PostMsg("Custom FMOD JSFX created successfully at: %s\n", jsfxFilePath.string().c_str());
-
-        // Add the JSFX to the selected track
-        int fxIndex = TrackFX_AddByName(selectedTrack, fxName.c_str(), false, 1);
-        if (fxIndex >= 0) {
-            PostMsg("Successfully added %s to the selected track.\n", jsfxFileName.c_str());
-            TrackFX_Show(selectedTrack, fxIndex, 3);  // Show the FX window
-        } else {
-            PostMsg("Failed to add JSFX to the selected track.\n");
-        }
-    } else {
-        PostMsg("Failed to create JSFX file at: %s\n", jsfxFilePath.string().c_str());
-    }
-}
-
-std::unordered_map<std::string, std::set<int>> itemTriggeredMarkers; // Map to store triggered marker indices for each item
-
 void CheckItems(double playPosition) {
-    UpdateTrackCache(); // Refresh track cache before checking items
+    UpdateTrackCache(); // Refresh the track cache before checking items
 
     double lookAheadTimeSeconds = lookAheadTimeMs / 1000.0;
     double tolerance = 0.04;
-    double earlyMarkerThreshold = 0.03;  // 30 milliseconds threshold
-
-    DebugMsg("Checking items at play position: %.2f\n", playPosition);
 
     for (const auto& pair : fmodTracks) {
         MediaTrack* track = pair.second;
         int itemCount = CountTrackMediaItems(track);
-
-        DebugMsg("Checking track with %d media items.\n", itemCount);
-
         for (int j = 0; j < itemCount; ++j) {
             MediaItem* item = GetTrackMediaItem(track, j);
             MediaItem_Take* take = GetActiveTake(item);
-            if (!take) {
-                DebugMsg("No active take found for media item %d. Skipping.\n", j);
-                continue;
-            }
+            if (!take) continue;
 
             double itemStart = *(double*)GetSetMediaItemInfo(item, "D_POSITION", nullptr);
             double itemEnd = itemStart + *(double*)GetSetMediaItemInfo(item, "D_LENGTH", nullptr);
-            double takeOffset = *(double*)GetSetMediaItemTakeInfo(take, "D_STARTOFFS", nullptr);
-            double takeRate = *(double*)GetSetMediaItemTakeInfo(take, "D_PLAYRATE", nullptr);
-
             std::string itemGUID = GetItemGUID(item);
 
-            DebugMsg("Media item %d: Start = %.2f, End = %.2f, GUID = %s\n", j, itemStart, itemEnd, itemGUID.c_str());
-
             if (playPosition < previousPlayPosition) {
-                DebugMsg("Play position moved backwards. Clearing active event instances and triggered markers.\n");
-                activeEventInstances.clear(); // Reset event instances if play position moves backwards
-                itemTriggeredMarkers.clear();  // Reset triggered markers
-            }
-
-            // Check for take markers close to the item start
-            int takeMarkerCount = GetNumTakeMarkers(take);
-            bool earlyMarkerTriggered = false;  // Flag to indicate if early marker triggered
-
-            for (int k = 0; k < takeMarkerCount; ++k) {
-                double markerPos = 0.0;
-                char markerName[512] = "";
-                int markerColor = 0;
-                int nameBufferSize = sizeof(markerName);
-
-                markerPos = GetTakeMarker(take, k, markerName, nameBufferSize, &markerColor);
-                double projectPos = itemStart + (markerPos / takeRate) - takeOffset;
-
-                if (markerPos <= earlyMarkerThreshold && !earlyMarkerTriggered) {
-                    DebugMsg("Found early marker %s at position %.2f (within 30 ms).\n", markerName, markerPos);
-
-                    // If there is an FMOD event instance or it will be created, pre-update the parameter
-                    if (activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
-                        FMOD::Studio::EventInstance* eventInstance = activeEventInstances[itemGUID].instance;
-                        float paramValue = std::stof(markerName + strlen("Note="));
-                        eventInstance->setParameterByName("Note", paramValue);
-                        fmod_system->update();
-                        DebugMsg("Pre-updated parameter 'Note' to %.2f for early marker.\n", paramValue);
-                    }
-
-                    earlyMarkerTriggered = true;  // Ensure we only process one early marker
-                }
+                activeEventInstances.clear();
             }
 
             if (itemStart <= playPosition + lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
                 if (activeEventInstances.find(itemGUID) == activeEventInstances.end()) {
                     char itemName[512] = "";
                     if (GetSetMediaItemTakeInfo_String(take, "P_NAME", itemName, false) && strstr(itemName, "event:") == itemName) {
-                        std::string eventPath = itemName + 6;  // Extract event path
-                        DebugMsg("Creating FMOD event instance for item: %s\n", eventPath.c_str());
+                        std::string eventPath = itemName + 6;
                         CreateFMODEventInstance(eventPath, item, itemStart, itemEnd);
-                    } else {
-                        DebugMsg("Item does not contain an FMOD event reference. Skipping.\n");
-                    }
-                }
-
-                // Regular take marker processing after FMOD event is triggered
-                for (int k = 0; k < takeMarkerCount; ++k) {
-                    double markerPos = 0.0;
-                    char markerName[512] = "";
-                    int markerColor = 0;
-                    int nameBufferSize = sizeof(markerName);
-
-                    markerPos = GetTakeMarker(take, k, markerName, nameBufferSize, &markerColor);
-                    double projectPos = itemStart + (markerPos / takeRate) - takeOffset;
-
-                    if (playPosition >= projectPos && itemTriggeredMarkers[itemGUID].find(k) == itemTriggeredMarkers[itemGUID].end()) {
-                        DebugMsg("Marker %s triggered at play position %.2f.\n", markerName, playPosition);
-
-                        // Update FMOD event instance with marker parameter
-                        if (activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
-                            FMOD::Studio::EventInstance* eventInstance = activeEventInstances[itemGUID].instance;
-                            float paramValue = std::stof(markerName + strlen("Note="));  // Assuming marker in form "Note=<value>"
-                            eventInstance->setParameterByName("Note", paramValue);
-                            fmod_system->update();
-                            DebugMsg("Updated parameter 'Note' to %.2f for event instance.\n", paramValue);
-
-                            // Mark marker as triggered
-                            itemTriggeredMarkers[itemGUID].insert(k);
-                        }
                     }
                 }
             } else if (playPosition > itemEnd + tolerance && activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
-                DebugMsg("Releasing FMOD event instance for item GUID: %s\n", itemGUID.c_str());
                 ReleaseFMODEventInstance(itemGUID);
-                itemTriggeredMarkers.erase(itemGUID);  // Clear triggered markers for this item when released
             }
         }
     }
 
     previousPlayPosition = playPosition;
 }
-
 
 bool trackCacheUpdatedDuringPlayback = false; // Flag to track if the cache has been updated during playback
 
@@ -1251,48 +1092,6 @@ void ReleaseAllEventInstances() {
     DebugMsg("All FMOD event instances released.\n");
 
     fmod_system->update();  // Ensure FMOD processes all the release calls
-}
-
-void MonitorJSFXSliderUpdates() {
-    // Attach to the shared memory block
-    if (gmem_attach) {
-        gmem_attach("ReaMOD_SliderMemory");
-    } else {
-        DebugMsg("gmem_attach function not available.\n");
-        return;
-    }
-
-    // Access the gmem data
-    int* gmem = gmem_get();
-    if (!gmem) {
-        DebugMsg("Failed to access gmem.\n");
-        return;
-    }
-
-    int gmem_index = 0;
-    while (gmem_index < 1024) {  // Assuming gmem is large enough, adjust as needed
-        // Read the slider index and value from gmem
-        int slider_index = gmem[gmem_index];
-        float slider_value = *(float*)&gmem[gmem_index + 1];
-        int num_sliders = gmem[gmem_index + 2];
-
-        // Convert the binary GUID in gmem to a readable string
-        char track_guid[64];
-        snprintf(track_guid, sizeof(track_guid),
-            "%08X-%04X-%04X-%04X-%012llX",
-            gmem[gmem_index + 3],               // Data1
-            gmem[gmem_index + 4] >> 16,         // Data2
-            gmem[gmem_index + 4] & 0xFFFF,      // Data3
-            gmem[gmem_index + 5] >> 16,         // First 2 bytes of Data4
-            ((uint64_t)(gmem[gmem_index + 5] & 0xFFFF) << 32) | // Remaining 6 bytes of Data4
-            ((uint64_t)gmem[gmem_index + 6] << 16) |
-            (uint64_t)gmem[gmem_index + 7]);
-
-        // Report changes via DebugMsg
-        DebugMsg("Track GUID: %s | Slider %d changed: Value = %.2f\n", track_guid, slider_index, slider_value);
-
-        gmem_index += 8;  // Move to the next set (adjust based on actual size needed)
-    }
 }
 
 void MonitorPlayback() {
@@ -1334,9 +1133,6 @@ void MonitorPlayback() {
 
         // Check items on tracks named "FMOD" or "fmod" for event or snapshot notes
         CheckItems(playPosition);
-
-        // Check for JSFX Parameter Updates
-        // MonitorJSFXSliderUpdates();
 
     } else if (previousPlayState & 1) {  // REAPER was playing but now 
         ReleaseAllEventInstances();  // Release all unreleased FMOD event instances
@@ -1650,84 +1446,6 @@ std::string RemoveBankExtension(const std::string& filename) {
     return filename;  // Return original if no ".bank" extension is found
 }
 
-std::string GetConfigFilePath() {
-    // Get Reaper's resource path
-    const char* resourcePath = GetResourcePath();
-
-    // Construct the ReaMOD folder path
-    fs::path reaMODFolderPath = fs::path(resourcePath) / "ReaMOD";
-
-    // Check if the ReaMOD folder exists, and create it if necessary
-    if (!fs::exists(reaMODFolderPath)) {
-        std::error_code ec;
-        bool created = fs::create_directory(reaMODFolderPath, ec);
-        if (!created || ec) {
-            DebugMsg("Failed to create ReaMOD folder: %s\n", ec.message().c_str());
-            return "";  // Return an empty string if folder creation failed
-        }
-    }
-
-    // Append the config file name to the ReaMOD folder path
-    std::string configFilePath = (reaMODFolderPath / "reaMOD_config.txt").string();
-    return configFilePath;
-}
-
-void CheckJSFxFolderPath() {
-    // Get Reaper's resource path
-    const char* resourcePath = GetResourcePath();
-
-    // Construct the full path to the "ReaMOD" folder inside the "Effects" subdirectory
-    fs::path reaMODFolderPath = fs::path(resourcePath) / "Effects" / "ReaMOD";
-
-    // Check if the "ReaMOD" folder exists
-    if (fs::exists(reaMODFolderPath)) {
-        if (fs::is_directory(reaMODFolderPath)) {
-            DebugMsg("ReaMOD folder already exists at: %s\n", reaMODFolderPath.string().c_str());
-        } else {
-            DebugMsg("A file named 'ReaMOD' exists, but it is not a directory. Please check the folder.\n");
-            return;  // Do not proceed if it's not a directory
-        }
-    } else {
-        // Create the "ReaMOD" folder if it doesn't exist
-        std::error_code ec;
-        bool created = fs::create_directory(reaMODFolderPath, ec);
-        if (created && !ec) {
-            DebugMsg("Successfully created ReaMOD folder at: %s\n", reaMODFolderPath.string().c_str());
-        } else {
-            DebugMsg("Failed to create ReaMOD folder. Error: %s\n", ec.message().c_str());
-            return;
-        }
-    }
-
-    // Set jsfx_folder_path to point to the "ReaMOD" folder
-    std::string newPath = reaMODFolderPath.string();
-    std::strncpy(jsfx_folder_path, newPath.c_str(), FILE_PATH_BUFFER_SIZE - 1);
-    jsfx_folder_path[FILE_PATH_BUFFER_SIZE - 1] = '\0';  // Ensure null-termination
-
-    DebugMsg("jsfx_folder_path automatically set to: %s\n", jsfx_folder_path);
-}
-
-void CheckConfigFilePath() {
-    std::string configFilePath = GetConfigFilePath();
-    if (!fs::exists(configFilePath)) {
-        DebugMsg("Config file does not exist, creating reaMOD_config.txt...\n");
-        std::ofstream configFile(configFilePath);
-        if (configFile.is_open()) {
-            configFile << "";  // Write an empty config file
-            configFile.close();
-            DebugMsg("reaMOD_config.txt created successfully at: %s\n", configFilePath.c_str());
-        } else {
-            DebugMsg("Failed to create reaMOD_config.txt at: %s\n", configFilePath.c_str());
-        }
-    }
-}
-
-void InitializeReaMOD() {
-    CheckConfigFilePath();
-    CheckJSFxFolderPath();
-}
-
-
 void RenderGUI() {
     ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
@@ -1934,8 +1652,6 @@ void toggleReaMODWindow() {
         ImGui::init(plugin_getapi);
         reaMOD_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
 
-        InitializeReaMOD();
-
         // Initialize FMOD only if it's not already initialized
         if (!IsFMODInitialized()) {
             InitializeFMOD();  // Initialize the FMOD system
@@ -1966,16 +1682,20 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         toggleReaMODWindow();
         return true;
     }
-    if (command == actionIdAddMarkerWithLastFMODEvent) {
-        AddMarkerWithSelectedFMODEvent();
+    if (command == actionIdAddMarkerWithSelectedEvent) {
+        AddMarkerWithSelectedEvent();
         return true;
     }
-    if (command == actionIdAddItemWithLastFMODEvent) {
-        AddItemWithSelectedFMODEvent();
+    if (command == actionIdAddItemWithSelectedEventAtEditCursor) {
+        AddItemWithSelectedEventAtEditCursor();
         return true;
     }
-    if (command == actionIdInsertFMODAutomationLane) {
-        InsertReaMODParameterControlJSFXforSelectedEventOnSelectedTrack();
+    if (command == actionIdAddItemWithSelectedEventWithinTimeSelection) {
+        AddItemWithSelectedEventWithinTimeSelection();
+        return true;
+    }
+    if (command == actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection) {
+        UpdateNumFramesForItemInsertionFromCurrentTimeSelection();
         return true;
     }
 
@@ -1989,17 +1709,21 @@ void RegisterActions() {
     static custom_action_register_t actionOpenReaMODWindowReg = { 0, "ReaMOD_OpenCloseReaMODWindow", "ReaMOD: Open/Close Window" };
     actionIdOpenCloseReaMODWindow = plugin_register("custom_action", &actionOpenReaMODWindowReg);  // Assign the action ID to actionIdOpenCloseReaMODWindow
 
-    // Register the new custom action for adding a marker with the last FMOD event
+    // Register the new custom action for adding a marker with the selected event at edit cursor
     static custom_action_register_t actionAddMarkerWithLastFMODEventReg = { 0, "ReaMOD_AddMarkerWithLastFMODEvent", "ReaMOD: Add Marker with Last FMOD Event" };
-    actionIdAddMarkerWithLastFMODEvent = plugin_register("custom_action", &actionAddMarkerWithLastFMODEventReg);
+    actionIdAddMarkerWithSelectedEvent = plugin_register("custom_action", &actionAddMarkerWithLastFMODEventReg);
 
-    // Register the new custom action for adding a marker with the last FMOD event
-    static custom_action_register_t actionAddItemWithLastFMODEvent = { 0, "ReaMOD_AddItemWithLastFMODEvent", "ReaMOD: Add Empty Item with Last FMOD Event" };
-    actionIdAddItemWithLastFMODEvent = plugin_register("custom_action", &actionAddItemWithLastFMODEvent);
+    // Register the new custom action for adding a item with the selected event at edit cursor
+    static custom_action_register_t actionAddItemWithLastFMODEvent = { 0, "ReaMOD_AddItemWithLastFMODEvent", "ReaMOD: Add Item with selected event at edit cursor" };
+    actionIdAddItemWithSelectedEventAtEditCursor = plugin_register("custom_action", &actionAddItemWithLastFMODEvent);
 
-    // Register the new custom action for inserting FMOD automation lane
-    static custom_action_register_t actionInsertFMODAutomationLaneReg = { 0, "ReaMOD_InsertParameterControlJSFX", "ReaMOD: Insert ReaMOD Parameter Control JSFX for Selected FMOD Event on Selected Track." };
-    actionIdInsertFMODAutomationLane = plugin_register("custom_action", &actionInsertFMODAutomationLaneReg);  // Correct struct usage
+    // Register the new custom action for adding a item with the selected event within the current time selection
+    static custom_action_register_t actionAddItemWithSelectedEventWithinTimeSelection = { 0, "ReaMOD_actionAddItemWithSelectedEventWithinTimeSelection", "ReaMOD: Add Item with selected event within current time selection" };
+    actionIdAddItemWithSelectedEventWithinTimeSelection = plugin_register("custom_action", &actionAddItemWithSelectedEventWithinTimeSelection);
+
+    // Register the new custom action for updating the item insertion length based upon the current time selection
+    static custom_action_register_t actionUpdateNumFramesForItemInsertionFromCurrentTimeSelection = { 0, "ReaMOD_actionUpdateNumFramesForItemInsertionFromCurrentTimeSelection", "ReaMOD: Update number of frames for item insertion from current time selection" };
+    actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = plugin_register("custom_action", &actionUpdateNumFramesForItemInsertionFromCurrentTimeSelection);
 }
 
 // Entry point function for the Reaper plugin
