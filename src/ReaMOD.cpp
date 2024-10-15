@@ -98,6 +98,9 @@ struct ParameterInfo {
 
 // Declare a global vector to store parameters of the selected event
 std::vector<ParameterInfo> selectedEventParameters;
+// Map to store cached parameters for each event
+std::unordered_map<std::string, std::vector<ParameterInfo>> eventParameterCache;
+
 
 // Define the EventInstanceData struct
 struct EventInstanceData {
@@ -735,6 +738,15 @@ void PlayButtonEvent(const std::string& eventPath) {
     if (eventDesc) {
         FMOD::Studio::EventInstance* eventInstance = nullptr;
         eventDesc->createInstance(&eventInstance);
+
+        // Apply cached parameter values
+        auto it = eventParameterCache.find(eventPath);
+        if (it != eventParameterCache.end()) {
+            for (const auto& param : it->second) {
+                eventInstance->setParameterByName(param.name.c_str(), param.currentValue);
+            }
+        }
+
         eventInstance->start();
         playButtonEventInstances[eventPath] = eventInstance;
     }
@@ -752,13 +764,20 @@ void StopButtonEvent(const std::string& eventPath) {
 }
 
 void UpdateSelectedEventParameters() {
-    // Clear the existing parameters
-    selectedEventParameters.clear();
-
     if (selectedFMODEvent.empty()) {
+        selectedEventParameters.clear(); // Clear if no event is selected
         return;
     }
 
+    // Check if parameters are already cached for this event
+    auto it = eventParameterCache.find(selectedFMODEvent);
+    if (it != eventParameterCache.end()) {
+        // Use cached parameters
+        selectedEventParameters = it->second;
+        return;
+    }
+
+    // Else, load parameters from FMOD and cache them
     FMOD::Studio::EventDescription* eventDesc = nullptr;
     FMOD_RESULT result = fmod_system->getEvent(selectedFMODEvent.c_str(), &eventDesc);
     if (result != FMOD_OK || !eventDesc) {
@@ -767,16 +786,15 @@ void UpdateSelectedEventParameters() {
     }
 
     int paramCount = 0;
-    // Use getParameterDescriptionCount instead
     result = eventDesc->getParameterDescriptionCount(&paramCount);
     if (result != FMOD_OK) {
         DebugMsg("Failed to get parameter description count for event: %s\n", selectedFMODEvent.c_str());
         return;
     }
 
+    selectedEventParameters.clear(); // Clear existing parameters
     for (int i = 0; i < paramCount; ++i) {
         FMOD_STUDIO_PARAMETER_DESCRIPTION paramDesc;
-        // Use getParameterDescriptionByIndex instead
         result = eventDesc->getParameterDescriptionByIndex(i, &paramDesc);
         if (result != FMOD_OK) {
             DebugMsg("Failed to get parameter description by index %d for event: %s\n", i, selectedFMODEvent.c_str());
@@ -793,6 +811,9 @@ void UpdateSelectedEventParameters() {
 
         selectedEventParameters.push_back(paramInfo);
     }
+
+    // Cache the parameters
+    eventParameterCache[selectedFMODEvent] = selectedEventParameters;
 }
 
 // Use the ReaImGui MouseButton_Right enum or value
@@ -1925,23 +1946,33 @@ void RenderGUI() {
             // Display sliders for the event's parameters using SliderDouble
             for (auto& param : selectedEventParameters) {
                 float previousValue = param.currentValue;
-        
+            
                 double doubleValue = static_cast<double>(param.currentValue);
                 double doubleMin = static_cast<double>(param.minValue);
                 double doubleMax = static_cast<double>(param.maxValue);
-        
+            
                 // Use SliderDouble to create a slider for the parameter
                 if (ImGui::SliderDouble(reaMOD_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax)) {
                     // Update the currentValue with the new value from the slider
                     param.currentValue = static_cast<float>(doubleValue);
-        
+            
                     // Update the parameter value in the event instance if it exists and the value has changed
                     if (previousValue != param.currentValue && eventInstance) {
                         eventInstance->setParameterByName(param.name.c_str(), param.currentValue);
                         fmod_system->update();
                     }
+            
+                    // Update the cached parameter value
+                    auto& cachedParams = eventParameterCache[selectedFMODEvent];
+                    for (auto& cachedParam : cachedParams) {
+                        if (cachedParam.name == param.name) {
+                            cachedParam.currentValue = param.currentValue;
+                            break;
+                        }
+                    }
                 }
             }
+
         }
 
 
