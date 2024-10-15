@@ -57,7 +57,7 @@ std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map o
 std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
 std::unordered_map<MediaItem*, bool> triggeredItems; // Global variable to store whether an item has already triggered
 
-std::string selectedFMODEvent = "";  // Global or static variable to store the selected event
+std::string selectedFMODEvent = "No event selected";  // Global or static variable to store the selected event
 
 // Global variables to track playback
 double previousPlayPosition = 0.0;
@@ -72,6 +72,8 @@ std::unordered_map<int, std::function<void()>> taskMap;
 int nextTaskId = 0;
 int guiTaskId = -1;
 int playbackTaskId = -1;
+int itemSelectionTaskId = -1;
+
 
 // Global variable to store the last triggered FMOD event path
 std::string lastTriggeredFMODEvent;
@@ -82,6 +84,8 @@ std::string formattedLastSaveTimestamp; // Holds the formatted "Last Save" text
 int numFramesForItem = 10; // Default number of frames for the inserted item
 bool moveCursorAfterInsert = true; // Default to true, meaning the cursor moves forward by default
 bool updateItemInsertionLength = true; 
+bool syncSelectedEventWithItemSelection = true;
+MediaItem* lastSelectedItem = nullptr;
 
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
@@ -150,6 +154,7 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         AddTakeToMediaItem = reinterpret_cast<decltype(AddTakeToMediaItem)>(rec->GetFunc("AddTakeToMediaItem"));
         GetSet_LoopTimeRange = reinterpret_cast<decltype(GetSet_LoopTimeRange)>(rec->GetFunc("GetSet_LoopTimeRange")); // Load GetSet_LoopTimeRange
         GetSelectedMediaItem = reinterpret_cast<decltype(GetSelectedMediaItem)>(rec->GetFunc("GetSelectedMediaItem"));
+        CountSelectedMediaItems = reinterpret_cast<decltype(CountSelectedMediaItems)>(rec->GetFunc("CountSelectedMediaItems"));
     }
 }
 
@@ -1789,6 +1794,7 @@ void RenderGUI() {
         if (ImGui::Button(reaMOD_ImGui_Context, "Load")) {
             LoadStateDialog();
         }
+        ImGui::Text(reaMOD_ImGui_Context, "");
 
         ImGui::Separator(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context, "FMOD Project:");
@@ -1800,6 +1806,7 @@ void RenderGUI() {
 
         ImGui::SameLine(reaMOD_ImGui_Context);  // Put the file name on the same line as the button
         ImGui::Text(reaMOD_ImGui_Context, selected_file_name);
+        ImGui::Text(reaMOD_ImGui_Context, "");
 
         // List the .bank files found in the "Build/Desktop/" directory
         if (!bank_files.empty()) {
@@ -1920,62 +1927,61 @@ void RenderGUI() {
                 }
             }
         }
+        ImGui::Text(reaMOD_ImGui_Context, "");
 
         // New section for selected event and parameters
-        if (!selectedFMODEvent.empty()) {
-            ImGui::Separator(reaMOD_ImGui_Context);
-            ImGui::Text(reaMOD_ImGui_Context, "Selected Event:");
+        ImGui::Separator(reaMOD_ImGui_Context);
+        ImGui::Text(reaMOD_ImGui_Context, "Selected Event:");
+    
+        // Display the selected event name
+        // ImGui::Text(reaMOD_ImGui_Context, selectedFMODEvent.c_str());
+    
+        // Render the play button
+        std::string play_button_label = "Play##SelectedEvent";
+        RenderPlayButton(reaMOD_ImGui_Context, play_button_label, selectedFMODEvent);
+        ImGui::SameLine(reaMOD_ImGui_Context);
+        // Display the selected event name
+        ImGui::Text(reaMOD_ImGui_Context, selectedFMODEvent.c_str());
+    
+        // Get the event instance for the selected event
+        FMOD::Studio::EventInstance* eventInstance = nullptr;
+        auto it = playButtonEventInstances.find(selectedFMODEvent);
+        if (it != playButtonEventInstances.end()) {
+            eventInstance = it->second;
+        }
+    
+        // Display sliders for the event's parameters using SliderDouble
+        for (auto& param : selectedEventParameters) {
+            float previousValue = param.currentValue;
         
-            // Display the selected event name
-            // ImGui::Text(reaMOD_ImGui_Context, selectedFMODEvent.c_str());
+            double doubleValue = static_cast<double>(param.currentValue);
+            double doubleMin = static_cast<double>(param.minValue);
+            double doubleMax = static_cast<double>(param.maxValue);
         
-            // Render the play button
-            std::string play_button_label = "Play##SelectedEvent";
-            RenderPlayButton(reaMOD_ImGui_Context, play_button_label, selectedFMODEvent);
-            ImGui::SameLine(reaMOD_ImGui_Context);
-            // Display the selected event name
-            ImGui::Text(reaMOD_ImGui_Context, selectedFMODEvent.c_str());
+            // Use SliderDouble to create a slider for the parameter
+            if (ImGui::SliderDouble(reaMOD_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax)) {
+                // Update the currentValue with the new value from the slider
+                param.currentValue = static_cast<float>(doubleValue);
         
-            // Get the event instance for the selected event
-            FMOD::Studio::EventInstance* eventInstance = nullptr;
-            auto it = playButtonEventInstances.find(selectedFMODEvent);
-            if (it != playButtonEventInstances.end()) {
-                eventInstance = it->second;
-            }
+                // Update the parameter value in the event instance if it exists and the value has changed
+                if (previousValue != param.currentValue && eventInstance) {
+                    eventInstance->setParameterByName(param.name.c_str(), param.currentValue);
+                    fmod_system->update();
+                }
         
-            // Display sliders for the event's parameters using SliderDouble
-            for (auto& param : selectedEventParameters) {
-                float previousValue = param.currentValue;
-            
-                double doubleValue = static_cast<double>(param.currentValue);
-                double doubleMin = static_cast<double>(param.minValue);
-                double doubleMax = static_cast<double>(param.maxValue);
-            
-                // Use SliderDouble to create a slider for the parameter
-                if (ImGui::SliderDouble(reaMOD_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax)) {
-                    // Update the currentValue with the new value from the slider
-                    param.currentValue = static_cast<float>(doubleValue);
-            
-                    // Update the parameter value in the event instance if it exists and the value has changed
-                    if (previousValue != param.currentValue && eventInstance) {
-                        eventInstance->setParameterByName(param.name.c_str(), param.currentValue);
-                        fmod_system->update();
-                    }
-            
-                    // Update the cached parameter value
-                    auto& cachedParams = eventParameterCache[selectedFMODEvent];
-                    for (auto& cachedParam : cachedParams) {
-                        if (cachedParam.name == param.name) {
-                            cachedParam.currentValue = param.currentValue;
-                            break;
-                        }
+                // Update the cached parameter value
+                auto& cachedParams = eventParameterCache[selectedFMODEvent];
+                for (auto& cachedParam : cachedParams) {
+                    if (cachedParam.name == param.name) {
+                        cachedParam.currentValue = param.currentValue;
+                        break;
                     }
                 }
             }
-
         }
 
-
+        ImGui::Checkbox(reaMOD_ImGui_Context, "Sync with selected item", &syncSelectedEventWithItemSelection);
+        ImGui::Text(reaMOD_ImGui_Context, "");
 
         ImGui::Separator(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context, "Settings:");
@@ -1995,6 +2001,7 @@ void RenderGUI() {
         // Add the checkbox for moving the cursor after inserting an item
         ImGui::Checkbox(reaMOD_ImGui_Context, "Move edit to end of inserted item.", &moveCursorAfterInsert);
         ImGui::Checkbox(reaMOD_ImGui_Context, "Update item length from last time-selection insert.", &updateItemInsertionLength);
+        ImGui::Text(reaMOD_ImGui_Context, "");
 
         ImGui::Separator(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context, "ReaMOD v0.1");
@@ -2110,6 +2117,114 @@ void MonitorPlayback() {
     UpdateEventPlayStates();
 }
 
+void MonitorItemSelection() {
+    DebugMsg("MonitorItemSelection called.\n");
+
+    if (!syncSelectedEventWithItemSelection) {
+        DebugMsg("Sync with selected item is disabled.\n");
+        lastSelectedItem = nullptr; // Reset if not syncing
+        return;
+    }
+
+    int numSelectedItems = CountSelectedMediaItems(nullptr);
+    DebugMsg("Number of selected items: %d\n", numSelectedItems);
+
+    if (numSelectedItems != 1) {
+        DebugMsg("Not exactly one item is selected. Resetting lastSelectedItem.\n");
+        lastSelectedItem = nullptr; // Reset if not exactly one item is selected
+        return;
+    }
+
+    MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0);
+    if (selectedItem != lastSelectedItem) {
+        DebugMsg("Selected item has changed.\n");
+        lastSelectedItem = selectedItem; // Update the last selected item
+
+        // Get the active take
+        MediaItem_Take* take = GetActiveTake(selectedItem);
+        if (!take) {
+            DebugMsg("Selected item has no active take. Exiting.\n");
+            return;
+        }
+
+        // Get the take name
+        char takeName[512] = "";
+        GetSetMediaItemTakeInfo_String(take, "P_NAME", takeName, false);
+        std::string takeNameStr(takeName);
+        DebugMsg("Active take name: %s\n", takeNameStr.c_str());
+
+        // Check if the take name starts with "event:"
+        if (takeNameStr.find("event:") == 0) {
+            DebugMsg("Take name starts with 'event:'. Setting selected FMOD event.\n");
+
+            // Set the selected event
+            selectedFMODEvent = takeNameStr;
+            UpdateSelectedEventParameters();
+
+            // Parse item notes for parameter values
+            char itemNotes[4096] = "";
+            bool hasNotes = GetSetMediaItemInfo_String(selectedItem, "P_NOTES", itemNotes, false);
+
+            if (hasNotes && strlen(itemNotes) > 0) {
+                DebugMsg("Item has notes: %s\n", itemNotes);
+
+                std::vector<std::string> noteLines = SplitString(itemNotes, "\n");
+                for (const std::string& line : noteLines) {
+                    DebugMsg("Processing note line: %s\n", line.c_str());
+
+                    if (line.rfind("param:", 0) == 0) {
+                        size_t equalPos = line.find('=');
+                        if (equalPos != std::string::npos) {
+                            std::string paramName = line.substr(6, equalPos - 6); // Get parameter name
+                            std::string paramValueStr = line.substr(equalPos + 1); // Get parameter value
+                            DebugMsg("Found parameter: %s with value: %s\n", paramName.c_str(), paramValueStr.c_str());
+
+                            try {
+                                float paramValue = std::stof(paramValueStr); // Convert value to float
+                                bool paramFound = false;
+
+                                // Update the matching parameter in selectedEventParameters
+                                for (auto& param : selectedEventParameters) {
+                                    if (param.name == paramName) {
+                                        DebugMsg("Updating parameter '%s' currentValue to %f\n", paramName.c_str(), paramValue);
+                                        param.currentValue = paramValue;
+
+                                        // Also update the cached parameter value
+                                        auto& cachedParams = eventParameterCache[selectedFMODEvent];
+                                        for (auto& cachedParam : cachedParams) {
+                                            if (cachedParam.name == paramName) {
+                                                cachedParam.currentValue = paramValue;
+                                                DebugMsg("Updated cached parameter '%s' currentValue to %f\n", paramName.c_str(), paramValue);
+                                                break;
+                                            }
+                                        }
+                                        paramFound = true;
+                                        break;
+                                    }
+                                }
+
+                                if (!paramFound) {
+                                    DebugMsg("Parameter '%s' not found in selectedEventParameters.\n", paramName.c_str());
+                                }
+                            } catch (const std::exception& e) {
+                                DebugMsg("Error parsing parameter value in item notes: %s\n", e.what());
+                            }
+                        } else {
+                            DebugMsg("No '=' found in parameter line: %s\n", line.c_str());
+                        }
+                    } else {
+                        DebugMsg("Line does not start with 'param:': %s\n", line.c_str());
+                    }
+                }
+            } else {
+                DebugMsg("Item has no notes or failed to retrieve notes.\n");
+            }
+        } else {
+            DebugMsg("Active take name does not start with 'event:'.\n");
+        }
+    }
+}
+
 // Add task and return its ID
 int AddTask(std::function<void()> task) {
     int taskId = nextTaskId++;
@@ -2153,7 +2268,6 @@ void AutoLoadReaMODFile() {
 
 void toggleReaMODWindow() {
     if (!reaMOD_ImGui_Context) {
-
         // First-time setup: initialize ReaImGui and FMOD, and start rendering
         ImGui::init(plugin_getapi);
         reaMOD_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
@@ -2167,19 +2281,29 @@ void toggleReaMODWindow() {
         // Add the GUI rendering task and store its ID
         guiTaskId = AddTask(RenderGUI);
 
+        // Add the item selection monitoring task
+        itemSelectionTaskId = AddTask(MonitorItemSelection);
+
         // Attempt to auto-load a .ReaMOD file if present
         AutoLoadReaMODFile();
 
     } else {
         // Remove the GUI rendering task if the window is closed
-        if (guiTaskId != -1) {  // Ensure the task ID is valid
+        if (guiTaskId != -1) {
             RemoveTask(guiTaskId);
-            guiTaskId = -1;  // Invalidate the task ID after removal
+            guiTaskId = -1;
+        }
+
+        // Remove the item selection monitoring task
+        if (itemSelectionTaskId != -1) {
+            RemoveTask(itemSelectionTaskId);
+            itemSelectionTaskId = -1;
         }
 
         reaMOD_ImGui_Context = nullptr;
     }
 }
+
 
 // Command hook function for Reaper custom action
 static bool commandHook(KbdSectionInfo *sec, const int command, const int val, const int valhw, const int relmode, HWND hwnd) {
