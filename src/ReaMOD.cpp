@@ -86,37 +86,25 @@ bool updateItemInsertionLength = true;
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
 
-// Map to store the FMOD event instances and their lifecycle
+// Define the ParameterInfo struct
+struct ParameterInfo {
+    std::string name;
+    FMOD_STUDIO_PARAMETER_ID id;
+    float minValue;
+    float maxValue;
+    float defaultValue;
+    float currentValue;
+};
+
+// Declare a global vector to store parameters of the selected event
+std::vector<ParameterInfo> selectedEventParameters;
+
+// Define the EventInstanceData struct
 struct EventInstanceData {
     FMOD::Studio::EventInstance* instance;
     double startPosition;
     double endPosition;
 };
-
-// Define ImVec2 (2D Vector)
-struct ImVec2 {
-    float x, y;
-    
-    ImVec2() : x(0.0f), y(0.0f) {}
-    ImVec2(float _x, float _y) : x(_x), y(_y) {}
-};
-
-// Define ImVec3 (3D Vector)
-struct ImVec3 {
-    float x, y, z;
-
-    ImVec3() : x(0.0f), y(0.0f), z(0.0f) {}
-    ImVec3(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
-};
-
-// Define ImVec4 (4D Vector)
-struct ImVec4 {
-    float x, y, z, w;
-
-    ImVec4() : x(0.0f), y(0.0f), z(0.0f), w(0.0f) {}
-    ImVec4(float _x, float _y, float _z, float _w) : x(_x), y(_y), z(_z), w(_w) {}
-};
-
 
 std::unordered_map<std::string, EventInstanceData> activeEventInstances;
 
@@ -745,6 +733,50 @@ void StopButtonEvent(const std::string& eventPath) {
     fmod_system->update();
 }
 
+void UpdateSelectedEventParameters() {
+    // Clear the existing parameters
+    selectedEventParameters.clear();
+
+    if (selectedFMODEvent.empty()) {
+        return;
+    }
+
+    FMOD::Studio::EventDescription* eventDesc = nullptr;
+    FMOD_RESULT result = fmod_system->getEvent(selectedFMODEvent.c_str(), &eventDesc);
+    if (result != FMOD_OK || !eventDesc) {
+        DebugMsg("Failed to get EventDescription for event: %s\n", selectedFMODEvent.c_str());
+        return;
+    }
+
+    int paramCount = 0;
+    // Use getParameterDescriptionCount instead
+    result = eventDesc->getParameterDescriptionCount(&paramCount);
+    if (result != FMOD_OK) {
+        DebugMsg("Failed to get parameter description count for event: %s\n", selectedFMODEvent.c_str());
+        return;
+    }
+
+    for (int i = 0; i < paramCount; ++i) {
+        FMOD_STUDIO_PARAMETER_DESCRIPTION paramDesc;
+        // Use getParameterDescriptionByIndex instead
+        result = eventDesc->getParameterDescriptionByIndex(i, &paramDesc);
+        if (result != FMOD_OK) {
+            DebugMsg("Failed to get parameter description by index %d for event: %s\n", i, selectedFMODEvent.c_str());
+            continue;
+        }
+
+        ParameterInfo paramInfo;
+        paramInfo.name = paramDesc.name;
+        paramInfo.id = paramDesc.id;
+        paramInfo.minValue = paramDesc.minimum;
+        paramInfo.maxValue = paramDesc.maximum;
+        paramInfo.defaultValue = paramDesc.defaultvalue;
+        paramInfo.currentValue = paramDesc.defaultvalue; // Initialize to default value
+
+        selectedEventParameters.push_back(paramInfo);
+    }
+}
+
 // Use the ReaImGui MouseButton_Right enum or value
 const int RightMouseButton = ImGui::MouseButton_Right;
 
@@ -778,6 +810,7 @@ bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
 
         // Update the selected event when the play button is clicked
         selectedFMODEvent = event_path;
+        UpdateSelectedEventParameters(); // Call this function here
 
         // Trigger or release the FMOD event
         if (is_active) {
@@ -794,7 +827,6 @@ bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
 
     return is_active;
 }
-
 
 void CheckMarkers(double playPosition) {
     if (CountProjectMarkers == nullptr || EnumProjectMarkers == nullptr) {
@@ -1748,13 +1780,14 @@ void RenderGUI() {
                                             RenderPlayButton(reaMOD_ImGui_Context, event_label, event_pair.second);
 
                                             ImGui::SameLine(reaMOD_ImGui_Context);  // Keep play button on the same line
-                                            
+
                                             // Highlight the selected event
                                             bool isSelected = (selectedFMODEvent == event_pair.second);
 
                                             // Pass the address of isSelected to ImGui::Selectable
                                             if (ImGui::Selectable(reaMOD_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
                                                 selectedFMODEvent = event_pair.second;  // Update selected event
+                                                UpdateSelectedEventParameters();        // Call this function here
                                                 DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
                                             }
                                         }
@@ -1772,13 +1805,14 @@ void RenderGUI() {
                                                 RenderPlayButton(reaMOD_ImGui_Context, event_label, event_pair.second);
 
                                                 ImGui::SameLine(reaMOD_ImGui_Context);  // Keep play button on the same line
-                                            
+
                                                 // Highlight the selected event
                                                 bool isSelected = (selectedFMODEvent == event_pair.second);
 
                                                 // Pass the address of isSelected to ImGui::Selectable
                                                 if (ImGui::Selectable(reaMOD_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
                                                     selectedFMODEvent = event_pair.second;  // Update selected event
+                                                    UpdateSelectedEventParameters();        // Call this function here
                                                     DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
                                                 }
                                             }
@@ -1814,11 +1848,58 @@ void RenderGUI() {
                     // Pass the address of isSelected to ImGui::Selectable
                     if (ImGui::Selectable(reaMOD_ImGui_Context, event_path.c_str(), &isSelected)) {
                         selectedFMODEvent = event_path;  // Update selected event
+                        UpdateSelectedEventParameters(); // Call this function here
                         DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
                     }
                 }
             }
         }
+
+        // New section for selected event and parameters
+        if (!selectedFMODEvent.empty()) {
+            ImGui::Separator(reaMOD_ImGui_Context);
+            ImGui::Text(reaMOD_ImGui_Context, "Selected Event:");
+        
+            // Display the selected event name
+            // ImGui::Text(reaMOD_ImGui_Context, selectedFMODEvent.c_str());
+        
+            // Render the play button
+            std::string play_button_label = "Play##SelectedEvent";
+            RenderPlayButton(reaMOD_ImGui_Context, play_button_label, selectedFMODEvent);
+            ImGui::SameLine(reaMOD_ImGui_Context);
+            // Display the selected event name
+            ImGui::Text(reaMOD_ImGui_Context, selectedFMODEvent.c_str());
+        
+            // Get the event instance for the selected event
+            FMOD::Studio::EventInstance* eventInstance = nullptr;
+            auto it = playButtonEventInstances.find(selectedFMODEvent);
+            if (it != playButtonEventInstances.end()) {
+                eventInstance = it->second;
+            }
+        
+            // Display sliders for the event's parameters using SliderDouble
+            for (auto& param : selectedEventParameters) {
+                float previousValue = param.currentValue;
+        
+                double doubleValue = static_cast<double>(param.currentValue);
+                double doubleMin = static_cast<double>(param.minValue);
+                double doubleMax = static_cast<double>(param.maxValue);
+        
+                // Use SliderDouble to create a slider for the parameter
+                if (ImGui::SliderDouble(reaMOD_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax)) {
+                    // Update the currentValue with the new value from the slider
+                    param.currentValue = static_cast<float>(doubleValue);
+        
+                    // Update the parameter value in the event instance if it exists and the value has changed
+                    if (previousValue != param.currentValue && eventInstance) {
+                        eventInstance->setParameterByName(param.name.c_str(), param.currentValue);
+                        fmod_system->update();
+                    }
+                }
+            }
+        }
+
+
 
         ImGui::Separator(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context, "Settings:");
@@ -1840,8 +1921,8 @@ void RenderGUI() {
         ImGui::Checkbox(reaMOD_ImGui_Context, "Update item length from last time-selection insert.", &updateItemInsertionLength);
 
         ImGui::Separator(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context,"ReaMOD v0.1");
-        ImGui::Text(reaMOD_ImGui_Context,"Created by Daniel Dehaan");
+        ImGui::Text(reaMOD_ImGui_Context, "ReaMOD v0.1");
+        ImGui::Text(reaMOD_ImGui_Context, "Created by Daniel Dehaan");
         ImGui::Text(reaMOD_ImGui_Context, "www.danielrdehaan.com");
 
         ImGui::End(reaMOD_ImGui_Context);
