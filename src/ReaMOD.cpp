@@ -27,7 +27,7 @@
 
 #define FILE_PATH_BUFFER_SIZE 1024
 
-#define DEBUG false
+#define DEBUG true
 
 namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
 
@@ -753,56 +753,43 @@ std::unordered_map<std::string, bool> buttonStates;
 
 // Function to render a toggleable play button and trigger/release FMOD event
 bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const std::string& event_path) {
-    // Create a unique button ID for the play button
+    // Unique ID for ImGui, but use event_path for state management
     std::string unique_button_id = "##play_button_" + button_id;
 
-    // Get the current state of the button (default to false if not found)
-    bool is_active = buttonStates[button_id];
+    // Use event_path as the key for buttonStates
+    bool is_active = buttonStates[event_path];
 
     // Push button color based on its state
     if (is_active) {
-        // Active: Green colors
-        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0x32CD32FF); // Green
+        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0x32CD32FF); // Active (green)
         ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0x008000FF); // Dark green when hovered
         ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x006400FF); // Even darker green when clicked
     } else {
-        // Inactive: Grey colors
-        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0xC0C0C0FF); // Light Grey
+        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0xC0C0C0FF); // Inactive (grey)
         ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0xA9A9A9FF); // Darker grey when hovered
         ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x808080FF); // Dark grey when clicked
     }
 
-    // Render the button as an arrow button using the correct ReaImGui function
+    // Render the button
     if (ImGui::ArrowButton(ctx, unique_button_id.c_str(), ImGui::Dir_Right)) {
-        // Toggle the state (activate or deactivate)
-        buttonStates[button_id] = !is_active;
-        is_active = buttonStates[button_id];
+        // Toggle the state
+        buttonStates[event_path] = !is_active;
+        is_active = buttonStates[event_path];
 
-        // Trigger or release the FMOD event based on the button state
+        // Update the selected event when the play button is clicked
+        selectedFMODEvent = event_path;
+
+        // Trigger or release the FMOD event
         if (is_active) {
-            // If button is active, play the event
-            FMOD::Studio::EventInstance* eventInstance = nullptr;
-            PlayButtonEvent(event_path); // Store the event instance
+            PlayButtonEvent(event_path);
+            DebugMsg("Play button clicked: Event Path - %s, State: Playing\n", event_path.c_str());
         } else {
             StopButtonEvent(event_path);
+            DebugMsg("Play button clicked: Event Path - %s, State: Stopped\n", event_path.c_str());
         }
-
-        DebugMsg("Play button clicked: Event Path - %s, State: %s\n", event_path.c_str(), is_active ? "Playing" : "Stopped");
     }
 
-    // Handle right-click hover detection for clipboard copy
-    if (ImGui::IsItemHovered(ctx) && ImGui::IsMouseReleased(ctx, ImGui::MouseButton_Right)) {
-        DebugMsg("Right-click detected on event: %s\n", event_path.c_str());
-
-        // Ensure the prefix is lowercase "event:" before copying to clipboard
-        std::string adjustedEventPath = event_path;
-        if (adjustedEventPath.rfind("Event:", 0) == 0) {
-            adjustedEventPath[0] = 'e'; // Convert "Event:" to "event:"
-        }
-
-        CopyToClipboard(adjustedEventPath);  // Copy the adjusted path to the clipboard
-    }
-    // Restore previous color
+    // Pop the style colors
     ImGui::PopStyleColor(ctx, 3);
 
     return is_active;
@@ -1381,59 +1368,6 @@ void stopReleaseALLFMODEventInstances(){
     StopAllEvents();
 }
 
-void MonitorPlayback() {
-    if (!IsFMODInitialized()) {
-        DebugMsg("FMOD system is not initialized. Skipping playback monitoring.\n");
-        return;
-    }
-
-    if (GetPlayState == nullptr || GetPlayPosition == nullptr) {
-        DebugMsg("Playback state functions are not available.\n");
-        return;
-    }
-
-    int playState = GetPlayState();  // Get current playback state
-    double playPosition = GetPlayPosition();  // Get current play position
-
-    // Check if REAPER is playing or recording
-    if (playState & 1) {  // REAPER is playing
-        DebugMsg("Playback running. Current position: %.2f\n", playPosition);
-
-        // If this is the first time during this playback session, update the track cache
-        if (!trackCacheUpdatedDuringPlayback) {
-            UpdateTrackCache(); // Refresh the track cache once when playback starts
-            trackCacheUpdatedDuringPlayback = true; // Set flag to indicate cache has been updated
-        }
-
-        // If playhead moved backward (looping, scrubbing, or jump)
-        if (playPosition < previousPlayPosition) {
-            DebugMsg("Playhead moved backward. Resetting triggered markers.\n");
-            triggeredMarkers.clear();  // Clear all triggered markers to allow retriggering
-            triggeredItems.clear();    // Clear all triggered items to allow retriggering
-        }
-
-        // Update previous play position
-        previousPlayPosition = playPosition;
-
-        // Check markers and trigger FMOD events based on marker positions
-        CheckMarkers(playPosition);
-
-        // Check items on tracks named "FMOD" or "fmod" for event or snapshot notes
-        CheckItems(playPosition);
-
-    } else if (previousPlayState & 1) {  // REAPER was playing but now 
-        ReleaseAllEventInstances();  // Release all unreleased FMOD event instances
-        DebugMsg("Playback stopped. Cleaning up any lingering state.\n");
-        // triggeredMarkers.clear();  // Clear all triggered markers when playback stops
-        // triggeredItems.clear();    // Clear all triggered items when playback stops
-        // trackCacheUpdatedDuringPlayback = false; // Reset the flag when playback stops
-        // StopAllEvents();
-    }
-
-    // Update previous play state to track state changes
-    previousPlayState = playState;
-}
-
 // Function to get the current Reaper project name without the .RPP extension
 std::string GetCurrentReaperProjectName() {
     char projectFilePath[256] = {0};
@@ -1810,7 +1744,7 @@ void RenderGUI() {
                                     if (top_level_folder != folder_type.second.end()) {
                                         for (const auto& event_pair : top_level_folder->second) {
                                             // Render the play button next to the selectable event
-                                            std::string event_label = "Play##" + event_pair.second;
+                                            std::string event_label = "Play##" + event_pair.first;
                                             RenderPlayButton(reaMOD_ImGui_Context, event_label, event_pair.second);
 
                                             ImGui::SameLine(reaMOD_ImGui_Context);  // Keep play button on the same line
@@ -1917,6 +1851,96 @@ void RenderGUI() {
     if (!open) {
         reaMOD_ImGui_Context = nullptr;
     }
+}
+
+void UpdateEventPlayStates() {
+    bool stateChanged = false;
+
+    // Iterate through the event instances and update their play state
+    for (auto& [eventPath, eventInstance] : playButtonEventInstances) {
+        FMOD_STUDIO_PLAYBACK_STATE playbackState;
+        FMOD_RESULT result = eventInstance->getPlaybackState(&playbackState);
+
+        if (result != FMOD_OK) {
+            DebugMsg("Failed to get playback state for event: %s\n", eventPath.c_str());
+            continue; // Skip if the state could not be retrieved
+        }
+
+        DebugMsg("Playback state for event %s is %d\n", eventPath.c_str(), playbackState);
+
+        // Check if the playback has stopped
+        if (playbackState == 2 && buttonStates[eventPath]) {
+            DebugMsg("FMOD event triggered by play button has stopped playing.\n");
+            buttonStates[eventPath] = false;
+            stateChanged = true;
+        } 
+        // Check if playback is starting/playing and button state is false
+        else if ((playbackState == FMOD_STUDIO_PLAYBACK_PLAYING || playbackState == FMOD_STUDIO_PLAYBACK_STARTING) && !buttonStates[eventPath]) {
+            DebugMsg("FMOD event is playing but button state is not active.\n");
+            buttonStates[eventPath] = true; // Sync button state with actual playback
+            stateChanged = true;
+        }
+    }
+
+    // If any state has changed, trigger a GUI refresh
+    if (stateChanged) {
+        DebugMsg("FMOD Play Button Event State changed. Refreshing GUI...\n");
+        RenderGUI(); // Force the GUI to refresh
+    }
+}
+
+void MonitorPlayback() {
+    if (!IsFMODInitialized()) {
+        DebugMsg("FMOD system is not initialized. Skipping playback monitoring.\n");
+        return;
+    }
+
+    if (GetPlayState == nullptr || GetPlayPosition == nullptr) {
+        DebugMsg("Playback state functions are not available.\n");
+        return;
+    }
+
+    int playState = GetPlayState();  // Get current playback state
+    double playPosition = GetPlayPosition();  // Get current play position
+
+    // Check if REAPER is playing or recording
+    if (playState & 1) {  // REAPER is playing
+        DebugMsg("Playback running. Current position: %.2f\n", playPosition);
+
+        // If this is the first time during this playback session, update the track cache
+        if (!trackCacheUpdatedDuringPlayback) {
+            UpdateTrackCache(); // Refresh the track cache once when playback starts
+            trackCacheUpdatedDuringPlayback = true; // Set flag to indicate cache has been updated
+        }
+
+        // If playhead moved backward (looping, scrubbing, or jump)
+        if (playPosition < previousPlayPosition) {
+            DebugMsg("Playhead moved backward. Resetting triggered markers.\n");
+            triggeredMarkers.clear();  // Clear all triggered markers to allow retriggering
+            triggeredItems.clear();    // Clear all triggered items to allow retriggering
+        }
+
+        // Update previous play position
+        previousPlayPosition = playPosition;
+
+        // Check markers and trigger FMOD events based on marker positions
+        CheckMarkers(playPosition);
+
+        // Check items on tracks named "FMOD" or "fmod" for event or snapshot notes
+        CheckItems(playPosition);
+
+    } else if (previousPlayState & 1) {  // REAPER was playing but now 
+        ReleaseAllEventInstances();  // Release all unreleased FMOD event instances
+        DebugMsg("Playback stopped. Cleaning up any lingering state.\n");
+        // triggeredMarkers.clear();  // Clear all triggered markers when playback stops
+        // triggeredItems.clear();    // Clear all triggered items when playback stops
+        // trackCacheUpdatedDuringPlayback = false; // Reset the flag when playback stops
+        // StopAllEvents();
+    }
+
+    // Update previous play state to track state changes
+    previousPlayState = playState;
+    UpdateEventPlayStates();
 }
 
 // Add task and return its ID
