@@ -2026,24 +2026,37 @@ void MonitorPlayback() {
         return;
     }
 
-    int playState = GetPlayState();  // Get current playback state
+    int playState = GetPlayState();      // Get current playback state
     double playPosition = GetPlayPosition();  // Get current play position
 
     // Check if REAPER is playing or recording
     if (playState & 1) {  // REAPER is playing
         DebugMsg("Playback running. Current position: %.2f\n", playPosition);
 
+        // If playback has just started
+        if (!(previousPlayState & 1)) {
+            // Playback has just started
+            stopReleaseALLFMODEventInstances();  // Call the function once when playback begins
+            DebugMsg("Playback started. Stopped and released all FMOD event instances.\n");
+
+            // Reset any necessary state variables
+            triggeredMarkers.clear();            // Clear triggered markers
+            triggeredItems.clear();              // Clear triggered items
+            activeEventInstances.clear();        // Clear active event instances
+            trackCacheUpdatedDuringPlayback = false; // Reset track cache flag
+        }
+
         // If this is the first time during this playback session, update the track cache
         if (!trackCacheUpdatedDuringPlayback) {
-            UpdateTrackCache(); // Refresh the track cache once when playback starts
-            trackCacheUpdatedDuringPlayback = true; // Set flag to indicate cache has been updated
+            UpdateTrackCache();                  // Refresh the track cache once when playback starts
+            trackCacheUpdatedDuringPlayback = true;  // Set flag to indicate cache has been updated
         }
 
         // If playhead moved backward (looping, scrubbing, or jump)
         if (playPosition < previousPlayPosition) {
             DebugMsg("Playhead moved backward. Resetting triggered markers.\n");
-            triggeredMarkers.clear();  // Clear all triggered markers to allow retriggering
-            triggeredItems.clear();    // Clear all triggered items to allow retriggering
+            triggeredMarkers.clear();            // Clear all triggered markers to allow retriggering
+            triggeredItems.clear();              // Clear all triggered items to allow retriggering
         }
 
         // Update previous play position
@@ -2055,13 +2068,10 @@ void MonitorPlayback() {
         // Check items on tracks named "FMOD" or "fmod" for event or snapshot notes
         CheckItems(playPosition);
 
-    } else if (previousPlayState & 1) {  // REAPER was playing but now 
-        ReleaseAllEventInstances();  // Release all unreleased FMOD event instances
+    } else if (previousPlayState & 1) {  // REAPER was playing but now stopped
+        ReleaseAllEventInstances();       // Release all unreleased FMOD event instances
         DebugMsg("Playback stopped. Cleaning up any lingering state.\n");
-        // triggeredMarkers.clear();  // Clear all triggered markers when playback stops
-        // triggeredItems.clear();    // Clear all triggered items when playback stops
-        // trackCacheUpdatedDuringPlayback = false; // Reset the flag when playback stops
-        // StopAllEvents();
+        // Optionally reset state variables here if needed
     }
 
     // Update previous play state to track state changes
