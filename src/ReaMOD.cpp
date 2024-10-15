@@ -39,6 +39,8 @@ static int actionIdAddItemWithSelectedEventWithinTimeSelection = 0;
 static int actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = 0;
 static int actionIDStopAndReleaseAllFmodEventInstances = 0;
 static int actionIDInsertParamUpdateItemForSelectedMediaItem = 0;
+static int actionIDInsertParamAutomationItemsForSelectedMediaItem = 0;
+
 
 // ImGui context
 ImGui_Context* reaMOD_ImGui_Context = nullptr;
@@ -155,6 +157,7 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         GetSet_LoopTimeRange = reinterpret_cast<decltype(GetSet_LoopTimeRange)>(rec->GetFunc("GetSet_LoopTimeRange")); // Load GetSet_LoopTimeRange
         GetSelectedMediaItem = reinterpret_cast<decltype(GetSelectedMediaItem)>(rec->GetFunc("GetSelectedMediaItem"));
         CountSelectedMediaItems = reinterpret_cast<decltype(CountSelectedMediaItems)>(rec->GetFunc("CountSelectedMediaItems"));
+        GetUserInputs = reinterpret_cast<decltype(GetUserInputs)>(rec->GetFunc("GetUserInputs"));
     }
 }
 
@@ -232,6 +235,14 @@ void PostMsg(const char* fmt, ...) {
     }
 
     va_end(args);
+}
+
+std::string Trim(const std::string& str) {
+    size_t first = str.find_first_not_of(" \t\n\r");
+    if (first == std::string::npos)
+        return ""; // All spaces
+    size_t last = str.find_last_not_of(" \t\n\r");
+    return str.substr(first, (last - first + 1));
 }
 
 // Initialize FMOD system
@@ -1049,6 +1060,7 @@ void InsertParamUpdateItemForSelectedMediaItem() {
     DebugMsg("Inserted param update item at position %.2f with GUID: %s\n", cursorPosition, guidStr.c_str());
 }
 
+
 void ParseAndApplyNotes(FMOD::Studio::EventInstance* eventInstance, const std::vector<std::string>& noteLines) {
     if (!eventInstance) {
         DebugMsg("ParseAndApplyNotes: eventInstance is null, skipping.\n");
@@ -1178,6 +1190,149 @@ void ProcessItemNotes(MediaItem* item, int itemIndex, int trackIndex, FMOD::Stud
 
     // Process the note lines
     ParseAndApplyNotes(eventInstance, noteLines);
+}
+
+void InsertParamAutomationItemsForSelectedMediaItem() {
+    // Get the first selected media item
+    MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0); // Pass 0 to get the first selected item
+
+    if (!selectedItem) {
+        PostMsg("No media item is selected.\n");
+        return;
+    }
+
+    // Get the active take
+    MediaItem_Take* take = GetActiveTake(selectedItem);
+    if (!take) {
+        PostMsg("Selected item has no active take.\n");
+        return;
+    }
+
+    // Get the take name
+    char takeName[512] = "";
+    GetSetMediaItemTakeInfo_String(take, "P_NAME", takeName, false);
+    std::string takeNameStr(takeName);
+
+    if (takeNameStr.find("event:") != 0) {
+        PostMsg("Selected item is not an 'event:' item.\n");
+        return;
+    }
+
+    // Get the GUID of the selected item
+    std::string guidStr = GetItemGUID(selectedItem);
+    if (guidStr.empty()) {
+        PostMsg("Failed to retrieve GUID for the selected media item.\n");
+        return;
+    }
+
+    // Prompt the user for Parameter Name, Starting Value, and Ending Value
+    char userInputs[512] = ""; // Buffer for return values
+    if (!GetUserInputs("Parameter Automation", 3, "Parameter Name,Starting Value,Ending Value", userInputs, sizeof(userInputs))) {
+        PostMsg("User cancelled the input dialog.\n");
+        return;
+    }
+
+    // Split the user inputs
+    std::vector<std::string> inputValues = SplitString(userInputs, ",");
+    if (inputValues.size() != 3) {
+        PostMsg("Invalid input. Please provide Parameter Name, Starting Value, and Ending Value.\n");
+        return;
+    }
+
+    std::string paramName = Trim(inputValues[0]);
+    double startValue = std::stod(Trim(inputValues[1]));
+    double endValue = std::stod(Trim(inputValues[2]));
+
+    // Get the current time selection
+    double timeSelStart, timeSelEnd;
+    GetSet_LoopTimeRange(false, false, &timeSelStart, &timeSelEnd, false); // Retrieve the time selection
+
+    if (timeSelEnd <= timeSelStart) {
+        PostMsg("No valid time selection exists.\n");
+        return;
+    }
+
+    // Get the frame rate
+    bool dropFrame = false;
+    double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame);
+    if (frameRate <= 0) {
+        PostMsg("Invalid frame rate detected.\n");
+        return;
+    }
+
+    // Calculate the number of frames
+    double timeSelectionLength = timeSelEnd - timeSelStart;
+    int numFrames = static_cast<int>(timeSelectionLength * frameRate);
+
+    if (numFrames < 1) {
+        PostMsg("Time selection is too short for frame-based automation.\n");
+        return;
+    }
+
+    // Calculate the value increment per frame
+    double valueIncrement = (endValue - startValue) / (numFrames - 1);
+
+    // Get the currently selected track
+    MediaTrack* selectedTrack = GetTrack(nullptr, 0); // Default to the first track if none is selected
+    int numTracks = CountTracks(nullptr);
+
+    // Find the first selected track
+    bool trackFound = false;
+    for (int i = 0; i < numTracks; ++i) {
+        MediaTrack* track = GetTrack(nullptr, i);
+        if (*(bool*)GetSetMediaTrackInfo(track, "I_SELECTED", nullptr)) {
+            selectedTrack = track;
+            trackFound = true;
+            break;
+        }
+    }
+
+    if (!trackFound) {
+        PostMsg("No track is selected.\n");
+        return;
+    }
+
+    // Loop over each frame and insert items
+    double frameDuration = 1.0 / frameRate;
+
+    for (int i = 0; i < numFrames; ++i) {
+        double itemPosition = timeSelStart + i * frameDuration;
+        double itemLength = frameDuration;
+
+        double paramValue = startValue + i * valueIncrement;
+
+        // Add a media item on the selected track at the itemPosition
+        MediaItem* newItem = AddMediaItemToTrack(selectedTrack);
+        if (!newItem) {
+            PostMsg("Failed to create a new item.\n");
+            continue; // Skip to next frame
+        }
+
+        // Set the item position
+        GetSetMediaItemInfo(newItem, "D_POSITION", &itemPosition);
+
+        // Set the item length
+        GetSetMediaItemInfo(newItem, "D_LENGTH", &itemLength);
+
+        // Add a new take to the item
+        MediaItem_Take* newTake = AddTakeToMediaItem(newItem);
+        if (!newTake) {
+            PostMsg("Failed to create a new take for the item.\n");
+            continue; // Skip to next frame
+        }
+
+        // Set the take name to "param:ParameterName=Value"
+        char takeNameBuffer[512];
+        snprintf(takeNameBuffer, sizeof(takeNameBuffer), "param:%s=%.6g", paramName.c_str(), paramValue);
+        GetSetMediaItemTakeInfo_String(newTake, "P_NAME", takeNameBuffer, true);
+
+        // Set the item's notes to include the GUID
+        std::string itemNotes = "GUID=" + guidStr;
+        GetSetMediaItemInfo_String(newItem, "P_NOTES", const_cast<char*>(itemNotes.c_str()), true);
+    }
+
+    // Update the arrangement view
+    UpdateArrange();
 }
 
 void CreateFMODEventInstance(const std::string& eventPath, MediaItem* item, double startPosition, double endPosition) {
@@ -2304,7 +2459,6 @@ void toggleReaMODWindow() {
     }
 }
 
-
 // Command hook function for Reaper custom action
 static bool commandHook(KbdSectionInfo *sec, const int command, const int val, const int valhw, const int relmode, HWND hwnd) {
     // Check if the action ID matches the registered actions
@@ -2335,6 +2489,10 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
     if (command == actionIDInsertParamUpdateItemForSelectedMediaItem) {
         InsertParamUpdateItemForSelectedMediaItem();
         return true;
+    }
+    if (command == actionIDInsertParamAutomationItemsForSelectedMediaItem) {
+    InsertParamAutomationItemsForSelectedMediaItem();
+    return true;
     }
 
     return false;
@@ -2368,8 +2526,13 @@ void RegisterActions() {
     actionIDStopAndReleaseAllFmodEventInstances = plugin_register("custom_action", &actionStopAndReleaseAllFmodEventInstances);
 
     // Register the new custom action for updating the item insertion length based upon the current time selection
-    static custom_action_register_t actionInsertParamUpdateItemForSelectedMediaItem = { 0, "ReaMOD_actionIDInsertParamUpdateItemForSelectedMediaItem", "ReaMOD: Insert default parameter update item for selected media item on selected track at edit cursor" };
+    static custom_action_register_t actionInsertParamUpdateItemForSelectedMediaItem = { 0, "ReaMOD_actionIDInsertParamUpdateItemForSelectedMediaItem", "ReaMOD: Insert default parameter update item for selected event item on selected track at edit cursor" };
     actionIDInsertParamUpdateItemForSelectedMediaItem = plugin_register("custom_action", &actionInsertParamUpdateItemForSelectedMediaItem);
+
+    // Register the custom action for inserting parameter automation items
+    static custom_action_register_t actionInsertParamAutomationItemsForSelectedMediaItem = {0, "ReaMOD_InsertParamAutomationItemsForSelectedMediaItem", "ReaMOD: Insert parameter automation items for selected event item over time selection"};
+    actionIDInsertParamAutomationItemsForSelectedMediaItem = plugin_register("custom_action", &actionInsertParamAutomationItemsForSelectedMediaItem);
+
 }
 
 // Entry point function for the Reaper plugin
