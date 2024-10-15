@@ -48,8 +48,9 @@ std::string currentReaMODFileName = " ";
 std::string currentDisplayedFileName = " ";
 bool reaModWindowOpen = true;
 
-// Store the list of found .bank files and their toggle states
-std::vector<std::string> bank_files;
+
+std::vector<std::string> masterStringEvents;  // Store event paths from Master.strings.bank
+std::vector<std::string> bank_files; // Store the list of found .bank files and their toggle states
 std::vector<bool> bank_load_states;
 std::unordered_map<std::string, FMOD::Studio::Bank*> loaded_banks;  // Map of loaded banks
 std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map of events in each bank
@@ -91,6 +92,31 @@ struct EventInstanceData {
     double startPosition;
     double endPosition;
 };
+
+// Define ImVec2 (2D Vector)
+struct ImVec2 {
+    float x, y;
+    
+    ImVec2() : x(0.0f), y(0.0f) {}
+    ImVec2(float _x, float _y) : x(_x), y(_y) {}
+};
+
+// Define ImVec3 (3D Vector)
+struct ImVec3 {
+    float x, y, z;
+
+    ImVec3() : x(0.0f), y(0.0f), z(0.0f) {}
+    ImVec3(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
+};
+
+// Define ImVec4 (4D Vector)
+struct ImVec4 {
+    float x, y, z, w;
+
+    ImVec4() : x(0.0f), y(0.0f), z(0.0f), w(0.0f) {}
+    ImVec4(float _x, float _y, float _z, float _w) : x(_x), y(_y), z(_z), w(_w) {}
+};
+
 
 std::unordered_map<std::string, EventInstanceData> activeEventInstances;
 
@@ -297,6 +323,22 @@ void FindBankFiles(const std::string& fspro_dir) {
             if (bank_file_name == "Master.strings.bank") {
                 LoadBank(bank_file, false);  // No need to load sample data for strings bank
                 DebugMsg("Loading Master.strings.bank file.\n");
+                // Populate masterStringEvents with event paths
+                FMOD::Studio::Bank* masterStringsBank = loaded_banks[bank_file];
+                if (masterStringsBank) {
+                    int stringCount = 0;
+                    masterStringsBank->getStringCount(&stringCount);
+
+                    for (int i = 0; i < stringCount; ++i) {
+                        char path[512];  // Buffer for event path
+                        FMOD_GUID guid;
+
+                        FMOD_RESULT result = masterStringsBank->getStringInfo(i, &guid, path, sizeof(path), nullptr);
+                        if (result == FMOD_OK) {
+                            masterStringEvents.push_back(path);  // Add event path
+                        }
+                    }
+                }
             }
         }
 
@@ -677,19 +719,78 @@ void CopyToClipboard(const std::string& text) {
     }
 }
 
+// Map for storing event instances triggered by the ReaMOD window play buttons
+std::unordered_map<std::string, FMOD::Studio::EventInstance*> playButtonEventInstances;
+
+void PlayButtonEvent(const std::string& eventPath) {
+    FMOD::Studio::EventDescription* eventDesc = nullptr;
+    fmod_system->getEvent(eventPath.c_str(), &eventDesc);
+
+    if (eventDesc) {
+        FMOD::Studio::EventInstance* eventInstance = nullptr;
+        eventDesc->createInstance(&eventInstance);
+        eventInstance->start();
+        playButtonEventInstances[eventPath] = eventInstance;
+    }
+    fmod_system->update();
+}
+
+void StopButtonEvent(const std::string& eventPath) {
+    auto it = playButtonEventInstances.find(eventPath);
+    if (it != playButtonEventInstances.end()) {
+        it->second->stop(FMOD_STUDIO_STOP_ALLOWFADEOUT);
+        it->second->release();
+        playButtonEventInstances.erase(it);
+    }
+    fmod_system->update();
+}
+
 // Use the ReaImGui MouseButton_Right enum or value
 const int RightMouseButton = ImGui::MouseButton_Right;
 
-// Updated function to render an arrow play button and trigger the FMOD event
-void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const std::string& event_path) {
-    if (ImGui::ArrowButton(ctx, ("##play_button_" + button_id).c_str(), ImGui::Dir_Right)) {
-        DebugMsg("Play button clicked: Event Path - %s\n", event_path.c_str());  // Debugging event path
+// Global state map to store the color toggle state for each button
+std::unordered_map<std::string, bool> buttonStates;
 
-        // Trigger the FMOD event when the button is clicked
-        PlayEvent(event_path);
-        // Update the last triggered event path
-        selectedFMODEvent = event_path;
+// Function to render a toggleable play button and trigger/release FMOD event
+bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const std::string& event_path) {
+    // Create a unique button ID for the play button
+    std::string unique_button_id = "##play_button_" + button_id;
+
+    // Get the current state of the button (default to false if not found)
+    bool is_active = buttonStates[button_id];
+
+    // Push button color based on its state
+    if (is_active) {
+        // Active: Green colors
+        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0x32CD32FF); // Green
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0x008000FF); // Dark green when hovered
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x006400FF); // Even darker green when clicked
+    } else {
+        // Inactive: Grey colors
+        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0xC0C0C0FF); // Light Grey
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0xA9A9A9FF); // Darker grey when hovered
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x808080FF); // Dark grey when clicked
     }
+
+    // Render the button as an arrow button using the correct ReaImGui function
+    if (ImGui::ArrowButton(ctx, unique_button_id.c_str(), ImGui::Dir_Right)) {
+        // Toggle the state (activate or deactivate)
+        buttonStates[button_id] = !is_active;
+        is_active = buttonStates[button_id];
+
+        // Trigger or release the FMOD event based on the button state
+        if (is_active) {
+            // If button is active, play the event
+            FMOD::Studio::EventInstance* eventInstance = nullptr;
+            PlayButtonEvent(event_path); // Store the event instance
+        } else {
+            StopButtonEvent(event_path);
+        }
+
+        DebugMsg("Play button clicked: Event Path - %s, State: %s\n", event_path.c_str(), is_active ? "Playing" : "Stopped");
+    }
+
+    // Handle right-click hover detection for clipboard copy
     if (ImGui::IsItemHovered(ctx) && ImGui::IsMouseReleased(ctx, ImGui::MouseButton_Right)) {
         DebugMsg("Right-click detected on event: %s\n", event_path.c_str());
 
@@ -701,7 +802,12 @@ void RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
 
         CopyToClipboard(adjustedEventPath);  // Copy the adjusted path to the clipboard
     }
+    // Restore previous color
+    ImGui::PopStyleColor(ctx, 3);
+
+    return is_active;
 }
+
 
 void CheckMarkers(double playPosition) {
     if (CountProjectMarkers == nullptr || EnumProjectMarkers == nullptr) {
@@ -1270,8 +1376,7 @@ void ReleaseAllEventInstances() {
     fmod_system->update();  // Ensure FMOD processes all the release calls
 }
 
-void stopReleaseALLFMODEventInstances()
-{
+void stopReleaseALLFMODEventInstances(){
     ReleaseAllEventInstances();
     StopAllEvents();
 }
@@ -1754,6 +1859,31 @@ void RenderGUI() {
                     ImGui::TreePop(reaMOD_ImGui_Context);  // End the bank file tree node
                 }
             }
+
+            // Display all events from Master.strings.bank (event paths without loading the banks)
+            if (!masterStringEvents.empty()) {
+                ImGui::Separator(reaMOD_ImGui_Context);  // Add a separator line
+                ImGui::Text(reaMOD_ImGui_Context, "FMOD Events from Master.strings.bank:");
+
+                // Render event paths retrieved from the Master.strings.bank
+                for (const auto& event_path : masterStringEvents) {
+                    std::string play_button_label = "Play##" + event_path;
+
+                    // Render the play button for each event
+                    RenderPlayButton(reaMOD_ImGui_Context, play_button_label, event_path);
+
+                    ImGui::SameLine(reaMOD_ImGui_Context);  // Keep play button on the same line
+
+                    // Highlight the selected event
+                    bool isSelected = (selectedFMODEvent == event_path);
+
+                    // Pass the address of isSelected to ImGui::Selectable
+                    if (ImGui::Selectable(reaMOD_ImGui_Context, event_path.c_str(), &isSelected)) {
+                        selectedFMODEvent = event_path;  // Update selected event
+                        DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
+                    }
+                }
+            }
         }
 
         ImGui::Separator(reaMOD_ImGui_Context);
@@ -1772,8 +1902,8 @@ void RenderGUI() {
         ImGui::Text(reaMOD_ImGui_Context, "Number of frames for inserted item");
 
         // Add the checkbox for moving the cursor after inserting an item
-        ImGui::Checkbox(reaMOD_ImGui_Context, "Move Edit Cursor After Insert", &moveCursorAfterInsert);
-        ImGui::Checkbox(reaMOD_ImGui_Context, "Update item length from current time selection following insertion", &updateItemInsertionLength);
+        ImGui::Checkbox(reaMOD_ImGui_Context, "Move edit to end of inserted item.", &moveCursorAfterInsert);
+        ImGui::Checkbox(reaMOD_ImGui_Context, "Update item length from last time-selection insert.", &updateItemInsertionLength);
 
         ImGui::Separator(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context,"ReaMOD v0.1");
