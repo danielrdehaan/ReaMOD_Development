@@ -504,11 +504,20 @@ void AddItemWithSelectedEventAtEditCursor() {
     // Set the selectedFMODEvent as the name for the take
     GetSetMediaItemTakeInfo_String(newTake, "P_NAME", const_cast<char*>(selectedFMODEvent.c_str()), true);
 
+    // Build the item's notes with the current parameter values
+    std::string itemNotes;
+    for (const auto& param : selectedEventParameters) {
+        itemNotes += "param:" + param.name + "=" + std::to_string(param.currentValue) + "\n";
+    }
+
+    // Set the item's notes
+    GetSetMediaItemInfo_String(newItem, "P_NOTES", const_cast<char*>(itemNotes.c_str()), true);
+
     // Update the arrangement view
     UpdateArrange();
 
     if (moveCursorAfterInsert) {
-        // Move the edit cursor forward by the number of frames
+        // Move the edit cursor forward by the item length
         double newCursorPosition = cursorPosition + itemLength;
         SetEditCurPos(newCursorPosition, true, false);
     }
@@ -581,6 +590,15 @@ void AddItemWithSelectedEventWithinTimeSelection() {
 
     // Set the selectedFMODEvent as the name for the take
     GetSetMediaItemTakeInfo_String(newTake, "P_NAME", const_cast<char*>(selectedFMODEvent.c_str()), true);
+
+    // Build the item's notes with the current parameter values
+    std::string itemNotes;
+    for (const auto& param : selectedEventParameters) {
+        itemNotes += "param:" + param.name + "=" + std::to_string(param.currentValue) + "\n";
+    }
+
+    // Set the item's notes
+    GetSetMediaItemInfo_String(newItem, "P_NOTES", const_cast<char*>(itemNotes.c_str()), true);
 
     // Update the arrangement view
     UpdateArrange();
@@ -1298,7 +1316,36 @@ void CheckItems(double playPosition) {
                     std::string eventPath = nameStr.substr(6);  // Strip the "event:" prefix
                     if (playPosition >= itemStart - lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
                         if (activeEventInstances.find(itemGUID) == activeEventInstances.end()) {
+                            // Create the FMOD event instance
                             CreateFMODEventInstance(eventPath, item, itemStart, itemEnd);
+
+                            // Apply parameters from item notes
+                            FMOD::Studio::EventInstance* eventInstance = activeEventInstances[itemGUID].instance;
+
+                            // Parse the item notes to get parameters
+                            char itemNotes[4096] = "";
+                            bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
+                            if (hasNotes && strlen(itemNotes) > 0) {
+                                // Split item notes into individual lines
+                                std::vector<std::string> noteLines = SplitString(itemNotes, "\n");
+                                for (const std::string& line : noteLines) {
+                                    if (line.rfind("param:", 0) == 0) {
+                                        size_t equalPos = line.find('=');
+                                        if (equalPos != std::string::npos) {
+                                            std::string paramName = line.substr(6, equalPos - 6); // Get parameter name
+                                            std::string paramValueStr = line.substr(equalPos + 1); // Get parameter value
+                                            try {
+                                                float paramValue = std::stof(paramValueStr); // Convert value to float
+                                                eventInstance->setParameterByName(paramName.c_str(), paramValue);
+                                                fmod_system->update();
+                                                DebugMsg("Updated parameter '%s' to value %.2f for event instance.\n", paramName.c_str(), paramValue);
+                                            } catch (const std::exception& e) {
+                                                DebugMsg("Error parsing parameter value in item notes: %s\n", e.what());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     } else if (playPosition > itemEnd + tolerance && activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
                         ReleaseFMODEventInstance(itemGUID);
@@ -1307,7 +1354,7 @@ void CheckItems(double playPosition) {
 
                 // Handle "param:" items
                 else if (nameStr.find("param:") == 0) {
-                    // Parse "param:Note=1"
+                    // Parse "param:ParameterName=Value"
                     size_t equalPos = nameStr.find('=');
                     if (equalPos != std::string::npos) {
                         std::string paramName = nameStr.substr(6, equalPos - 6); // Get parameter name
@@ -1328,11 +1375,8 @@ void CheckItems(double playPosition) {
                                 size_t end = guidStr.find("\n", start);
                                 std::string extractedGUID = guidStr.substr(start, end - start);
 
-                                // Add curly braces to the extracted GUID
-                                // std::string formattedGUID = "{" + extractedGUID + "}";
-
                                 // Debug message for the extracted GUID
-                                DebugMsg("Extracted and formatted GUID from item notes: %s\n", extractedGUID.c_str());
+                                DebugMsg("Extracted GUID from item notes: %s\n", extractedGUID.c_str());
 
                                 // Find the specific event instance by GUID
                                 if (activeEventInstances.find(extractedGUID) != activeEventInstances.end()) {
@@ -1360,6 +1404,7 @@ void CheckItems(double playPosition) {
 
     previousPlayPosition = playPosition;
 }
+
 
 bool trackCacheUpdatedDuringPlayback = false; // Flag to track if the cache has been updated during playback
 
