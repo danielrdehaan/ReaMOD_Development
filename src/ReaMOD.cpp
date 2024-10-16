@@ -27,7 +27,7 @@
 
 #define FILE_PATH_BUFFER_SIZE 1024
 
-#define DEBUG true
+#define DEBUG false
 
 namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
 
@@ -2085,30 +2085,30 @@ void RenderGUI() {
             }
 
             // Display all events from Master.strings.bank (event paths without loading the banks)
-            if (!masterStringEvents.empty()) {
-                ImGui::Separator(reaMOD_ImGui_Context);  // Add a separator line
-                ImGui::Text(reaMOD_ImGui_Context, "FMOD Events from Master.strings.bank:");
+            // if (!masterStringEvents.empty()) {
+            //     ImGui::Separator(reaMOD_ImGui_Context);  // Add a separator line
+            //     ImGui::Text(reaMOD_ImGui_Context, "FMOD Events from Master.strings.bank:");
 
-                // Render event paths retrieved from the Master.strings.bank
-                for (const auto& event_path : masterStringEvents) {
-                    std::string play_button_label = "Play##" + event_path;
+            //     // Render event paths retrieved from the Master.strings.bank
+            //     for (const auto& event_path : masterStringEvents) {
+            //         std::string play_button_label = "Play##" + event_path;
 
-                    // Render the play button for each event
-                    RenderPlayButton(reaMOD_ImGui_Context, play_button_label, event_path);
+            //         // Render the play button for each event
+            //         RenderPlayButton(reaMOD_ImGui_Context, play_button_label, event_path);
 
-                    ImGui::SameLine(reaMOD_ImGui_Context);  // Keep play button on the same line
+            //         ImGui::SameLine(reaMOD_ImGui_Context);  // Keep play button on the same line
 
-                    // Highlight the selected event
-                    bool isSelected = (selectedFMODEvent == event_path);
+            //         // Highlight the selected event
+            //         bool isSelected = (selectedFMODEvent == event_path);
 
-                    // Pass the address of isSelected to ImGui::Selectable
-                    if (ImGui::Selectable(reaMOD_ImGui_Context, event_path.c_str(), &isSelected)) {
-                        selectedFMODEvent = event_path;  // Update selected event
-                        UpdateSelectedEventParameters(); // Call this function here
-                        DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
-                    }
-                }
-            }
+            //         // Pass the address of isSelected to ImGui::Selectable
+            //         if (ImGui::Selectable(reaMOD_ImGui_Context, event_path.c_str(), &isSelected)) {
+            //             selectedFMODEvent = event_path;  // Update selected event
+            //             UpdateSelectedEventParameters(); // Call this function here
+            //             DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
+            //         }
+            //     }
+            // }
         }
         ImGui::Text(reaMOD_ImGui_Context, "");
 
