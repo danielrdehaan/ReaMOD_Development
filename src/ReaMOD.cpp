@@ -248,8 +248,16 @@ std::string Trim(const std::string& str) {
 // Initialize FMOD system
 void InitializeFMOD() {
     FMOD::Studio::System::create(&fmod_system);
-    fmod_system->initialize(512, FMOD_STUDIO_INIT_NORMAL, FMOD_INIT_NORMAL, 0);
-    DebugMsg("Initializing FMOD System.\n");
+
+    unsigned int studioInitFlags = FMOD_STUDIO_INIT_NORMAL | FMOD_STUDIO_INIT_LIVEUPDATE;
+    unsigned int initFlags = FMOD_INIT_NORMAL;
+
+    FMOD_RESULT result = fmod_system->initialize(512, studioInitFlags, initFlags, nullptr);
+    if (result != FMOD_OK) {
+        DebugMsg("Failed to initialize FMOD system with Live Update. FMOD_RESULT: %d\n", result);
+        return;
+    }
+    DebugMsg("Initialized FMOD System with Live Update enabled.\n");
 }
 
 // Function to check if FMOD System is Initialzed
@@ -1059,7 +1067,6 @@ void InsertParamUpdateItemForSelectedMediaItem() {
 
     DebugMsg("Inserted param update item at position %.2f with GUID: %s\n", cursorPosition, guidStr.c_str());
 }
-
 
 void ParseAndApplyNotes(FMOD::Studio::EventInstance* eventInstance, const std::vector<std::string>& noteLines) {
     if (!eventInstance) {
@@ -2224,7 +2231,6 @@ void RenderGUI() {
     }
 }
 
-
 void UpdateEventPlayStates() {
     bool stateChanged = false;
 
@@ -2613,7 +2619,6 @@ void RegisterActions() {
     // Register the custom action for inserting parameter automation items
     static custom_action_register_t actionInsertParamAutomationItemsForSelectedMediaItem = {0, "ReaMOD_InsertParamAutomationItemsForSelectedMediaItem", "ReaMOD: Insert parameter automation items for selected event item over time selection"};
     actionIDInsertParamAutomationItemsForSelectedMediaItem = plugin_register("custom_action", &actionInsertParamAutomationItemsForSelectedMediaItem);
-
 }
 
 // Entry point function for the Reaper plugin
