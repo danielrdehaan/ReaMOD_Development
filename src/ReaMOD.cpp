@@ -1420,6 +1420,13 @@ void ReleaseFMODEventInstance(const std::string& itemGUID) {
 std::unordered_map<int, MediaTrack*> fmodTracks;
 int cachedTrackCount = 0;
 
+std::string ToLower(const std::string& str) {
+    std::string lowerStr(str.size(), ' '); // Initialize with the same size
+    std::transform(str.begin(), str.end(), lowerStr.begin(),
+                   [](unsigned char c){ return std::tolower(c); });
+    return lowerStr;
+}
+
 void UpdateTrackCache() {
     int currentTrackCount = CountTracks(nullptr);
     if (currentTrackCount != cachedTrackCount) {
@@ -1430,10 +1437,14 @@ void UpdateTrackCache() {
             if (!track) continue;
 
             // Get the track name
-            char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
-            if (trackName && (strstr(trackName, "FMOD") || strstr(trackName, "fmod"))) {
-                // If the track name contains "FMOD" or "fmod", add it to the map
-                fmodTracks[i] = track;
+            char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+            if (trackNameChar) {
+                std::string trackName(trackNameChar);
+                std::string lowerTrackName = ToLower(trackName);
+                if (lowerTrackName.find("fmod") != std::string::npos) {
+                    // If the track name contains "fmod" in any case, add it to the map
+                    fmodTracks[i] = track;
+                }
             }
         }
         cachedTrackCount = currentTrackCount;
@@ -1441,9 +1452,16 @@ void UpdateTrackCache() {
         // Check for name changes
         for (auto it = fmodTracks.begin(); it != fmodTracks.end();) {
             MediaTrack* track = it->second;
-            char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
-            if (!trackName || (!strstr(trackName, "FMOD") && !strstr(trackName, "fmod"))) {
-                // If track name no longer matches, remove it from the map
+            char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+            if (!trackNameChar) {
+                // If track name is null, remove it from the map
+                it = fmodTracks.erase(it);
+                continue;
+            }
+            std::string trackName(trackNameChar);
+            std::string lowerTrackName = ToLower(trackName);
+            if (lowerTrackName.find("fmod") == std::string::npos) {
+                // If track name no longer contains "fmod", remove it from the map
                 it = fmodTracks.erase(it);
             } else {
                 ++it;
@@ -1456,9 +1474,13 @@ void UpdateTrackCache() {
                 MediaTrack* track = GetTrack(nullptr, i);
                 if (!track) continue;
 
-                char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
-                if (trackName && (strstr(trackName, "FMOD") || strstr(trackName, "fmod"))) {
-                    fmodTracks[i] = track;
+                char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+                if (trackNameChar) {
+                    std::string trackName(trackNameChar);
+                    std::string lowerTrackName = ToLower(trackName);
+                    if (lowerTrackName.find("fmod") != std::string::npos) {
+                        fmodTracks[i] = track;
+                    }
                 }
             }
         }
