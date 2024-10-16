@@ -1586,7 +1586,6 @@ void CheckItems(double playPosition) {
     previousPlayPosition = playPosition;
 }
 
-
 bool trackCacheUpdatedDuringPlayback = false; // Flag to track if the cache has been updated during playback
 
 void ReleaseAllEventInstances() {
@@ -2088,9 +2087,6 @@ void RenderGUI() {
         ImGui::Separator(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context, "Selected Event:");
     
-        // Display the selected event name
-        // ImGui::Text(reaMOD_ImGui_Context, selectedFMODEvent.c_str());
-    
         // Render the play button
         std::string play_button_label = "Play##SelectedEvent";
         RenderPlayButton(reaMOD_ImGui_Context, play_button_label, selectedFMODEvent);
@@ -2100,30 +2096,50 @@ void RenderGUI() {
     
         // Get the event instance for the selected event
         FMOD::Studio::EventInstance* eventInstance = nullptr;
+
+        // Check if the selected event is being played via the play button
         auto it = playButtonEventInstances.find(selectedFMODEvent);
         if (it != playButtonEventInstances.end()) {
             eventInstance = it->second;
         }
-    
+
+        // If sync with selected item is enabled and an item is selected, get the event instance from activeEventInstances
+        if (syncSelectedEventWithItemSelection && lastSelectedItem != nullptr) {
+            std::string itemGUID = GetItemGUID(lastSelectedItem);
+            auto instanceIt = activeEventInstances.find(itemGUID);
+            if (instanceIt != activeEventInstances.end()) {
+                eventInstance = instanceIt->second.instance;
+            }
+        }
+
+        // Flag to detect if any slider is active
+        bool anySliderActive = false;
+
         // Display sliders for the event's parameters using SliderDouble
         for (auto& param : selectedEventParameters) {
             float previousValue = param.currentValue;
-        
+
             double doubleValue = static_cast<double>(param.currentValue);
             double doubleMin = static_cast<double>(param.minValue);
             double doubleMax = static_cast<double>(param.maxValue);
-        
+
             // Use SliderDouble to create a slider for the parameter
-            if (ImGui::SliderDouble(reaMOD_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax)) {
-                // Update the currentValue with the new value from the slider
-                param.currentValue = static_cast<float>(doubleValue);
-        
-                // Update the parameter value in the event instance if it exists and the value has changed
-                if (previousValue != param.currentValue && eventInstance) {
+            ImGui::SliderDouble(reaMOD_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax);
+
+            if (ImGui::IsItemActive(reaMOD_ImGui_Context)) {
+                anySliderActive = true;
+            }
+
+            // Update the currentValue with the new value from the slider
+            param.currentValue = static_cast<float>(doubleValue);
+
+            // If the value has changed and the slider is active, update the FMOD event instance
+            if (previousValue != param.currentValue && anySliderActive) {
+                if (eventInstance) {
                     eventInstance->setParameterByName(param.name.c_str(), param.currentValue);
                     fmod_system->update();
                 }
-        
+
                 // Update the cached parameter value
                 auto& cachedParams = eventParameterCache[selectedFMODEvent];
                 for (auto& cachedParam : cachedParams) {
@@ -2132,6 +2148,20 @@ void RenderGUI() {
                         break;
                     }
                 }
+            }
+        }
+
+        // After the loop, if no sliders are active and REAPER is playing, update parameter values from event instance
+        if (!anySliderActive && (GetPlayState() & 1)) {
+            if (eventInstance) {
+                for (auto& param : selectedEventParameters) {
+                    float value = 0.0f;
+                    FMOD_RESULT result = eventInstance->getParameterByName(param.name.c_str(), &value);
+                    if (result == FMOD_OK) {
+                        param.currentValue = value;
+                    }
+                }
+                fmod_system->update();
             }
         }
 
@@ -2171,6 +2201,7 @@ void RenderGUI() {
         reaMOD_ImGui_Context = nullptr;
     }
 }
+
 
 void UpdateEventPlayStates() {
     bool stateChanged = false;
@@ -2291,25 +2322,25 @@ void MonitorItemSelection() {
     }
 
     MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0);
-    if (selectedItem != lastSelectedItem) {
-        DebugMsg("Selected item has changed.\n");
-        lastSelectedItem = selectedItem; // Update the last selected item
 
-        // Get the active take
-        MediaItem_Take* take = GetActiveTake(selectedItem);
-        if (!take) {
-            DebugMsg("Selected item has no active take. Exiting.\n");
-            return;
-        }
+    // Get the active take
+    MediaItem_Take* take = GetActiveTake(selectedItem);
+    if (!take) {
+        DebugMsg("Selected item has no active take. Exiting.\n");
+        lastSelectedItem = nullptr; // Reset lastSelectedItem
+        return;
+    }
 
-        // Get the take name
-        char takeName[512] = "";
-        GetSetMediaItemTakeInfo_String(take, "P_NAME", takeName, false);
-        std::string takeNameStr(takeName);
-        DebugMsg("Active take name: %s\n", takeNameStr.c_str());
+    // Get the take name
+    char takeName[512] = "";
+    GetSetMediaItemTakeInfo_String(take, "P_NAME", takeName, false);
+    std::string takeNameStr(takeName);
 
-        // Check if the take name starts with "event:"
-        if (takeNameStr.find("event:") == 0) {
+    if (takeNameStr.find("event:") == 0) {
+        if (selectedItem != lastSelectedItem) {
+            DebugMsg("Selected item has changed.\n");
+            lastSelectedItem = selectedItem; // Update the last selected item
+
             DebugMsg("Take name starts with 'event:'. Setting selected FMOD event.\n");
 
             // Set the selected event
@@ -2375,8 +2406,36 @@ void MonitorItemSelection() {
                 DebugMsg("Item has no notes or failed to retrieve notes.\n");
             }
         } else {
-            DebugMsg("Active take name does not start with 'event:'.\n");
+            // Selected item hasn't changed, but we might need to update parameters
+            DebugMsg("Selected item has not changed.\n");
+
+            // If REAPER is playing, update parameters from event instance
+            if (GetPlayState() & 1) { // If REAPER is playing
+                // Retrieve current parameter values from the active event instance
+                std::string itemGUID = GetItemGUID(selectedItem);
+                auto it = activeEventInstances.find(itemGUID);
+                if (it != activeEventInstances.end()) {
+                    FMOD::Studio::EventInstance* eventInstance = it->second.instance;
+                    if (eventInstance) {
+                        for (auto& param : selectedEventParameters) {
+                            float value = 0.0f;
+                            FMOD_RESULT result = eventInstance->getParameterByName(param.name.c_str(), &value);
+                            if (result == FMOD_OK) {
+                                param.currentValue = value;
+                            } else {
+                                DebugMsg("Failed to get parameter '%s' value from event instance.\n", param.name.c_str());
+                            }
+                        }
+                        fmod_system->update();
+                    }
+                } else {
+                    DebugMsg("No active event instance found for GUID: %s\n", itemGUID.c_str());
+                }
+            }
         }
+    } else {
+        DebugMsg("Active take name does not start with 'event:'.\n");
+        lastSelectedItem = nullptr; // Reset lastSelectedItem
     }
 }
 
