@@ -1514,29 +1514,11 @@ void PostFmodTracksListToConsole() {
 }
 
 bool isTrackActive(MediaTrack* track) {
+    // Check if the track itself is muted
     bool trackMuted = GetMediaTrackInfo_Value(track, "B_MUTE") > 0;
-    int soloState = GetMediaTrackInfo_Value(track, "I_SOLO");
+    int soloState = (int)GetMediaTrackInfo_Value(track, "I_SOLO");
 
-    // Check if this track has a parent
-    MediaTrack* parentTrack = GetParentTrack(track);
-
-    // If the track has a parent, check the parent's mute/solo state recursively
-    while (parentTrack) {
-        bool parentMuted = GetMediaTrackInfo_Value(parentTrack, "B_MUTE") > 0;
-        int parentSoloState = GetMediaTrackInfo_Value(parentTrack, "I_SOLO");
-
-        // If the parent is muted or no track in the project is soloed, the child will be muted unless explicitly soloed
-        if (parentMuted || parentSoloState > 0) {
-            if (soloState == 0) {
-                return false;  // Parent is muted or soloed and this track is not soloed
-            }
-        }
-
-        // Move up to the next parent track
-        parentTrack = GetParentTrack(parentTrack);
-    }
-
-    // Now check the solo state of the entire project
+    // Check if any track in the project is soloed
     bool soloedTracksExist = false;
     for (int i = 0; i < CountTracks(0); ++i) {
         MediaTrack* t = GetTrack(0, i);
@@ -1546,20 +1528,41 @@ bool isTrackActive(MediaTrack* track) {
         }
     }
 
-    // If the track itself is muted, it is not heard
+    // Recursively check parent track states
+    MediaTrack* parentTrack = GetParentTrack(track);
+    bool parentSoloed = false;
+    while (parentTrack) {
+        bool parentMuted = GetMediaTrackInfo_Value(parentTrack, "B_MUTE") > 0;
+        int parentSoloState = (int)GetMediaTrackInfo_Value(parentTrack, "I_SOLO");
+
+        // If the parent is muted, the child is muted as well
+        if (parentMuted) {
+            return false;
+        }
+
+        // If the parent is soloed, mark that the child should inherit the solo state
+        if (parentSoloState > 0) {
+            parentSoloed = true;
+        }
+
+        // Move up the parent hierarchy
+        parentTrack = GetParentTrack(parentTrack);
+    }
+
+    // If the track itself is muted, it is inactive
     if (trackMuted) {
         return false;
     }
 
-    // If any track in the project is soloed, this track must also be soloed to be heard
+    // If any track in the project is soloed:
     if (soloedTracksExist) {
-        return soloState > 0;
+        // This track is active if it is soloed, or if its parent is soloed
+        return soloState > 0 || parentSoloed;
     }
 
-    // If no tracks are soloed and this track is not muted, it is heard
+    // If no tracks are soloed, this track is active if it's not muted
     return true;
 }
-
 
 void CheckItems(double playPosition) {
     UpdateTrackCache(); // Refresh the track cache before checking items
