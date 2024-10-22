@@ -40,6 +40,7 @@ static int actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = 0;
 static int actionIDStopAndReleaseAllFmodEventInstances = 0;
 static int actionIDInsertParamUpdateItemForSelectedMediaItem = 0;
 static int actionIDInsertParamAutomationItemsForSelectedMediaItem = 0;
+static int actionIDPostFmodTracksListToConsole = 0;
 
 
 // ImGui context
@@ -158,6 +159,9 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         GetSelectedMediaItem = reinterpret_cast<decltype(GetSelectedMediaItem)>(rec->GetFunc("GetSelectedMediaItem"));
         CountSelectedMediaItems = reinterpret_cast<decltype(CountSelectedMediaItems)>(rec->GetFunc("CountSelectedMediaItems"));
         GetUserInputs = reinterpret_cast<decltype(GetUserInputs)>(rec->GetFunc("GetUserInputs"));
+        GetTrackDepth = reinterpret_cast<decltype(GetTrackDepth)>(rec->GetFunc("GetTrackDepth"));
+        GetParentTrack = reinterpret_cast<decltype(GetParentTrack)>(rec->GetFunc("GetParentTrack"));
+        GetMediaTrackInfo_Value = reinterpret_cast<decltype(GetMediaTrackInfo_Value)>(rec->GetFunc("GetMediaTrackInfo_Value"));
     }
 }
 
@@ -364,6 +368,7 @@ void FindBankFiles(const std::string& fspro_dir) {
 
             if (bank_file_name == "Master.bank") {
                 master_bank_file = bank_file;  // Store Master.bank path
+                LoadBank(master_bank_file, true);  // Always load sample data for Master bank
                 DebugMsg("Found Master.bank file.\n");
             }
         }
@@ -1436,63 +1441,125 @@ std::string ToLower(const std::string& str) {
 
 void UpdateTrackCache() {
     int currentTrackCount = CountTracks(nullptr);
-    if (currentTrackCount != cachedTrackCount) {
-        // Update cached track list if track count changes
-        fmodTracks.clear();
-        for (int i = 0; i < currentTrackCount; ++i) {
-            MediaTrack* track = GetTrack(nullptr, i);
-            if (!track) continue;
+    fmodTracks.clear();
+    int folderDepth = 0; // Initialize folder depth
 
-            // Get the track name
-            char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
-            if (trackNameChar) {
-                std::string trackName(trackNameChar);
-                std::string lowerTrackName = ToLower(trackName);
-                if (lowerTrackName.find("fmod") != std::string::npos) {
-                    // If the track name contains "fmod" in any case, add it to the map
-                    fmodTracks[i] = track;
-                }
-            }
-        }
-        cachedTrackCount = currentTrackCount;
-    } else {
-        // Check for name changes
-        for (auto it = fmodTracks.begin(); it != fmodTracks.end();) {
-            MediaTrack* track = it->second;
-            char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
-            if (!trackNameChar) {
-                // If track name is null, remove it from the map
-                it = fmodTracks.erase(it);
-                continue;
-            }
+    for (int i = 0; i < currentTrackCount; ++i) {
+        MediaTrack* track = GetTrack(nullptr, i);
+        if (!track) continue;
+
+        // Get the track name
+        char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+        if (trackNameChar) {
             std::string trackName(trackNameChar);
             std::string lowerTrackName = ToLower(trackName);
-            if (lowerTrackName.find("fmod") == std::string::npos) {
-                // If track name no longer contains "fmod", remove it from the map
-                it = fmodTracks.erase(it);
-            } else {
-                ++it;
-            }
-        }
 
-        // Look for any new tracks that should be added to the map
-        for (int i = 0; i < currentTrackCount; ++i) {
-            if (fmodTracks.find(i) == fmodTracks.end()) {
-                MediaTrack* track = GetTrack(nullptr, i);
-                if (!track) continue;
+            // Get folder depth for the current track
+            int currentFolderDepth = *(int*)GetSetMediaTrackInfo(track, "I_FOLDERDEPTH", nullptr);
+            
+            // If folderDepth is > 0, we're inside a parent track, so add the track regardless of its name
+            if (folderDepth > 0) {
+                fmodTracks[i] = track;
+                folderDepth += currentFolderDepth; // Update folder depth
 
-                char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
-                if (trackNameChar) {
-                    std::string trackName(trackNameChar);
-                    std::string lowerTrackName = ToLower(trackName);
-                    if (lowerTrackName.find("fmod") != std::string::npos) {
-                        fmodTracks[i] = track;
-                    }
+                // Print debug message for added track
+                DebugMsg("Added track: %s\n", trackName.c_str());
+
+                // If folderDepth becomes 0, it means we've exited the folder, so stop adding children
+                if (folderDepth == 0) {
+                    continue;
+                }
+            } else if (lowerTrackName.find("fmod") != std::string::npos) {
+                // If the track contains "FMOD", add the parent track and update folderDepth
+                fmodTracks[i] = track;
+                folderDepth += currentFolderDepth;
+
+                // Print debug message for added parent track
+                DebugMsg("Added FMOD parent track: %s\n", trackName.c_str());
+
+                // If the folder depth becomes 0 immediately, it means this is not a folder track, so we stop here
+                if (folderDepth == 0) {
+                    continue;
                 }
             }
         }
     }
+
+    // Update cached track count
+    cachedTrackCount = currentTrackCount;
 }
+
+void PostFmodTracksListToConsole() {
+    // Update the track cache before printing, ensuring it's up-to-date.
+    UpdateTrackCache();
+
+    // If the track list is empty, print a message
+    if (fmodTracks.empty()) {
+        PostMsg("No FMOD tracks found.\n");
+        return;
+    }
+
+    // Iterate over the fmodTracks map and post each track's info to the console
+    PostMsg("FMOD Tracks:\n");
+    for (const auto& trackPair : fmodTracks) {
+        int trackIndex = trackPair.first;
+        MediaTrack* track = trackPair.second;
+
+        // Get the track name
+        char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+        if (trackName) {
+            PostMsg("      Track %d: %s\n", trackIndex, trackName);
+        }
+    }
+}
+
+bool isTrackActive(MediaTrack* track) {
+    bool trackMuted = GetMediaTrackInfo_Value(track, "B_MUTE") > 0;
+    int soloState = GetMediaTrackInfo_Value(track, "I_SOLO");
+
+    // Check if this track has a parent
+    MediaTrack* parentTrack = GetParentTrack(track);
+
+    // If the track has a parent, check the parent's mute/solo state recursively
+    while (parentTrack) {
+        bool parentMuted = GetMediaTrackInfo_Value(parentTrack, "B_MUTE") > 0;
+        int parentSoloState = GetMediaTrackInfo_Value(parentTrack, "I_SOLO");
+
+        // If the parent is muted or no track in the project is soloed, the child will be muted unless explicitly soloed
+        if (parentMuted || parentSoloState > 0) {
+            if (soloState == 0) {
+                return false;  // Parent is muted or soloed and this track is not soloed
+            }
+        }
+
+        // Move up to the next parent track
+        parentTrack = GetParentTrack(parentTrack);
+    }
+
+    // Now check the solo state of the entire project
+    bool soloedTracksExist = false;
+    for (int i = 0; i < CountTracks(0); ++i) {
+        MediaTrack* t = GetTrack(0, i);
+        if (GetMediaTrackInfo_Value(t, "I_SOLO") > 0) {
+            soloedTracksExist = true;
+            break;
+        }
+    }
+
+    // If the track itself is muted, it is not heard
+    if (trackMuted) {
+        return false;
+    }
+
+    // If any track in the project is soloed, this track must also be soloed to be heard
+    if (soloedTracksExist) {
+        return soloState > 0;
+    }
+
+    // If no tracks are soloed and this track is not muted, it is heard
+    return true;
+}
+
 
 void CheckItems(double playPosition) {
     UpdateTrackCache(); // Refresh the track cache before checking items
@@ -1500,117 +1567,128 @@ void CheckItems(double playPosition) {
     double lookAheadTimeSeconds = lookAheadTimeMs / 1000.0;
     double tolerance = 0.04;
 
+    // Debugging: Print the entire fmodTracks map
+    DebugMsg("Number of FMOD tracks to check: %d\n", fmodTracks.size());
+
     for (const auto& pair : fmodTracks) {
         MediaTrack* track = pair.second;
-        int itemCount = CountTrackMediaItems(track);
-        for (int j = 0; j < itemCount; ++j) {
-            MediaItem* item = GetTrackMediaItem(track, j);
-            MediaItem_Take* take = GetActiveTake(item);
-            if (!take) continue;
+        char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+        std::string trackName(trackNameChar);
+        DebugMsg("Checking items on track: %s\n", trackName.c_str());
 
-            double itemStart = *(double*)GetSetMediaItemInfo(item, "D_POSITION", nullptr);
-            double itemEnd = itemStart + *(double*)GetSetMediaItemInfo(item, "D_LENGTH", nullptr);
-            std::string itemGUID = GetItemGUID(item);
+        if (isTrackActive(track)){
+            int itemCount = CountTrackMediaItems(track);
+            for (int j = 0; j < itemCount; ++j) {
+                MediaItem* item = GetTrackMediaItem(track, j);
+                MediaItem_Take* take = GetActiveTake(item);
+                if (!take) continue;
 
-            if (playPosition < previousPlayPosition) {
-                activeEventInstances.clear();  // Reset instances if playhead moved backward
-            }
+                double itemStart = *(double*)GetSetMediaItemInfo(item, "D_POSITION", nullptr);
+                double itemEnd = itemStart + *(double*)GetSetMediaItemInfo(item, "D_LENGTH", nullptr);
+                std::string itemGUID = GetItemGUID(item);
 
-            // Get the item name
-            char itemName[512] = "";
-            if (GetSetMediaItemTakeInfo_String(take, "P_NAME", itemName, false)) {
-                std::string nameStr(itemName);
+                if (playPosition < previousPlayPosition) {
+                    activeEventInstances.clear();  // Reset instances if playhead moved backward
+                }
 
-                // Handle "event:" items
-                if (nameStr.find("event:") == 0) {
-                    std::string eventPath = nameStr.substr(6);  // Strip the "event:" prefix
-                    if (playPosition >= itemStart - lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
-                        if (activeEventInstances.find(itemGUID) == activeEventInstances.end()) {
-                            // Create the FMOD event instance
-                            CreateFMODEventInstance(eventPath, item, itemStart, itemEnd);
+                // Get the item name
+                char itemName[512] = "";
+                if (GetSetMediaItemTakeInfo_String(take, "P_NAME", itemName, false)) {
+                    std::string nameStr(itemName);
 
-                            // Apply parameters from item notes
-                            FMOD::Studio::EventInstance* eventInstance = activeEventInstances[itemGUID].instance;
+                    // Handle "event:" items
+                    if (nameStr.find("event:") == 0) {
+                        std::string eventPath = nameStr.substr(6);  // Strip the "event:" prefix
+                        if (playPosition >= itemStart - lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
+                            if (activeEventInstances.find(itemGUID) == activeEventInstances.end()) {
+                                // Create the FMOD event instance
+                                CreateFMODEventInstance(eventPath, item, itemStart, itemEnd);
 
-                            // Parse the item notes to get parameters
-                            char itemNotes[4096] = "";
-                            bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
-                            if (hasNotes && strlen(itemNotes) > 0) {
-                                // Split item notes into individual lines
-                                std::vector<std::string> noteLines = SplitString(itemNotes, "\n");
-                                for (const std::string& line : noteLines) {
-                                    if (line.rfind("param:", 0) == 0) {
-                                        size_t equalPos = line.find('=');
-                                        if (equalPos != std::string::npos) {
-                                            std::string paramName = line.substr(6, equalPos - 6); // Get parameter name
-                                            std::string paramValueStr = line.substr(equalPos + 1); // Get parameter value
-                                            try {
-                                                float paramValue = std::stof(paramValueStr); // Convert value to float
-                                                eventInstance->setParameterByName(paramName.c_str(), paramValue);
-                                                fmod_system->update();
-                                                DebugMsg("Updated parameter '%s' to value %.2f for event instance.\n", paramName.c_str(), paramValue);
-                                            } catch (const std::exception& e) {
-                                                DebugMsg("Error parsing parameter value in item notes: %s\n", e.what());
+                                // Apply parameters from item notes
+                                FMOD::Studio::EventInstance* eventInstance = activeEventInstances[itemGUID].instance;
+
+                                // Parse the item notes to get parameters
+                                char itemNotes[4096] = "";
+                                bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
+                                if (hasNotes && strlen(itemNotes) > 0) {
+                                    // Split item notes into individual lines
+                                    std::vector<std::string> noteLines = SplitString(itemNotes, "\n");
+                                    for (const std::string& line : noteLines) {
+                                        if (line.rfind("param:", 0) == 0) {
+                                            size_t equalPos = line.find('=');
+                                            if (equalPos != std::string::npos) {
+                                                std::string paramName = line.substr(6, equalPos - 6); // Get parameter name
+                                                std::string paramValueStr = line.substr(equalPos + 1); // Get parameter value
+                                                try {
+                                                    float paramValue = std::stof(paramValueStr); // Convert value to float
+                                                    eventInstance->setParameterByName(paramName.c_str(), paramValue);
+                                                    fmod_system->update();
+                                                    DebugMsg("Updated parameter '%s' to value %.2f for event instance.\n", paramName.c_str(), paramValue);
+                                                } catch (const std::exception& e) {
+                                                    DebugMsg("Error parsing parameter value in item notes: %s\n", e.what());
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
+                        } else if (playPosition > itemEnd + tolerance && activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
+                            ReleaseFMODEventInstance(itemGUID);
                         }
-                    } else if (playPosition > itemEnd + tolerance && activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
-                        ReleaseFMODEventInstance(itemGUID);
                     }
-                }
 
-                // Handle "param:" items
-                else if (nameStr.find("param:") == 0) {
-                    // Parse "param:ParameterName=Value"
-                    size_t equalPos = nameStr.find('=');
-                    if (equalPos != std::string::npos) {
-                        std::string paramName = nameStr.substr(6, equalPos - 6); // Get parameter name
-                        std::string paramValueStr = nameStr.substr(equalPos + 1); // Get parameter value
-                        float paramValue = std::stof(paramValueStr); // Convert value to float
+                    // Handle "param:" items
+                    else if (nameStr.find("param:") == 0) {
+                        // Parse "param:ParameterName=Value"
+                        size_t equalPos = nameStr.find('=');
+                        if (equalPos != std::string::npos) {
+                            std::string paramName = nameStr.substr(6, equalPos - 6); // Get parameter name
+                            std::string paramValueStr = nameStr.substr(equalPos + 1); // Get parameter value
+                            float paramValue = std::stof(paramValueStr); // Convert value to float
 
-                        // Check if playPosition is within the item's time range
-                        if (playPosition >= itemStart - lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
-                            DebugMsg("Found param item: %s with value: %s\n", paramName.c_str(), paramValueStr.c_str());
+                            // Check if playPosition is within the item's time range
+                            if (playPosition >= itemStart - lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
+                                DebugMsg("Found param item: %s with value: %s\n", paramName.c_str(), paramValueStr.c_str());
 
-                            // Check for a GUID in the item's notes
-                            char itemNotes[4096];
-                            bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
-                            if (hasNotes && strstr(itemNotes, "GUID=")) {
-                                // Extract GUID from notes
-                                std::string guidStr(itemNotes);
-                                size_t start = guidStr.find("GUID=") + 5;
-                                size_t end = guidStr.find("\n", start);
-                                std::string extractedGUID = guidStr.substr(start, end - start);
+                                // Check for a GUID in the item's notes
+                                char itemNotes[4096];
+                                bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
+                                if (hasNotes && strstr(itemNotes, "GUID=")) {
+                                    // Extract GUID from notes
+                                    std::string guidStr(itemNotes);
+                                    size_t start = guidStr.find("GUID=") + 5;
+                                    size_t end = guidStr.find("\n", start);
+                                    std::string extractedGUID = guidStr.substr(start, end - start);
 
-                                // Debug message for the extracted GUID
-                                DebugMsg("Extracted GUID from item notes: %s\n", extractedGUID.c_str());
+                                    // Debug message for the extracted GUID
+                                    DebugMsg("Extracted GUID from item notes: %s\n", extractedGUID.c_str());
 
-                                // Find the specific event instance by GUID
-                                if (activeEventInstances.find(extractedGUID) != activeEventInstances.end()) {
-                                    FMOD::Studio::EventInstance* instance = activeEventInstances[extractedGUID].instance;
-                                    if (instance) {
-                                        instance->setParameterByName(paramName.c_str(), paramValue);
-                                        fmod_system->update();
-                                        DebugMsg("Updated parameter '%s' to value %.2f for instance with GUID: %s\n", paramName.c_str(), paramValue, extractedGUID.c_str());
+                                    // Find the specific event instance by GUID
+                                    if (activeEventInstances.find(extractedGUID) != activeEventInstances.end()) {
+                                        FMOD::Studio::EventInstance* instance = activeEventInstances[extractedGUID].instance;
+                                        if (instance) {
+                                            instance->setParameterByName(paramName.c_str(), paramValue);
+                                            fmod_system->update();
+                                            DebugMsg("Updated parameter '%s' to value %.2f for instance with GUID: %s\n", paramName.c_str(), paramValue, extractedGUID.c_str());
+                                        }
+                                    } else {
+                                        DebugMsg("No active instance found for GUID: %s\n", extractedGUID.c_str());
                                     }
                                 } else {
-                                    DebugMsg("No active instance found for GUID: %s\n", extractedGUID.c_str());
+                                    // If no GUID, assume it's a global parameter
+                                    fmod_system->setParameterByName(paramName.c_str(), paramValue);
+                                    fmod_system->update();
+                                    DebugMsg("Updated global parameter '%s' to value %.2f\n", paramName.c_str(), paramValue);
                                 }
-                            } else {
-                                // If no GUID, assume it's a global parameter
-                                fmod_system->setParameterByName(paramName.c_str(), paramValue);
-                                fmod_system->update();
-                                DebugMsg("Updated global parameter '%s' to value %.2f\n", paramName.c_str(), paramValue);
                             }
                         }
                     }
                 }
             }
         }
-    }
+        }
+
+        
 
     previousPlayPosition = playPosition;
 }
@@ -1953,11 +2031,15 @@ std::string RemoveBankExtension(const std::string& filename) {
     return filename;  // Return original if no ".bank" extension is found
 }
 
+int greyDark = 0x333333FF;
+
 void RenderGUI() {
     ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
+    ImGui::PushStyleColor(reaMOD_ImGui_Context, ImGui::Col_WindowBg, greyDark);
+
     bool open = true;  // Open flag for the window
-    if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open)) {
+    if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing)) {
 
         // Display the formatted ReaMOD session text
         ImGui::Text(reaMOD_ImGui_Context, "ReaMOD Session: ");
@@ -2083,32 +2165,6 @@ void RenderGUI() {
                     ImGui::TreePop(reaMOD_ImGui_Context);  // End the bank file tree node
                 }
             }
-
-            // Display all events from Master.strings.bank (event paths without loading the banks)
-            // if (!masterStringEvents.empty()) {
-            //     ImGui::Separator(reaMOD_ImGui_Context);  // Add a separator line
-            //     ImGui::Text(reaMOD_ImGui_Context, "FMOD Events from Master.strings.bank:");
-
-            //     // Render event paths retrieved from the Master.strings.bank
-            //     for (const auto& event_path : masterStringEvents) {
-            //         std::string play_button_label = "Play##" + event_path;
-
-            //         // Render the play button for each event
-            //         RenderPlayButton(reaMOD_ImGui_Context, play_button_label, event_path);
-
-            //         ImGui::SameLine(reaMOD_ImGui_Context);  // Keep play button on the same line
-
-            //         // Highlight the selected event
-            //         bool isSelected = (selectedFMODEvent == event_path);
-
-            //         // Pass the address of isSelected to ImGui::Selectable
-            //         if (ImGui::Selectable(reaMOD_ImGui_Context, event_path.c_str(), &isSelected)) {
-            //             selectedFMODEvent = event_path;  // Update selected event
-            //             UpdateSelectedEventParameters(); // Call this function here
-            //             DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
-            //         }
-            //     }
-            // }
         }
         ImGui::Text(reaMOD_ImGui_Context, "");
 
@@ -2215,7 +2271,6 @@ void RenderGUI() {
         // Add the checkbox for moving the cursor after inserting an item
         ImGui::Checkbox(reaMOD_ImGui_Context, "Move edit to end of inserted item.", &moveCursorAfterInsert);
         ImGui::Checkbox(reaMOD_ImGui_Context, "Update item length from last time-selection insert.", &updateItemInsertionLength);
-        ImGui::Text(reaMOD_ImGui_Context, "");
 
         ImGui::Separator(reaMOD_ImGui_Context);
         ImGui::Text(reaMOD_ImGui_Context, "ReaMOD v0.1");
@@ -2224,6 +2279,9 @@ void RenderGUI() {
 
         ImGui::End(reaMOD_ImGui_Context);
     }
+
+    // Pop the style colors
+    ImGui::PopStyleColor(reaMOD_ImGui_Context);
 
     // If the window is closed, unregister the timer to stop rendering
     if (!open) {
@@ -2295,14 +2353,14 @@ void MonitorPlayback() {
             triggeredMarkers.clear();            // Clear triggered markers
             triggeredItems.clear();              // Clear triggered items
             activeEventInstances.clear();        // Clear active event instances
-            trackCacheUpdatedDuringPlayback = false; // Reset track cache flag
+            // trackCacheUpdatedDuringPlayback = false; // Reset track cache flag
         }
 
         // If this is the first time during this playback session, update the track cache
-        if (!trackCacheUpdatedDuringPlayback) {
-            UpdateTrackCache();                  // Refresh the track cache once when playback starts
-            trackCacheUpdatedDuringPlayback = true;  // Set flag to indicate cache has been updated
-        }
+        // if (!trackCacheUpdatedDuringPlayback) {
+        //     UpdateTrackCache();                  // Refresh the track cache once when playback starts
+        //     trackCacheUpdatedDuringPlayback = true;  // Set flag to indicate cache has been updated
+        // }
 
         // If playhead moved backward (looping, scrubbing, or jump)
         if (playPosition < previousPlayPosition) {
@@ -2332,19 +2390,19 @@ void MonitorPlayback() {
 }
 
 void MonitorItemSelection() {
-    DebugMsg("MonitorItemSelection called.\n");
+    // DebugMsg("MonitorItemSelection called.\n");
 
     if (!syncSelectedEventWithItemSelection) {
-        DebugMsg("Sync with selected item is disabled.\n");
+        // DebugMsg("Sync with selected item is disabled.\n");
         lastSelectedItem = nullptr; // Reset if not syncing
         return;
     }
 
     int numSelectedItems = CountSelectedMediaItems(nullptr);
-    DebugMsg("Number of selected items: %d\n", numSelectedItems);
+    // DebugMsg("Number of selected items: %d\n", numSelectedItems);
 
     if (numSelectedItems != 1) {
-        DebugMsg("Not exactly one item is selected. Resetting lastSelectedItem.\n");
+        // DebugMsg("Not exactly one item is selected. Resetting lastSelectedItem.\n");
         lastSelectedItem = nullptr; // Reset if not exactly one item is selected
         return;
     }
@@ -2354,7 +2412,7 @@ void MonitorItemSelection() {
     // Get the active take
     MediaItem_Take* take = GetActiveTake(selectedItem);
     if (!take) {
-        DebugMsg("Selected item has no active take. Exiting.\n");
+        // DebugMsg("Selected item has no active take. Exiting.\n");
         lastSelectedItem = nullptr; // Reset lastSelectedItem
         return;
     }
@@ -2366,10 +2424,10 @@ void MonitorItemSelection() {
 
     if (takeNameStr.find("event:") == 0) {
         if (selectedItem != lastSelectedItem) {
-            DebugMsg("Selected item has changed.\n");
+            // DebugMsg("Selected item has changed.\n");
             lastSelectedItem = selectedItem; // Update the last selected item
 
-            DebugMsg("Take name starts with 'event:'. Setting selected FMOD event.\n");
+            // DebugMsg("Take name starts with 'event:'. Setting selected FMOD event.\n");
 
             // Set the selected event
             selectedFMODEvent = takeNameStr;
@@ -2380,18 +2438,18 @@ void MonitorItemSelection() {
             bool hasNotes = GetSetMediaItemInfo_String(selectedItem, "P_NOTES", itemNotes, false);
 
             if (hasNotes && strlen(itemNotes) > 0) {
-                DebugMsg("Item has notes: %s\n", itemNotes);
+                // DebugMsg("Item has notes: %s\n", itemNotes);
 
                 std::vector<std::string> noteLines = SplitString(itemNotes, "\n");
                 for (const std::string& line : noteLines) {
-                    DebugMsg("Processing note line: %s\n", line.c_str());
+                    // DebugMsg("Processing note line: %s\n", line.c_str());
 
                     if (line.rfind("param:", 0) == 0) {
                         size_t equalPos = line.find('=');
                         if (equalPos != std::string::npos) {
                             std::string paramName = line.substr(6, equalPos - 6); // Get parameter name
                             std::string paramValueStr = line.substr(equalPos + 1); // Get parameter value
-                            DebugMsg("Found parameter: %s with value: %s\n", paramName.c_str(), paramValueStr.c_str());
+                            // DebugMsg("Found parameter: %s with value: %s\n", paramName.c_str(), paramValueStr.c_str());
 
                             try {
                                 float paramValue = std::stof(paramValueStr); // Convert value to float
@@ -2400,7 +2458,7 @@ void MonitorItemSelection() {
                                 // Update the matching parameter in selectedEventParameters
                                 for (auto& param : selectedEventParameters) {
                                     if (param.name == paramName) {
-                                        DebugMsg("Updating parameter '%s' currentValue to %f\n", paramName.c_str(), paramValue);
+                                        // DebugMsg("Updating parameter '%s' currentValue to %f\n", paramName.c_str(), paramValue);
                                         param.currentValue = paramValue;
 
                                         // Also update the cached parameter value
@@ -2408,7 +2466,7 @@ void MonitorItemSelection() {
                                         for (auto& cachedParam : cachedParams) {
                                             if (cachedParam.name == paramName) {
                                                 cachedParam.currentValue = paramValue;
-                                                DebugMsg("Updated cached parameter '%s' currentValue to %f\n", paramName.c_str(), paramValue);
+                                                // DebugMsg("Updated cached parameter '%s' currentValue to %f\n", paramName.c_str(), paramValue);
                                                 break;
                                             }
                                         }
@@ -2418,24 +2476,24 @@ void MonitorItemSelection() {
                                 }
 
                                 if (!paramFound) {
-                                    DebugMsg("Parameter '%s' not found in selectedEventParameters.\n", paramName.c_str());
+                                    // DebugMsg("Parameter '%s' not found in selectedEventParameters.\n", paramName.c_str());
                                 }
                             } catch (const std::exception& e) {
-                                DebugMsg("Error parsing parameter value in item notes: %s\n", e.what());
+                                // DebugMsg("Error parsing parameter value in item notes: %s\n", e.what());
                             }
                         } else {
-                            DebugMsg("No '=' found in parameter line: %s\n", line.c_str());
+                            // DebugMsg("No '=' found in parameter line: %s\n", line.c_str());
                         }
                     } else {
-                        DebugMsg("Line does not start with 'param:': %s\n", line.c_str());
+                        // DebugMsg("Line does not start with 'param:': %s\n", line.c_str());
                     }
                 }
             } else {
-                DebugMsg("Item has no notes or failed to retrieve notes.\n");
+                // DebugMsg("Item has no notes or failed to retrieve notes.\n");
             }
         } else {
             // Selected item hasn't changed, but we might need to update parameters
-            DebugMsg("Selected item has not changed.\n");
+            // DebugMsg("Selected item has not changed.\n");
 
             // If REAPER is playing, update parameters from event instance
             if (GetPlayState() & 1) { // If REAPER is playing
@@ -2451,7 +2509,7 @@ void MonitorItemSelection() {
                             if (result == FMOD_OK) {
                                 param.currentValue = value;
                             } else {
-                                DebugMsg("Failed to get parameter '%s' value from event instance.\n", param.name.c_str());
+                                // DebugMsg("Failed to get parameter '%s' value from event instance.\n", param.name.c_str());
                             }
                         }
                         fmod_system->update();
@@ -2578,9 +2636,14 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         return true;
     }
     if (command == actionIDInsertParamAutomationItemsForSelectedMediaItem) {
-    InsertParamAutomationItemsForSelectedMediaItem();
-    return true;
+        InsertParamAutomationItemsForSelectedMediaItem();
+        return true;
     }
+    if (command == actionIDPostFmodTracksListToConsole) {
+        PostFmodTracksListToConsole();
+        return true;
+    }
+
 
     return false;
 }
@@ -2619,6 +2682,9 @@ void RegisterActions() {
     // Register the custom action for inserting parameter automation items
     static custom_action_register_t actionInsertParamAutomationItemsForSelectedMediaItem = {0, "ReaMOD_InsertParamAutomationItemsForSelectedMediaItem", "ReaMOD: Insert parameter automation items for selected event item over time selection"};
     actionIDInsertParamAutomationItemsForSelectedMediaItem = plugin_register("custom_action", &actionInsertParamAutomationItemsForSelectedMediaItem);
+
+    static custom_action_register_t actionPostFmodTracksListToConsole = { 0, "ReaMOD_PostFmodTracksListToConsole", "ReaMOD: Post current list of FMOD tracks to console" };
+    actionIDPostFmodTracksListToConsole = plugin_register("custom_action", &actionPostFmodTracksListToConsole);
 }
 
 // Entry point function for the Reaper plugin
