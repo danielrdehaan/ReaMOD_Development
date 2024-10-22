@@ -49,7 +49,9 @@ char selected_file_path[FILE_PATH_BUFFER_SIZE] = "";  // Full path of selected .
 char selected_file_name[FILE_PATH_BUFFER_SIZE] = "No project selected.";  // Initial text in the input box
 std::string currentReaMODFileName = " ";
 std::string currentDisplayedFileName = " ";
+std::string fmodProjectDirectory = "";
 bool reaModWindowOpen = true;
+bool reaModWindowPreviouslyOpen = false;
 
 
 std::vector<std::string> masterStringEvents;  // Store event paths from Master.strings.bank
@@ -103,8 +105,16 @@ struct ParameterInfo {
     float currentValue;
 };
 
+struct GlobalParameter {
+    std::string name;
+    float currentValue;
+    float minValue;
+    float maxValue;
+};
+
 // Declare a global vector to store parameters of the selected event
 std::vector<ParameterInfo> selectedEventParameters;
+std::vector<GlobalParameter> globalParameters;
 // Map to store cached parameters for each event
 std::unordered_map<std::string, std::vector<ParameterInfo>> eventParameterCache;
 
@@ -280,14 +290,65 @@ bool IsFMODInitialized() {
     return false;  // FMOD is not initialized
 }
 
+void RetrieveGlobalParameters() {
+    globalParameters.clear();  // Clear any existing parameters
+
+    // Get the number of global parameters
+    int numGlobalParameters = 0;
+    FMOD_RESULT result = fmod_system->getParameterDescriptionCount(&numGlobalParameters);
+    if (result != FMOD_OK) {
+        // DebugMsg("Error retrieving global parameter count: %d\n", result);
+        return;
+    }
+
+    // Allocate an array to hold all global parameter descriptions
+    std::vector<FMOD_STUDIO_PARAMETER_DESCRIPTION> paramDescriptions(numGlobalParameters);
+
+    // Retrieve the list of global parameters
+    int count = 0;
+    result = fmod_system->getParameterDescriptionList(paramDescriptions.data(), numGlobalParameters, &count);
+    if (result != FMOD_OK) {
+        // DebugMsg("Error retrieving global parameter descriptions: %d\n", result);
+        return;
+    }
+
+    // Loop through the retrieved global parameters
+    for (int i = 0; i < count; ++i) {
+        const FMOD_STUDIO_PARAMETER_DESCRIPTION& paramDesc = paramDescriptions[i];
+
+        GlobalParameter globalParam;
+        globalParam.name = paramDesc.name;
+        globalParam.minValue = paramDesc.minimum;
+        globalParam.maxValue = paramDesc.maximum;
+
+        // Get the current value for the global parameter by name
+        float currentValue = 0.0f;
+        result = fmod_system->getParameterByName(paramDesc.name, &currentValue);
+        if (result == FMOD_OK) {
+            globalParam.currentValue = currentValue;
+        } else {
+            // DebugMsg("Error retrieving current value for global parameter '%s': %d\n", paramDesc.name, result);
+        }
+
+        // Post the parameter's full path to the console
+        // DebugMsg("Retrieved global parameter: %s\n", paramDesc.name);
+
+        // Add this global parameter to the list
+        globalParameters.push_back(globalParam);
+    }
+
+    // Debug message for how many parameters were loaded
+    // DebugMsg("Global parameters loaded: %d\n", globalParameters.size());
+}
+
 // Load a bank and retrieve its events
 void LoadBank(const std::string& bank_path, bool load_sample_data = true) {
     if (loaded_banks.find(bank_path) == loaded_banks.end()) {
         FMOD::Studio::Bank* bank = nullptr;
         FMOD_RESULT result = fmod_system->loadBankFile(bank_path.c_str(), FMOD_STUDIO_LOAD_BANK_NORMAL, &bank);
+        DebugMsg("Loading bank: %s\n", bank_path.c_str());
         if (result == FMOD_OK) {
             // Debug message to indicate that the bank is being loaded
-            DebugMsg("Loading bank: %s\n", bank_path.c_str());
 
             loaded_banks[bank_path] = bank;
             if (load_sample_data) {
@@ -433,6 +494,7 @@ void OpenFileDialog() {
 
         // Extract the directory of the .fspro file
         std::string fspro_directory = file_path.substr(0, pos);
+        fmodProjectDirectory = fspro_directory;
 
         // Find the .bank files in the "Build/Desktop/" directory
         FindBankFiles(fspro_directory);
@@ -1812,8 +1874,10 @@ void SaveStateToFile(const std::string& filePath = "") {
     // Save relevant state information
     outFile << "fspro_file=" << selected_file_path << "\n";
     outFile << "lookahead_time_ms=" << lookAheadTimeMs << "\n";
-    outFile << "move_cursor_after_insert=" << (moveCursorAfterInsert ? 1 : 0) << "\n"; // Save the checkbox state
-    outFile << "num_frames_for_item=" << numFramesForItem << "\n"; // Save the number of frames for the item
+    outFile << "move_cursor_after_insert=" << (moveCursorAfterInsert ? 1 : 0) << "\n";
+    outFile << "num_frames_for_item=" << numFramesForItem << "\n"; 
+    outFile << "item_sync_selection=" << syncSelectedEventWithItemSelection << "\n";
+    outFile << "update_item_insertion_length_from_last_time_selection=" << updateItemInsertionLength << "\n";
 
     outFile << "<bank_files>\n";
     for (size_t i = 0; i < bank_files.size(); ++i) {
@@ -1900,6 +1964,12 @@ void LoadStateFromFile(const std::string& filePath) {
         } else if (line.rfind("num_frames_for_item=", 0) == 0) {
             numFramesForItem = std::stoi(line.substr(20));
             DebugMsg("Loaded num_frames_for_item: %d\n", numFramesForItem);
+        } else if (line.rfind("item_sync_selection=", 0) == 0) {
+            syncSelectedEventWithItemSelection = std::stoi(line.substr(20)) != 0;
+            DebugMsg("Loaded item_sync_selection: %d\n", syncSelectedEventWithItemSelection);
+        } else if (line.rfind("update_item_insertion_length_from_last_time_selection=", 0) == 0) {
+            updateItemInsertionLength = std::stoi(line.substr(52)) != 0;
+            DebugMsg("Loaded update_item_insertion_length: %d\n", updateItemInsertionLength);
         } else if (line == "<bank_files>") {
             while (std::getline(inFile, line) && line != "</bank_files>") {
                 if (line.rfind("bank_file=", 0) == 0) {
@@ -1971,6 +2041,8 @@ void LoadStateFromFile(const std::string& filePath) {
         DebugMsg("Error retrieving last modification time: %s\n", ec.message().c_str());
         formattedLastSaveTimestamp.clear();
     }
+
+    RetrieveGlobalParameters();
 }
 
 void SaveStateDialog() {
@@ -2175,6 +2247,38 @@ void RenderGUI() {
                     ImGui::TreePop(reaMOD_ImGui_Context);  // End the bank file tree node
                 }
             }
+        }
+        ImGui::Text(reaMOD_ImGui_Context, "");
+
+        // Global Parameters Section
+        ImGui::Separator(reaMOD_ImGui_Context);
+        ImGui::Text(reaMOD_ImGui_Context, "Global Parameters:");
+
+        RetrieveGlobalParameters();
+        
+        if (!globalParameters.empty()) {
+            // Display sliders for the global parameters
+            for (auto& globalParam : globalParameters) {
+                float previousValue = globalParam.currentValue;
+
+                double doubleValue = static_cast<double>(globalParam.currentValue);
+                double doubleMin = static_cast<double>(globalParam.minValue);
+                double doubleMax = static_cast<double>(globalParam.maxValue);
+
+                // Use SliderDouble to create a slider for the parameter
+                ImGui::SliderDouble(reaMOD_ImGui_Context, globalParam.name.c_str(), &doubleValue, doubleMin, doubleMax);
+
+                // Update the currentValue with the new value from the slider
+                globalParam.currentValue = static_cast<float>(doubleValue);
+
+                // If the value has changed, update the global parameter in FMOD
+                if (previousValue != globalParam.currentValue) {
+                    fmod_system->setParameterByName(globalParam.name.c_str(), globalParam.currentValue);
+                    fmod_system->update();
+                }
+            }
+        } else {
+            ImGui::Text(reaMOD_ImGui_Context, "No global parameters.");
         }
         ImGui::Text(reaMOD_ImGui_Context, "");
 
@@ -2584,32 +2688,35 @@ void toggleReaMODWindow() {
 
         // Initialize FMOD only if it's not already initialized
         if (!IsFMODInitialized()) {
-            InitializeFMOD();  // Initialize the FMOD system
-            playbackTaskId = AddTask(MonitorPlayback);  // Add playback monitoring
+            InitializeFMOD();
+            playbackTaskId = AddTask(MonitorPlayback);
         }
 
-        // Add the GUI rendering task and store its ID
+        // Add tasks to monitor and render the GUI
         guiTaskId = AddTask(RenderGUI);
-
-        // Add the item selection monitoring task
         itemSelectionTaskId = AddTask(MonitorItemSelection);
 
-        // Attempt to auto-load a .ReaMOD file if present
-        AutoLoadReaMODFile();
-
+        // Auto-load the .ReaMOD file if available
+        if (reaModWindowPreviouslyOpen != true) {
+            AutoLoadReaMODFile();
+            reaModWindowPreviouslyOpen = true;
+        }
     } else {
-        // Remove the GUI rendering task if the window is closed
+        // Clean up: remove tasks and close the window
         if (guiTaskId != -1) {
             RemoveTask(guiTaskId);
             guiTaskId = -1;
         }
-
-        // Remove the item selection monitoring task
         if (itemSelectionTaskId != -1) {
             RemoveTask(itemSelectionTaskId);
             itemSelectionTaskId = -1;
         }
+        if (playbackTaskId != -1){
+            RemoveTask(playbackTaskId);
+            playbackTaskId = -1;
+        }
 
+        // Nullify the ImGui context to signify the window is closed
         reaMOD_ImGui_Context = nullptr;
     }
 }
