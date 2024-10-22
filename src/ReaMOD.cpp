@@ -1583,6 +1583,13 @@ void CheckItems(double playPosition) {
                 MediaItem_Take* take = GetActiveTake(item);
                 if (!take) continue;
 
+                // Check if the media item is muted
+                bool isItemMuted = *(bool*)GetSetMediaItemInfo(item, "B_MUTE", nullptr);
+                if (isItemMuted) {
+                    DebugMsg("Skipping muted item on track: %s\n", trackName.c_str());
+                    continue; // Skip to the next item if the item is muted
+                }
+
                 double itemStart = *(double*)GetSetMediaItemInfo(item, "D_POSITION", nullptr);
                 double itemEnd = itemStart + *(double*)GetSetMediaItemInfo(item, "D_LENGTH", nullptr);
                 std::string itemGUID = GetItemGUID(item);
