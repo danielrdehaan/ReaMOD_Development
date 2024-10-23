@@ -41,10 +41,12 @@ static int actionIDStopAndReleaseAllFmodEventInstances = 0;
 static int actionIDInsertParamUpdateItemForSelectedMediaItem = 0;
 static int actionIDInsertParamAutomationItemsForSelectedMediaItem = 0;
 static int actionIDPostFmodTracksListToConsole = 0;
+static int actionIDSearchForFmodEvent = 0;
 
 
 // ImGui context
-ImGui_Context* reaMOD_ImGui_Context = nullptr;
+ImGui_Context* reaMOD_Main_ImGui_Context = nullptr;
+ImGui_Context* reaMOD_EventSearch_ImGui_Context = nullptr;
 char selected_file_path[FILE_PATH_BUFFER_SIZE] = "";  // Full path of selected .fspro file
 char selected_file_name[FILE_PATH_BUFFER_SIZE] = "No project selected.";  // Initial text in the input box
 std::string currentReaMODFileName = " ";
@@ -52,6 +54,7 @@ std::string currentDisplayedFileName = " ";
 std::string fmodProjectDirectory = "";
 bool reaModWindowOpen = true;
 bool reaModWindowPreviouslyOpen = false;
+bool searchFmodEventWindowOpen = false;
 
 
 std::vector<std::string> masterStringEvents;  // Store event paths from Master.strings.bank
@@ -76,6 +79,7 @@ int lookAheadTimeMs = 60;  // Default look-ahead time set to 0 milliseconds
 std::unordered_map<int, std::function<void()>> taskMap;
 int nextTaskId = 0;
 int guiTaskId = -1;
+int searchEventGuiTaskId = -1;
 int playbackTaskId = -1;
 int itemSelectionTaskId = -1;
 
@@ -290,14 +294,18 @@ bool IsFMODInitialized() {
     return false;  // FMOD is not initialized
 }
 
+// Declare at global scope or as a class member
+std::map<std::string, std::vector<GlobalParameter>> groupedGlobalParameters;
+
+
 void RetrieveGlobalParameters() {
-    globalParameters.clear();  // Clear any existing parameters
+    globalParameters.clear();           // Clear any existing parameters
+    groupedGlobalParameters.clear();    // Clear existing grouped parameters
 
     // Get the number of global parameters
     int numGlobalParameters = 0;
     FMOD_RESULT result = fmod_system->getParameterDescriptionCount(&numGlobalParameters);
     if (result != FMOD_OK) {
-        // DebugMsg("Error retrieving global parameter count: %d\n", result);
         return;
     }
 
@@ -308,7 +316,6 @@ void RetrieveGlobalParameters() {
     int count = 0;
     result = fmod_system->getParameterDescriptionList(paramDescriptions.data(), numGlobalParameters, &count);
     if (result != FMOD_OK) {
-        // DebugMsg("Error retrieving global parameter descriptions: %d\n", result);
         return;
     }
 
@@ -320,26 +327,41 @@ void RetrieveGlobalParameters() {
         globalParam.name = paramDesc.name;
         globalParam.minValue = paramDesc.minimum;
         globalParam.maxValue = paramDesc.maximum;
-
+        
         // Get the current value for the global parameter by name
         float currentValue = 0.0f;
         result = fmod_system->getParameterByName(paramDesc.name, &currentValue);
         if (result == FMOD_OK) {
             globalParam.currentValue = currentValue;
-        } else {
-            // DebugMsg("Error retrieving current value for global parameter '%s': %d\n", paramDesc.name, result);
         }
 
-        // Post the parameter's full path to the console
-        // DebugMsg("Retrieved global parameter: %s\n", paramDesc.name);
 
-        // Add this global parameter to the list
+        // Extract prefix from parameter name
+        std::string paramName = paramDesc.name;
+        size_t pos = paramName.find_first_of("_");
+        std::string prefix;
+        if (pos != std::string::npos) {
+            prefix = paramName.substr(0, pos);
+        } else {
+            prefix = paramName;
+        }
+
+        // Add this global parameter to the appropriate group
+        groupedGlobalParameters[prefix].push_back(globalParam);
+
+        // Optionally, add this global parameter to the list
         globalParameters.push_back(globalParam);
     }
 
-    // Debug message for how many parameters were loaded
-    // DebugMsg("Global parameters loaded: %d\n", globalParameters.size());
+    // **Sort parameters within each group**
+    for (auto& group : groupedGlobalParameters) {
+        std::vector<GlobalParameter>& parameters = group.second;
+        std::sort(parameters.begin(), parameters.end(), [](const GlobalParameter& a, const GlobalParameter& b) {
+            return a.name < b.name;
+        });
+    }
 }
+
 
 // Load a bank and retrieve its events
 void LoadBank(const std::string& bank_path, bool load_sample_data = true) {
@@ -804,7 +826,7 @@ std::map<std::string, std::map<std::string, std::vector<std::pair<std::string, s
 }
 
 void CopyToClipboard(const std::string& text) {
-    if (!reaMOD_ImGui_Context) {
+    if (!reaMOD_Main_ImGui_Context) {
         DebugMsg("ImGui context is not available, cannot copy to clipboard.\n");
         return;
     }
@@ -812,7 +834,7 @@ void CopyToClipboard(const std::string& text) {
     const char* clipboardText = text.c_str();
     if (clipboardText && strlen(clipboardText) > 0) {
         DebugMsg("Attempting to copy to clipboard using ImGui API: %s\n", clipboardText);
-        ImGui::SetClipboardText(reaMOD_ImGui_Context, clipboardText);
+        ImGui::SetClipboardText(reaMOD_Main_ImGui_Context, clipboardText);
         DebugMsg("Text successfully copied to clipboard: %s\n", clipboardText);
     } else {
         DebugMsg("Clipboard text is empty or null, cannot copy to clipboard.\n");
@@ -2114,58 +2136,94 @@ std::string RemoveBankExtension(const std::string& filename) {
 }
 
 int greyDark = 0x333333FF;
+int blue = 0x395271FF;
+
+// Function to render the Event Search Window
+void RenderEventSearchWindow() {
+    // Set the initial window size (400x300 pixels)
+    ImGui::SetNextWindowSize(reaMOD_EventSearch_ImGui_Context, 400, 300, ImGui::Cond_FirstUseEver);
+
+    // // Boolean flag to control window visibility
+    bool open = true;
+
+    // Begin the window
+    if (ImGui::Begin(reaMOD_EventSearch_ImGui_Context, "Event Search", &open, ImGui::WindowFlags_TopMost)) {
+
+        // // Display a label for the input field
+        ImGui::Text(reaMOD_EventSearch_ImGui_Context, "Event Search:");
+
+        // // Static buffer to hold user input (max 255 characters + null terminator)
+        // static char eventSearchBuffer[256] = "";    
+
+        // // Render the InputText field
+        // if (ImGui::InputText(reaMOD_Main_ImGui_Context, "##EventSearch", eventSearchBuffer, sizeof(eventSearchBuffer), ImGui::InputTextFlags_EnterReturnsTrue)) {
+        //     // When Enter is pressed, capture the input into selectedFMODEvent
+        //     selectedFMODEvent = "event:" + std::string(eventSearchBuffer);
+        //     UpdateSelectedEventParameters(); 
+        // }
+
+        // End the window
+        ImGui::End(reaMOD_EventSearch_ImGui_Context);
+    }
+
+    if (!open) {
+        reaMOD_EventSearch_ImGui_Context = nullptr;
+    }
+}
+
+
 
 void RenderGUI() {
-    ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
+    ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
-    ImGui::PushStyleColor(reaMOD_ImGui_Context, ImGui::Col_WindowBg, greyDark);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_WindowBg, greyDark);
 
     bool open = true;  // Open flag for the window
-    if (ImGui::Begin(reaMOD_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing)) {
+    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing)) {
 
         // Display the formatted ReaMOD session text
-        ImGui::Text(reaMOD_ImGui_Context, "ReaMOD Session: ");
-        ImGui::SameLine(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context, currentDisplayedFileName.c_str());
+        ImGui::Text(reaMOD_Main_ImGui_Context, "ReaMOD Session: ");
+        ImGui::SameLine(reaMOD_Main_ImGui_Context);
+        ImGui::Text(reaMOD_Main_ImGui_Context, currentDisplayedFileName.c_str());
 
         // Display the formatted last save timestamp if available
         if (!formattedLastSaveTimestamp.empty()) {
-            ImGui::Text(reaMOD_ImGui_Context, formattedLastSaveTimestamp.c_str());
+            ImGui::Text(reaMOD_Main_ImGui_Context, formattedLastSaveTimestamp.c_str());
         }
 
         // Add Save and Load State buttons
-        if (ImGui::Button(reaMOD_ImGui_Context, "Save")) {
+        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Save")) {
             SaveStateDialog();
         }
-        ImGui::SameLine(reaMOD_ImGui_Context);
-        if (ImGui::Button(reaMOD_ImGui_Context, "Load")) {
+        ImGui::SameLine(reaMOD_Main_ImGui_Context);
+        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Load")) {
             LoadStateDialog();
         }
-        ImGui::Text(reaMOD_ImGui_Context, "");
+        ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
-        ImGui::Separator(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context, "FMOD Project:");
+        // ImGui::Separator(reaMOD_Main_ImGui_Context);
+        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "FMOD Project:");
 
         // Move the "Select" button to the left of the selected .fspro file
-        if (ImGui::Button(reaMOD_ImGui_Context, "Select")) {
+        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Select")) {
             OpenFileDialog();
         }
 
-        ImGui::SameLine(reaMOD_ImGui_Context);  // Put the file name on the same line as the button
-        ImGui::Text(reaMOD_ImGui_Context, selected_file_name);
-        ImGui::Text(reaMOD_ImGui_Context, "");
+        ImGui::SameLine(reaMOD_Main_ImGui_Context);  // Put the file name on the same line as the button
+        ImGui::Text(reaMOD_Main_ImGui_Context, selected_file_name);
+        ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
         // List the .bank files found in the "Build/Desktop/" directory
         if (!bank_files.empty()) {
-            ImGui::Separator(reaMOD_ImGui_Context);  // Add a separator line
-            ImGui::Text(reaMOD_ImGui_Context, "FMOD Bank Files:");
+            // ImGui::Separator(reaMOD_Main_ImGui_Context);  // Add a separator line
+            ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "FMOD Bank Files:");
 
             for (size_t i = 0; i < bank_files.size(); ++i) {
                 std::string bank_file_name = RemoveBankExtension(fs::path(bank_files[i]).filename().string());
                 std::string button_label = bank_load_states[i] ? "Unload##" + std::to_string(i) : "Load##" + std::to_string(i);
 
                 // Render the toggle button for loading/unloading the bank on the left
-                if (ImGui::Button(reaMOD_ImGui_Context, button_label.c_str())) {
+                if (ImGui::Button(reaMOD_Main_ImGui_Context, button_label.c_str())) {
                     if (bank_load_states[i]) {
                         // If unloading, unload the bank and clear the events
                         loaded_banks[bank_files[i]]->unload();
@@ -2178,10 +2236,10 @@ void RenderGUI() {
                     bank_load_states[i] = !bank_load_states[i];  // Toggle the load state
                 }
 
-                ImGui::SameLine(reaMOD_ImGui_Context);  // Place the text on the same line as the button
+                ImGui::SameLine(reaMOD_Main_ImGui_Context);  // Place the text on the same line as the button
 
                 // Display the bank file name as a collapsible tree node
-                if (ImGui::TreeNode(reaMOD_ImGui_Context, bank_file_name.c_str())) {
+                if (ImGui::TreeNode(reaMOD_Main_ImGui_Context, bank_file_name.c_str())) {
                     // If the bank is loaded, display its events grouped by "Events" and "Snapshots"
                     if (bank_load_states[i]) {
                         if (bank_events.find(bank_files[i]) != bank_events.end()) {
@@ -2190,22 +2248,22 @@ void RenderGUI() {
 
                             // Iterate over "Events" and "Snapshots"
                             for (const auto& folder_type : grouped_folders) {
-                                if (ImGui::TreeNode(reaMOD_ImGui_Context, folder_type.first.c_str())) {  // "Events" or "Snapshots"
+                                if (ImGui::TreeNode(reaMOD_Main_ImGui_Context, folder_type.first.c_str())) {  // "Events" or "Snapshots"
                                     // First, display top-level events/snapshots (with an empty folder name)
                                     auto top_level_folder = folder_type.second.find("");
                                     if (top_level_folder != folder_type.second.end()) {
                                         for (const auto& event_pair : top_level_folder->second) {
                                             // Render the play button next to the selectable event
                                             std::string event_label = "Play##" + event_pair.first;
-                                            RenderPlayButton(reaMOD_ImGui_Context, event_label, event_pair.second);
+                                            RenderPlayButton(reaMOD_Main_ImGui_Context, event_label, event_pair.second);
 
-                                            ImGui::SameLine(reaMOD_ImGui_Context);  // Keep play button on the same line
+                                            ImGui::SameLine(reaMOD_Main_ImGui_Context);  // Keep play button on the same line
 
                                             // Highlight the selected event
                                             bool isSelected = (selectedFMODEvent == event_pair.second);
 
                                             // Pass the address of isSelected to ImGui::Selectable
-                                            if (ImGui::Selectable(reaMOD_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
+                                            if (ImGui::Selectable(reaMOD_Main_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
                                                 selectedFMODEvent = event_pair.second;  // Update selected event
                                                 UpdateSelectedEventParameters();        // Call this function here
                                                 DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
@@ -2218,80 +2276,94 @@ void RenderGUI() {
                                         if (folder.first.empty()) {
                                             continue; // Skip top-level, already handled
                                         }
-                                        if (ImGui::TreeNode(reaMOD_ImGui_Context, folder.first.c_str())) {
+                                        if (ImGui::TreeNode(reaMOD_Main_ImGui_Context, folder.first.c_str())) {
                                             for (const auto& event_pair : folder.second) {
                                                 // Render the play button next to the selectable event
                                                 std::string event_label = "Play##" + event_pair.second;
-                                                RenderPlayButton(reaMOD_ImGui_Context, event_label, event_pair.second);
+                                                RenderPlayButton(reaMOD_Main_ImGui_Context, event_label, event_pair.second);
 
-                                                ImGui::SameLine(reaMOD_ImGui_Context);  // Keep play button on the same line
+                                                ImGui::SameLine(reaMOD_Main_ImGui_Context);  // Keep play button on the same line
 
                                                 // Highlight the selected event
                                                 bool isSelected = (selectedFMODEvent == event_pair.second);
 
                                                 // Pass the address of isSelected to ImGui::Selectable
-                                                if (ImGui::Selectable(reaMOD_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
+                                                if (ImGui::Selectable(reaMOD_Main_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
                                                     selectedFMODEvent = event_pair.second;  // Update selected event
                                                     UpdateSelectedEventParameters();        // Call this function here
                                                     DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
                                                 }
                                             }
-                                            ImGui::TreePop(reaMOD_ImGui_Context);
+                                            ImGui::TreePop(reaMOD_Main_ImGui_Context);
                                         }
                                     }
-                                    ImGui::TreePop(reaMOD_ImGui_Context);
+                                    ImGui::TreePop(reaMOD_Main_ImGui_Context);
                                 }
                             }
                         }
                     }
-                    ImGui::TreePop(reaMOD_ImGui_Context);  // End the bank file tree node
+                    ImGui::TreePop(reaMOD_Main_ImGui_Context);  // End the bank file tree node
                 }
             }
         }
-        ImGui::Text(reaMOD_ImGui_Context, "");
+        ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
         // Global Parameters Section
-        ImGui::Separator(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context, "Global Parameters:");
-
+        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Global Parameters:");
+        
         RetrieveGlobalParameters();
         
-        if (!globalParameters.empty()) {
-            // Display sliders for the global parameters
-            for (auto& globalParam : globalParameters) {
-                float previousValue = globalParam.currentValue;
-
-                double doubleValue = static_cast<double>(globalParam.currentValue);
-                double doubleMin = static_cast<double>(globalParam.minValue);
-                double doubleMax = static_cast<double>(globalParam.maxValue);
-
-                // Use SliderDouble to create a slider for the parameter
-                ImGui::SliderDouble(reaMOD_ImGui_Context, globalParam.name.c_str(), &doubleValue, doubleMin, doubleMax);
-
-                // Update the currentValue with the new value from the slider
-                globalParam.currentValue = static_cast<float>(doubleValue);
-
-                // If the value has changed, update the global parameter in FMOD
-                if (previousValue != globalParam.currentValue) {
-                    fmod_system->setParameterByName(globalParam.name.c_str(), globalParam.currentValue);
-                    fmod_system->update();
+        if (!groupedGlobalParameters.empty()) {
+            // Loop over each group
+            for (auto& group : groupedGlobalParameters) {
+                const std::string& groupName = group.first;
+                std::vector<GlobalParameter>& parameters = group.second;
+        
+                // Display the group name as a collapsible tree node
+                if (ImGui::TreeNode(reaMOD_Main_ImGui_Context, groupName.c_str())) {
+        
+                    // Loop over parameters in the group
+                    for (auto& globalParam : parameters) {
+                        float previousValue = globalParam.currentValue;
+        
+                        double doubleValue = static_cast<double>(globalParam.currentValue);
+                        double doubleMin = static_cast<double>(globalParam.minValue);
+                        double doubleMax = static_cast<double>(globalParam.maxValue);
+        
+                        // Use SliderDouble to create a slider for the parameter
+                        ImGui::SliderDouble(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), &doubleValue, doubleMin, doubleMax);
+        
+                        // Update the currentValue with the new value from the slider
+                        globalParam.currentValue = static_cast<float>(doubleValue);
+        
+                        // If the value has changed, update the global parameter in FMOD
+                        if (previousValue != globalParam.currentValue) {
+                            fmod_system->setParameterByName(globalParam.name.c_str(), globalParam.currentValue);
+                            fmod_system->update();
+                        }
+                    }
+        
+                    ImGui::TreePop(reaMOD_Main_ImGui_Context); // End the group tree node
                 }
             }
         } else {
-            ImGui::Text(reaMOD_ImGui_Context, "No global parameters.");
+            ImGui::Text(reaMOD_Main_ImGui_Context, "No global parameters.");
         }
-        ImGui::Text(reaMOD_ImGui_Context, "");
+
+
+
+        ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
         // New section for selected event and parameters
-        ImGui::Separator(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context, "Selected Event:");
+        // ImGui::Separator(reaMOD_Main_ImGui_Context);
+        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Selected Event:");
     
         // Render the play button
         std::string play_button_label = "Play##SelectedEvent";
-        RenderPlayButton(reaMOD_ImGui_Context, play_button_label, selectedFMODEvent);
-        ImGui::SameLine(reaMOD_ImGui_Context);
+        RenderPlayButton(reaMOD_Main_ImGui_Context, play_button_label, selectedFMODEvent);
+        ImGui::SameLine(reaMOD_Main_ImGui_Context);
         // Display the selected event name
-        ImGui::Text(reaMOD_ImGui_Context, selectedFMODEvent.c_str());
+        ImGui::Text(reaMOD_Main_ImGui_Context, selectedFMODEvent.c_str());
     
         // Get the event instance for the selected event
         FMOD::Studio::EventInstance* eventInstance = nullptr;
@@ -2323,9 +2395,9 @@ void RenderGUI() {
             double doubleMax = static_cast<double>(param.maxValue);
 
             // Use SliderDouble to create a slider for the parameter
-            ImGui::SliderDouble(reaMOD_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax);
+            ImGui::SliderDouble(reaMOD_Main_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax);
 
-            if (ImGui::IsItemActive(reaMOD_ImGui_Context)) {
+            if (ImGui::IsItemActive(reaMOD_Main_ImGui_Context)) {
                 anySliderActive = true;
             }
 
@@ -2364,42 +2436,45 @@ void RenderGUI() {
             }
         }
 
-        ImGui::Checkbox(reaMOD_ImGui_Context, "Sync with selected item", &syncSelectedEventWithItemSelection);
-        ImGui::Text(reaMOD_ImGui_Context, "");
+        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Sync with selected item", &syncSelectedEventWithItemSelection);
+        ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
-        ImGui::Separator(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context, "Settings:");
+        // ImGui::Separator(reaMOD_Main_ImGui_Context);
+        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Settings:");
 
         // Add the InputInt control for Look Ahead Time and keep the text on the same line
-        ImGui::SetNextItemWidth(reaMOD_ImGui_Context, 90);
-        ImGui::InputInt(reaMOD_ImGui_Context, "##look_ahead_time_ms", &lookAheadTimeMs);
-        ImGui::SameLine(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context, "Event detection look ahead time (ms)");
+        ImGui::SetNextItemWidth(reaMOD_Main_ImGui_Context, 90);
+        ImGui::InputInt(reaMOD_Main_ImGui_Context, "##look_ahead_time_ms", &lookAheadTimeMs);
+        ImGui::SameLine(reaMOD_Main_ImGui_Context);
+        ImGui::Text(reaMOD_Main_ImGui_Context, "Event detection look ahead time (ms)");
 
         // Add the InputInt control for number of frames
-        ImGui::SetNextItemWidth(reaMOD_ImGui_Context, 90);
-        ImGui::InputInt(reaMOD_ImGui_Context, "##num_frames_for_item", &numFramesForItem);
-        ImGui::SameLine(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context, "Number of frames for inserted item");
+        ImGui::SetNextItemWidth(reaMOD_Main_ImGui_Context, 90);
+        ImGui::InputInt(reaMOD_Main_ImGui_Context, "##num_frames_for_item", &numFramesForItem);
+        ImGui::SameLine(reaMOD_Main_ImGui_Context);
+        ImGui::Text(reaMOD_Main_ImGui_Context, "Number of frames for inserted item");
 
         // Add the checkbox for moving the cursor after inserting an item
-        ImGui::Checkbox(reaMOD_ImGui_Context, "Move edit to end of inserted item.", &moveCursorAfterInsert);
-        ImGui::Checkbox(reaMOD_ImGui_Context, "Update item length from last time-selection insert.", &updateItemInsertionLength);
+        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Move edit to end of inserted item.", &moveCursorAfterInsert);
+        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Update item length from last time-selection insert.", &updateItemInsertionLength);
 
-        ImGui::Separator(reaMOD_ImGui_Context);
-        ImGui::Text(reaMOD_ImGui_Context, "ReaMOD v0.1");
-        ImGui::Text(reaMOD_ImGui_Context, "Created by Daniel Dehaan");
-        ImGui::Text(reaMOD_ImGui_Context, "www.danielrdehaan.com");
+        ImGui::Separator(reaMOD_Main_ImGui_Context);
+        ImGui::Text(reaMOD_Main_ImGui_Context, "ReaMOD v0.1");
+        ImGui::Text(reaMOD_Main_ImGui_Context, "Created by Daniel Dehaan");
+        ImGui::Text(reaMOD_Main_ImGui_Context, "www.danielrdehaan.com");
 
-        ImGui::End(reaMOD_ImGui_Context);
+        if (searchFmodEventWindowOpen) {
+            // RenderEventSearchWindow();
+        }
+
+        ImGui::End(reaMOD_Main_ImGui_Context);
     }
 
     // Pop the style colors
-    ImGui::PopStyleColor(reaMOD_ImGui_Context);
+    ImGui::PopStyleColor(reaMOD_Main_ImGui_Context);
 
-    // If the window is closed, unregister the timer to stop rendering
     if (!open) {
-        reaMOD_ImGui_Context = nullptr;
+        reaMOD_Main_ImGui_Context = nullptr;
     }
 }
 
@@ -2681,10 +2756,10 @@ void AutoLoadReaMODFile() {
 }
 
 void toggleReaMODWindow() {
-    if (!reaMOD_ImGui_Context) {
+    if (!reaMOD_Main_ImGui_Context) {
         // First-time setup: initialize ReaImGui and FMOD, and start rendering
         ImGui::init(plugin_getapi);
-        reaMOD_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
+        reaMOD_Main_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
 
         // Initialize FMOD only if it's not already initialized
         if (!IsFMODInitialized()) {
@@ -2717,8 +2792,13 @@ void toggleReaMODWindow() {
         }
 
         // Nullify the ImGui context to signify the window is closed
-        reaMOD_ImGui_Context = nullptr;
+        reaMOD_Main_ImGui_Context = nullptr;
     }
+}
+
+void openFmodEventSearchWindow()
+{
+    searchFmodEventWindowOpen = !searchFmodEventWindowOpen;
 }
 
 // Command hook function for Reaper custom action
@@ -2758,6 +2838,10 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
     }
     if (command == actionIDPostFmodTracksListToConsole) {
         PostFmodTracksListToConsole();
+        return true;
+    }
+    if (command == actionIDSearchForFmodEvent) {
+        openFmodEventSearchWindow();
         return true;
     }
 
@@ -2802,6 +2886,9 @@ void RegisterActions() {
 
     static custom_action_register_t actionPostFmodTracksListToConsole = { 0, "ReaMOD_PostFmodTracksListToConsole", "ReaMOD: Post current list of FMOD tracks to console" };
     actionIDPostFmodTracksListToConsole = plugin_register("custom_action", &actionPostFmodTracksListToConsole);
+
+    static custom_action_register_t actionSearchForFmodEvent = { 0, "ReaMOD_SearchForFmodEvent", "ReaMOD: Search for FMOD Event" };
+    actionIDSearchForFmodEvent = plugin_register("custom_action", &actionSearchForFmodEvent);
 }
 
 // Entry point function for the Reaper plugin
