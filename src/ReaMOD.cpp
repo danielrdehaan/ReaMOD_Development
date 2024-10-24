@@ -27,7 +27,7 @@
 
 #define FILE_PATH_BUFFER_SIZE 1024
 
-#define DEBUG false
+#define DEBUG true
 
 namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
 
@@ -40,6 +40,7 @@ static int actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = 0;
 static int actionIDStopAndReleaseAllFmodEventInstances = 0;
 static int actionIDInsertParamUpdateItemForSelectedMediaItem = 0;
 static int actionIDInsertParamAutomationItemsForSelectedMediaItem = 0;
+static int actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem = 0;
 // static int actionIDPostFmodTracksListToConsole = 0;
 static int actionIDSearchForFmodEvent = 0;
 static int actionIDTriggerSelectedEvent = 0;
@@ -178,6 +179,13 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         GetTrackDepth = reinterpret_cast<decltype(GetTrackDepth)>(rec->GetFunc("GetTrackDepth"));
         GetParentTrack = reinterpret_cast<decltype(GetParentTrack)>(rec->GetFunc("GetParentTrack"));
         GetMediaTrackInfo_Value = reinterpret_cast<decltype(GetMediaTrackInfo_Value)>(rec->GetFunc("GetMediaTrackInfo_Value"));
+        GetResourcePath = reinterpret_cast<decltype(GetResourcePath)>(rec->GetFunc("GetResourcePath"));
+        TrackFX_AddByName = reinterpret_cast<decltype(TrackFX_AddByName)>(rec->GetFunc("TrackFX_AddByName"));
+        GetMediaItemTrack = reinterpret_cast<decltype(GetMediaItemTrack)>(rec->GetFunc("GetMediaItemTrack"));           // Load GetMediaItemTrack
+        TakeFX_AddByName = reinterpret_cast<decltype(TakeFX_AddByName)>(rec->GetFunc("TakeFX_AddByName"));
+        CreateNewMIDIItemInProj = reinterpret_cast<decltype(CreateNewMIDIItemInProj)>(rec->GetFunc("CreateNewMIDIItemInProj"));
+        TakeFX_GetEnvelope = reinterpret_cast<decltype(TakeFX_GetEnvelope)>(rec->GetFunc("TakeFX_GetEnvelope"));                // Load TakeFX_GetEnvelope
+        Envelope_Evaluate = reinterpret_cast<decltype(Envelope_Evaluate)>(rec->GetFunc("Envelope_Evaluate"));                    // Load Envelope_Evaluate
     }
 }
 
@@ -299,7 +307,6 @@ bool IsFMODInitialized() {
 // Declare at global scope or as a class member
 std::map<std::string, std::vector<GlobalParameter>> groupedGlobalParameters;
 
-
 void RetrieveGlobalParameters() {
     globalParameters.clear();           // Clear any existing parameters
     groupedGlobalParameters.clear();    // Clear existing grouped parameters
@@ -367,7 +374,6 @@ void RetrieveGlobalParameters() {
         });
     }
 }
-
 
 // Load a bank and retrieve its events
 void LoadBank(const std::string& bank_path, bool load_sample_data = true) {
@@ -617,26 +623,23 @@ void AddItemWithSelectedEventAtEditCursor() {
         return;
     }
 
-    // Add a media item on the selected track at the cursor position
-    MediaItem* newItem = AddMediaItemToTrack(selectedTrack);
-    if (!newItem) {
-        PostMsg("Failed to create a new item.\n");
-        return;
-    }
-
-    // Set the item position to the cursor
-    GetSetMediaItemInfo(newItem, "D_POSITION", &cursorPosition);
-
     // Calculate the item length based on the frame rate and the number of frames
     bool dropFrame = false;
     double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame);
     double itemLength = numFramesForItem / frameRate; // Set the length to the specified number of frames
 
-    // Set the calculated length for the item
-    GetSetMediaItemInfo(newItem, "D_LENGTH", &itemLength);
+    // Set looping to false
+    bool loop = false;
 
-    // Add a new take to the item
-    MediaItem_Take* newTake = AddTakeToMediaItem(newItem);
+    // Create a MIDI item on the selected track at the cursor position
+    MediaItem* newItem = CreateNewMIDIItemInProj(selectedTrack, cursorPosition, cursorPosition + itemLength, &loop);
+    if (!newItem) {
+        PostMsg("Failed to create a new MIDI item.\n");
+        return;
+    }
+
+    // Add a new take to the item (it will be MIDI by default)
+    MediaItem_Take* newTake = GetActiveTake(newItem);
     if (!newTake) {
         PostMsg("Failed to create a new take for the item.\n");
         return;
@@ -663,8 +666,9 @@ void AddItemWithSelectedEventAtEditCursor() {
         SetEditCurPos(newCursorPosition, true, false);
     }
 
-    DebugMsg("Item added at position %.2f with take name: %s\n", cursorPosition, selectedFMODEvent.c_str());
+    DebugMsg("MIDI item added at position %.2f with take name: %s\n", cursorPosition, selectedFMODEvent.c_str());
 }
+
 
 void AddItemWithSelectedEventWithinTimeSelection() {
     if (selectedFMODEvent.empty()) {
@@ -699,31 +703,18 @@ void AddItemWithSelectedEventWithinTimeSelection() {
         return;
     }
 
-    // Add a media item on the selected track within the time selection
-    MediaItem* newItem = AddMediaItemToTrack(selectedTrack);
+    // Set looping to false
+    bool loop = false;
+
+    // Create a MIDI item on the selected track within the time selection
+    MediaItem* newItem = CreateNewMIDIItemInProj(selectedTrack, timeSelStart, timeSelEnd, &loop);
     if (!newItem) {
-        PostMsg("Failed to create a new item.\n");
+        PostMsg("Failed to create a new MIDI item.\n");
         return;
     }
 
-    // Set the item start position to the time selection start
-    GetSetMediaItemInfo(newItem, "D_POSITION", &timeSelStart);
-
-    // Set the item length to match the time selection
-    double itemLength = timeSelEnd - timeSelStart;
-    GetSetMediaItemInfo(newItem, "D_LENGTH", &itemLength);
-
-    // Update the numFramesForItem if the checkbox is checked
-    if (updateItemInsertionLength == true) {
-        bool dropFrame = false;
-        double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame); // Get the project frame rate
-
-        // Convert the item length (in seconds) to frames based on the frame rate
-        numFramesForItem = static_cast<int>(itemLength * frameRate);
-    }
-
-    // Add a new take to the item
-    MediaItem_Take* newTake = AddTakeToMediaItem(newItem);
+    // Add a new take to the item (it will be MIDI by default)
+    MediaItem_Take* newTake = GetActiveTake(newItem);
     if (!newTake) {
         PostMsg("Failed to create a new take for the item.\n");
         return;
@@ -749,7 +740,7 @@ void AddItemWithSelectedEventWithinTimeSelection() {
         SetEditCurPos(timeSelEnd, true, false);
     }
 
-    DebugMsg("Item added within time selection from %.2f to %.2f with take name: %s\n", timeSelStart, timeSelEnd, selectedFMODEvent.c_str());
+    DebugMsg("MIDI item added within time selection from %.2f to %.2f with take name: %s\n", timeSelStart, timeSelEnd, selectedFMODEvent.c_str());
 }
 
 void UpdateNumFramesForItemInsertionFromCurrentTimeSelection() {
@@ -990,6 +981,7 @@ bool UpdateSelectedEventParameters(const std::string& eventPath) {
     selectedFMODEvent = eventPath;
 
     return true;
+    DebugMsg("Selected FMOD Event Updated to %s and its paramters have been loaded.\n", selectedFMODEvent.c_str());
 }
 
 // Use the ReaImGui MouseButton_Right enum or value
@@ -1708,6 +1700,53 @@ bool isTrackActive(MediaTrack* track) {
     return true;
 }
 
+void ApplyEnvelopeValueToFMODEvent(const std::string& itemGUID, const std::string& paramName, float value) {
+    // Retrieve the active event instance for this item using the GUID
+    auto it = activeEventInstances.find(itemGUID);
+    if (it == activeEventInstances.end()) {
+        DebugMsg("No active FMOD event instance found for GUID: %s\n", itemGUID.c_str());
+        return;
+    }
+
+    // Apply the parameter value to the FMOD event instance
+    FMOD::Studio::EventInstance* eventInstance = it->second.instance;
+    FMOD_RESULT result = eventInstance->setParameterByName(paramName.c_str(), value);
+    if (result == FMOD_OK) {
+        DebugMsg("Updated FMOD event parameter %s to %.2f for item GUID: %s\n", paramName.c_str(), value, itemGUID.c_str());
+    } else {
+        DebugMsg("Failed to update FMOD event parameter %s for item GUID: %s\n", paramName.c_str(), itemGUID.c_str());
+    }
+
+    // Make sure to call the FMOD update function to apply changes
+    fmod_system->update();
+}
+
+void MonitorEnvelopesForEventItem(MediaItem_Take* take, const std::string& itemGUID) {
+    if (!take || itemGUID.empty()) return;
+
+    int fxIndex = 0; // Assuming JSFX is the first FX in the chain
+
+    for (int paramIndex = 0; paramIndex < selectedEventParameters.size(); ++paramIndex) {
+        // Retrieve the envelope for this parameter
+        TrackEnvelope* envelope = TakeFX_GetEnvelope(take, fxIndex, paramIndex, false); // Don't create if it doesn't exist
+        if (!envelope) {
+            DebugMsg("No envelope for parameter %d on FX %d.\n", paramIndex, fxIndex);
+            continue;
+        }
+
+        // Evaluate the envelope at the current play position
+        double playPosition = GetPlayPosition();
+        double envelopeValue = 0.0;
+        bool result = Envelope_Evaluate(envelope, playPosition, 0, 0, &envelopeValue, nullptr, nullptr, 0);
+        if (result) {
+            DebugMsg("Envelope value for parameter %s at position %.2f: %.2f\n", selectedEventParameters[paramIndex].name.c_str(), playPosition, envelopeValue);
+
+            // Apply this value to the FMOD event instance
+            ApplyEnvelopeValueToFMODEvent(itemGUID, selectedEventParameters[paramIndex].name, envelopeValue);
+        }
+    }
+}
+
 void CheckItems(double playPosition) {
     UpdateTrackCache(); // Refresh the track cache before checking items
 
@@ -1723,7 +1762,7 @@ void CheckItems(double playPosition) {
         std::string trackName(trackNameChar);
         DebugMsg("Checking items on track: %s\n", trackName.c_str());
 
-        if (isTrackActive(track)){
+        if (isTrackActive(track)) {
             int itemCount = CountTrackMediaItems(track);
             for (int j = 0; j < itemCount; ++j) {
                 MediaItem* item = GetTrackMediaItem(track, j);
@@ -1734,13 +1773,14 @@ void CheckItems(double playPosition) {
                 bool isItemMuted = *(bool*)GetSetMediaItemInfo(item, "B_MUTE", nullptr);
                 if (isItemMuted) {
                     DebugMsg("Skipping muted item on track: %s\n", trackName.c_str());
-                    continue; // Skip to the next item if the item is muted
+                    continue; // Skip to next item if the item is muted
                 }
 
                 double itemStart = *(double*)GetSetMediaItemInfo(item, "D_POSITION", nullptr);
                 double itemEnd = itemStart + *(double*)GetSetMediaItemInfo(item, "D_LENGTH", nullptr);
                 std::string itemGUID = GetItemGUID(item);
 
+                // If the playhead moved backward, clear active instances
                 if (playPosition < previousPlayPosition) {
                     activeEventInstances.clear();  // Reset instances if playhead moved backward
                 }
@@ -1753,96 +1793,24 @@ void CheckItems(double playPosition) {
                     // Handle "event:" items
                     if (nameStr.find("event:") == 0) {
                         std::string eventPath = nameStr.substr(6);  // Strip the "event:" prefix
+
+                        // If within the item's time range
                         if (playPosition >= itemStart - lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
                             if (activeEventInstances.find(itemGUID) == activeEventInstances.end()) {
                                 // Create the FMOD event instance
                                 CreateFMODEventInstance(eventPath, item, itemStart, itemEnd);
-
-                                // Apply parameters from item notes
-                                FMOD::Studio::EventInstance* eventInstance = activeEventInstances[itemGUID].instance;
-
-                                // Parse the item notes to get parameters
-                                char itemNotes[4096] = "";
-                                bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
-                                if (hasNotes && strlen(itemNotes) > 0) {
-                                    // Split item notes into individual lines
-                                    std::vector<std::string> noteLines = SplitString(itemNotes, "\n");
-                                    for (const std::string& line : noteLines) {
-                                        if (line.rfind("param:", 0) == 0) {
-                                            size_t equalPos = line.find('=');
-                                            if (equalPos != std::string::npos) {
-                                                std::string paramName = line.substr(6, equalPos - 6); // Get parameter name
-                                                std::string paramValueStr = line.substr(equalPos + 1); // Get parameter value
-                                                try {
-                                                    float paramValue = std::stof(paramValueStr); // Convert value to float
-                                                    eventInstance->setParameterByName(paramName.c_str(), paramValue);
-                                                    fmod_system->update();
-                                                    DebugMsg("Updated parameter '%s' to value %.2f for event instance.\n", paramName.c_str(), paramValue);
-                                                } catch (const std::exception& e) {
-                                                    DebugMsg("Error parsing parameter value in item notes: %s\n", e.what());
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
                             }
+
+                            // Apply envelope values to the FMOD event parameters
+                            MonitorEnvelopesForEventItem(take, itemGUID);
                         } else if (playPosition > itemEnd + tolerance && activeEventInstances.find(itemGUID) != activeEventInstances.end()) {
                             ReleaseFMODEventInstance(itemGUID);
-                        }
-                    }
-
-                    // Handle "param:" items
-                    else if (nameStr.find("param:") == 0) {
-                        // Parse "param:ParameterName=Value"
-                        size_t equalPos = nameStr.find('=');
-                        if (equalPos != std::string::npos) {
-                            std::string paramName = nameStr.substr(6, equalPos - 6); // Get parameter name
-                            std::string paramValueStr = nameStr.substr(equalPos + 1); // Get parameter value
-                            float paramValue = std::stof(paramValueStr); // Convert value to float
-
-                            // Check if playPosition is within the item's time range
-                            if (playPosition >= itemStart - lookAheadTimeSeconds && playPosition <= itemEnd + tolerance) {
-                                DebugMsg("Found param item: %s with value: %s\n", paramName.c_str(), paramValueStr.c_str());
-
-                                // Check for a GUID in the item's notes
-                                char itemNotes[4096];
-                                bool hasNotes = GetSetMediaItemInfo_String(item, "P_NOTES", itemNotes, false);
-                                if (hasNotes && strstr(itemNotes, "GUID=")) {
-                                    // Extract GUID from notes
-                                    std::string guidStr(itemNotes);
-                                    size_t start = guidStr.find("GUID=") + 5;
-                                    size_t end = guidStr.find("\n", start);
-                                    std::string extractedGUID = guidStr.substr(start, end - start);
-
-                                    // Debug message for the extracted GUID
-                                    DebugMsg("Extracted GUID from item notes: %s\n", extractedGUID.c_str());
-
-                                    // Find the specific event instance by GUID
-                                    if (activeEventInstances.find(extractedGUID) != activeEventInstances.end()) {
-                                        FMOD::Studio::EventInstance* instance = activeEventInstances[extractedGUID].instance;
-                                        if (instance) {
-                                            instance->setParameterByName(paramName.c_str(), paramValue);
-                                            fmod_system->update();
-                                            DebugMsg("Updated parameter '%s' to value %.2f for instance with GUID: %s\n", paramName.c_str(), paramValue, extractedGUID.c_str());
-                                        }
-                                    } else {
-                                        DebugMsg("No active instance found for GUID: %s\n", extractedGUID.c_str());
-                                    }
-                                } else {
-                                    // If no GUID, assume it's a global parameter
-                                    fmod_system->setParameterByName(paramName.c_str(), paramValue);
-                                    fmod_system->update();
-                                    DebugMsg("Updated global parameter '%s' to value %.2f\n", paramName.c_str(), paramValue);
-                                }
-                            }
                         }
                     }
                 }
             }
         }
-        }
-
-        
+    }
 
     previousPlayPosition = playPosition;
 }
@@ -2011,14 +1979,6 @@ void SaveStateToFile(const std::string& filePath = "") {
         formattedLastSaveTimestamp.clear();
     }
 }
-
-#include <string>
-#include <vector>
-#include <fstream>
-#include <algorithm>
-#include <exception>
-#include <filesystem> // For fs::exists and last_write_time
-namespace fs = std::filesystem;
 
 // Utility function to trim leading and trailing whitespace from a string
 std::string TrimString(const std::string& str) {
@@ -3041,7 +3001,7 @@ void MonitorItemSelection() {
     // DebugMsg("MonitorItemSelection called.\n");
 
     if (!syncSelectedEventWithItemSelection) {
-        // DebugMsg("Sync with selected item is disabled.\n");
+        DebugMsg("Sync with selected item is disabled.\n");
         lastSelectedItem = nullptr; // Reset if not syncing
         return;
     }
@@ -3060,7 +3020,7 @@ void MonitorItemSelection() {
     // Get the active take
     MediaItem_Take* take = GetActiveTake(selectedItem);
     if (!take) {
-        // DebugMsg("Selected item has no active take. Exiting.\n");
+        DebugMsg("Selected item has no active take. Exiting.\n");
         lastSelectedItem = nullptr; // Reset lastSelectedItem
         return;
     }
@@ -3072,10 +3032,10 @@ void MonitorItemSelection() {
 
     if (takeNameStr.find("event:") == 0) {
         if (selectedItem != lastSelectedItem) {
-            // DebugMsg("Selected item has changed.\n");
+            DebugMsg("Selected item has changed.\n");
             lastSelectedItem = selectedItem; // Update the last selected item
 
-            // DebugMsg("Take name starts with 'event:'. Setting selected FMOD event.\n");
+            DebugMsg("Take name starts with 'event:'. Setting selected FMOD event.\n");
 
             // Set the selected event
             selectedFMODEvent = takeNameStr;
@@ -3086,18 +3046,18 @@ void MonitorItemSelection() {
             bool hasNotes = GetSetMediaItemInfo_String(selectedItem, "P_NOTES", itemNotes, false);
 
             if (hasNotes && strlen(itemNotes) > 0) {
-                // DebugMsg("Item has notes: %s\n", itemNotes);
+                DebugMsg("Item has notes: %s\n", itemNotes);
 
                 std::vector<std::string> noteLines = SplitString(itemNotes, "\n");
                 for (const std::string& line : noteLines) {
-                    // DebugMsg("Processing note line: %s\n", line.c_str());
+                    DebugMsg("Processing note line: %s\n", line.c_str());
 
                     if (line.rfind("param:", 0) == 0) {
                         size_t equalPos = line.find('=');
                         if (equalPos != std::string::npos) {
                             std::string paramName = line.substr(6, equalPos - 6); // Get parameter name
                             std::string paramValueStr = line.substr(equalPos + 1); // Get parameter value
-                            // DebugMsg("Found parameter: %s with value: %s\n", paramName.c_str(), paramValueStr.c_str());
+                            DebugMsg("Found parameter: %s with value: %s\n", paramName.c_str(), paramValueStr.c_str());
 
                             try {
                                 float paramValue = std::stof(paramValueStr); // Convert value to float
@@ -3106,7 +3066,7 @@ void MonitorItemSelection() {
                                 // Update the matching parameter in selectedEventParameters
                                 for (auto& param : selectedEventParameters) {
                                     if (param.name == paramName) {
-                                        // DebugMsg("Updating parameter '%s' currentValue to %f\n", paramName.c_str(), paramValue);
+                                        DebugMsg("Updating parameter '%s' currentValue to %f\n", paramName.c_str(), paramValue);
                                         param.currentValue = paramValue;
 
                                         // Also update the cached parameter value
@@ -3114,7 +3074,7 @@ void MonitorItemSelection() {
                                         for (auto& cachedParam : cachedParams) {
                                             if (cachedParam.name == paramName) {
                                                 cachedParam.currentValue = paramValue;
-                                                // DebugMsg("Updated cached parameter '%s' currentValue to %f\n", paramName.c_str(), paramValue);
+                                                DebugMsg("Updated cached parameter '%s' currentValue to %f\n", paramName.c_str(), paramValue);
                                                 break;
                                             }
                                         }
@@ -3124,20 +3084,20 @@ void MonitorItemSelection() {
                                 }
 
                                 if (!paramFound) {
-                                    // DebugMsg("Parameter '%s' not found in selectedEventParameters.\n", paramName.c_str());
+                                    DebugMsg("Parameter '%s' not found in selectedEventParameters.\n", paramName.c_str());
                                 }
                             } catch (const std::exception& e) {
-                                // DebugMsg("Error parsing parameter value in item notes: %s\n", e.what());
+                                DebugMsg("Error parsing parameter value in item notes: %s\n", e.what());
                             }
                         } else {
-                            // DebugMsg("No '=' found in parameter line: %s\n", line.c_str());
+                            DebugMsg("No '=' found in parameter line: %s\n", line.c_str());
                         }
                     } else {
-                        // DebugMsg("Line does not start with 'param:': %s\n", line.c_str());
+                        DebugMsg("Line does not start with 'param:': %s\n", line.c_str());
                     }
                 }
             } else {
-                // DebugMsg("Item has no notes or failed to retrieve notes.\n");
+                DebugMsg("Item has no notes or failed to retrieve notes.\n");
             }
         } else {
             // Selected item hasn't changed, but we might need to update parameters
@@ -3157,7 +3117,7 @@ void MonitorItemSelection() {
                             if (result == FMOD_OK) {
                                 param.currentValue = value;
                             } else {
-                                // DebugMsg("Failed to get parameter '%s' value from event instance.\n", param.name.c_str());
+                                DebugMsg("Failed to get parameter '%s' value from event instance.\n", param.name.c_str());
                             }
                         }
                         fmod_system->update();
@@ -3260,6 +3220,134 @@ void openFmodEventSearchWindow()
     searchFmodEventWindowOpen = !searchFmodEventWindowOpen;
 }
 
+// Function to check if a directory exists
+bool DirectoryExists(const std::string& directoryPath) {
+    return fs::exists(directoryPath) && fs::is_directory(directoryPath);
+}
+
+// Function to create a directory if it doesn't exist (renamed to avoid macro conflict)
+bool CreateDirectoryIfNotExists(const std::string& directoryPath) {
+    if (!DirectoryExists(directoryPath)) {
+        try {
+            return fs::create_directories(directoryPath); // Creates the directory and any parent directories if needed
+        } catch (const fs::filesystem_error& e) {
+            ShowConsoleMsg(("Failed to create directory: " + std::string(e.what()) + "\n").c_str());
+            return false;
+        }
+    }
+    return true; // Directory already exists
+}
+
+void InsertEventParameterJSFXForSelectedMediaItem() {
+    DebugMsg("Starting InsertEventParameterJSFXForSelectedMediaItem...\n");
+
+    // Get the currently selected media item
+    MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0);
+    if (!selectedItem) {
+        DebugMsg("No media item is selected.\n");
+        return;
+    }
+
+    // Get the active take of the selected media item
+    MediaItem_Take* activeTake = GetActiveTake(selectedItem);
+    if (!activeTake) {
+        DebugMsg("Selected item has no active take.\n");
+        return;
+    }
+
+    // Get the name of the active take
+    char takeName[512];
+    GetSetMediaItemTakeInfo_String(activeTake, "P_NAME", takeName, false);
+    DebugMsg("Active take name: %s\n", takeName);
+
+    // Strip "event:" prefix and check if the take name matches the selected FMOD event
+    std::string fmodEventName = selectedFMODEvent;
+    DebugMsg("Original FMOD event name: %s\n", fmodEventName.c_str());
+
+    if (fmodEventName != takeName) {
+        DebugMsg("Take name does not match the selected FMOD event. Aborting.\n");
+        return;
+    }
+
+    // Strip "event:" prefix from the FMOD event path
+    fmodEventName = StripPathPrefix(selectedFMODEvent);
+    DebugMsg("Stripped FMOD event name: %s\n", fmodEventName.c_str());
+
+    // Construct the JSFX filename based on the project and event path, without "event:"
+    std::string projectName = selected_file_name;
+    projectName = projectName.substr(0, projectName.rfind(".fspro"));  // Remove ".fspro" extension
+    DebugMsg("Project name: %s\n", projectName.c_str());
+
+    // Construct the JSFX filename based on the project and event path, without "event:"
+    std::string jsfxName = projectName + "_" + fmodEventName;
+    
+    // Step 1: Remove the first "/"
+    size_t firstSlashPos = jsfxName.find('/');
+    if (firstSlashPos != std::string::npos) {
+        jsfxName.erase(firstSlashPos, 1);  // Remove the first "/"
+    }
+    
+    // Step 2: Replace all subsequent "/" with "-"
+    std::replace(jsfxName.begin(), jsfxName.end(), '/', '-');
+    
+    // Step 3: Remove any ":" to make it valid for Reaper
+    jsfxName.erase(std::remove(jsfxName.begin(), jsfxName.end(), ':'), jsfxName.end());
+    
+    DebugMsg("Final JSFX name (after removing invalid characters): %s\n", jsfxName.c_str());
+
+
+    // Create the "ReaMOD" directory if it doesn't exist
+    std::string effectsPath = std::string(GetResourcePath()) + "/Effects/ReaMOD";
+    DebugMsg("Effects path: %s\n", effectsPath.c_str());
+
+    if (!DirectoryExists(effectsPath.c_str())) {
+        DebugMsg("Directory does not exist. Creating: %s\n", effectsPath.c_str());
+        if (!CreateDirectoryIfNotExists(effectsPath.c_str())) {
+            DebugMsg("Failed to create directory: %s\n", effectsPath.c_str());
+            return;
+        }
+    }
+
+    // Full path to the new JSFX file
+    std::string jsfxFilePath = effectsPath + "/" + jsfxName + ".jsfx";
+    DebugMsg("JSFX file path: %s\n", jsfxFilePath.c_str());
+
+    // Build JSFX content from FMOD parameters with sequential slider indices
+    std::string jsfxContent = "desc: " + jsfxName + "\n";
+    int sliderIndex = 1;  // Start slider indices from 1
+    for (const auto& param : selectedEventParameters) {
+        jsfxContent += "slider" + std::to_string(sliderIndex++) + ": " +
+                       std::to_string(param.defaultValue) + "<" +
+                       std::to_string(param.minValue) + "," +
+                       std::to_string(param.maxValue) + "> " + param.name + "\n";
+        DebugMsg("Added parameter to JSFX: %s (default: %f, min: %f, max: %f)\n", param.name.c_str(), param.defaultValue, param.minValue, param.maxValue);
+    }
+    jsfxContent += "@sample\n";
+
+    // Write the JSFX content to the file
+    DebugMsg("Writing JSFX content to file...\n");
+    FILE* jsfxFile = fopen(jsfxFilePath.c_str(), "w");
+    if (jsfxFile) {
+        fwrite(jsfxContent.c_str(), 1, jsfxContent.size(), jsfxFile);
+        fclose(jsfxFile);
+        DebugMsg("JSFX file successfully created.\n");
+    } else {
+        DebugMsg("Failed to create JSFX file at path: %s\n", jsfxFilePath.c_str());
+        return;
+    }
+
+    // Insert the JSFX as a take effect on the selected media item (using TakeFX_AddByName)
+    DebugMsg("Inserting JSFX as take effect...\n");
+    int fxIndex = TakeFX_AddByName(activeTake, jsfxName.c_str(), true);
+
+    if (fxIndex >= 0) {
+        DebugMsg("JSFX %s inserted successfully on take, FX index: %d.\n", jsfxName.c_str(), fxIndex);
+        UpdateArrange();  // Force update the UI
+    } else {
+        DebugMsg("Failed to insert JSFX: %s\n", jsfxName.c_str());
+    }
+}
+
 // Command hook function for Reaper custom action
 static bool commandHook(KbdSectionInfo *sec, const int command, const int val, const int valhw, const int relmode, HWND hwnd) {
     // Check if the action ID matches the registered actions
@@ -3305,6 +3393,10 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
     }
     if (command == actionIDTriggerSelectedEvent) {
         PlayStopCurrentSelectedEvent();
+        return true;
+    }
+    if (command == actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem) {
+        InsertEventParameterJSFXForSelectedMediaItem();
         return true;
     }
 
@@ -3355,6 +3447,10 @@ void RegisterActions() {
 
     static custom_action_register_t actionTriggerSelectedEvent = { 0, "ReaMOD_TriggerSelectedEvent", "ReaMOD: Play/Stop Current Selected Event" };
     actionIDTriggerSelectedEvent = plugin_register("custom_action", &actionTriggerSelectedEvent);
+
+    static custom_action_register_t actionInsertParamEnvelopesForSelectedEventOnSelectedItem = { 0, "ReaMOD_InsertParamEnvelopesForSelectedEventOnSelectedItem", "ReaMOD: Insert parameter envelopes for selected FMOD event on selected media item" };
+    actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem = plugin_register("custom_action", &actionInsertParamEnvelopesForSelectedEventOnSelectedItem);
+
 }
 
 // Entry point function for the Reaper plugin
