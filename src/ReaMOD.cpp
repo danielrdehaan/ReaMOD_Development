@@ -42,6 +42,7 @@ static int actionIDInsertParamUpdateItemForSelectedMediaItem = 0;
 static int actionIDInsertParamAutomationItemsForSelectedMediaItem = 0;
 static int actionIDPostFmodTracksListToConsole = 0;
 static int actionIDSearchForFmodEvent = 0;
+static int actionIDTriggerSelectedEvent = 0;
 
 
 // ImGui context
@@ -64,6 +65,7 @@ std::unordered_map<std::string, FMOD::Studio::Bank*> loaded_banks;  // Map of lo
 std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map of events in each bank
 std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
 std::unordered_map<MediaItem*, bool> triggeredItems; // Global variable to store whether an item has already triggered
+std::unordered_map<std::string, bool> buttonStates; // Global state map to store the color toggle state for each button
 
 std::string selectedFMODEvent = "No event selected";  // Global or static variable to store the selected event
 
@@ -892,11 +894,43 @@ void PlayButtonEvent(const std::string& eventPath) {
 void StopButtonEvent(const std::string& eventPath) {
     auto it = playButtonEventInstances.find(eventPath);
     if (it != playButtonEventInstances.end()) {
-        it->second->stop(FMOD_STUDIO_STOP_ALLOWFADEOUT);
-        it->second->release();
+        FMOD::Studio::EventInstance* eventInstance = it->second;
+        FMOD_RESULT result = eventInstance->stop(FMOD_STUDIO_STOP_ALLOWFADEOUT);
+        if (result != FMOD_OK) {
+            DebugMsg("Failed to stop event: %s.", eventPath.c_str());
+        }
+        eventInstance->release();
         playButtonEventInstances.erase(it);
+
+        // Explicitly update the button state to inactive
+        if (buttonStates.find(eventPath) != buttonStates.end()) {
+            buttonStates[eventPath] = false;
+        } else {
+            // If the event wasn't in buttonStates, initialize it
+            buttonStates[eventPath] = false;
+        }
+
+        // Optionally, log the state change
+        DebugMsg("Stopped FMOD event: %s. Button state set to inactive.\n", eventPath.c_str());
     }
     fmod_system->update();
+}
+
+
+void PlayStopCurrentSelectedEvent() {
+    if (selectedFMODEvent.empty()) {
+        return;
+    }
+
+    // Check if the selected event is currently playing
+    auto it = playButtonEventInstances.find(selectedFMODEvent);
+    if (it != playButtonEventInstances.end()) {
+        // Event is currently playing; stop it
+        StopButtonEvent(selectedFMODEvent);
+    } else {
+        // Event is not playing; start it
+        PlayButtonEvent(selectedFMODEvent);
+    }
 }
 
 bool UpdateSelectedEventParameters(const std::string& eventPath) {
@@ -960,9 +994,6 @@ bool UpdateSelectedEventParameters(const std::string& eventPath) {
 
 // Use the ReaImGui MouseButton_Right enum or value
 const int RightMouseButton = ImGui::MouseButton_Right;
-
-// Global state map to store the color toggle state for each button
-std::unordered_map<std::string, bool> buttonStates;
 
 // Function to render a toggleable play button and trigger/release FMOD event
 bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const std::string& event_path) {
@@ -3272,6 +3303,10 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         openFmodEventSearchWindow();
         return true;
     }
+    if (command == actionIDTriggerSelectedEvent) {
+        PlayStopCurrentSelectedEvent();
+        return true;
+    }
 
 
     return false;
@@ -3317,6 +3352,9 @@ void RegisterActions() {
 
     static custom_action_register_t actionSearchForFmodEvent = { 0, "ReaMOD_SearchForFmodEvent", "ReaMOD: Search for FMOD Event" };
     actionIDSearchForFmodEvent = plugin_register("custom_action", &actionSearchForFmodEvent);
+
+    static custom_action_register_t actionTriggerSelectedEvent = { 0, "ReaMOD_TriggerSelectedEvent", "ReaMOD: Play/Stop Current Selected Event" };
+    actionIDTriggerSelectedEvent = plugin_register("custom_action", &actionTriggerSelectedEvent);
 }
 
 // Entry point function for the Reaper plugin
