@@ -2860,6 +2860,43 @@ void RenderGUI() {
         ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Sync with selected item", &syncSelectedEventWithItemSelection);
         ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
+        // New section to display and edit the notes of the selected media item
+        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Selected Media Item Notes:");
+        
+        // Retrieve the currently selected media item
+        MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0);
+        static char itemNotes[4096] = "";  // Static buffer to persist across frames
+        static MediaItem* lastSelectedItem = nullptr;  // To track if the selected item has changed
+        
+        if (selectedItem) {
+            // If the selected item has changed, load the notes
+            if (selectedItem != lastSelectedItem) {
+                GetSetMediaItemInfo_String(selectedItem, "P_NOTES", itemNotes, false);
+                lastSelectedItem = selectedItem;  // Update last selected item
+            }
+        
+            // Display the current notes in a multi-line input field
+            ImGui::InputTextMultiline(reaMOD_Main_ImGui_Context, "##ItemNotes", itemNotes, sizeof(itemNotes), ImGui::InputTextFlags_CtrlEnterForNewLine);
+        
+            // Check if the multiline is active and "Return" key is pressed
+            if (ImGui::IsItemActive(reaMOD_Main_ImGui_Context) && ImGui::IsKeyPressed(reaMOD_Main_ImGui_Context, ImGui::Key_Enter)) {
+                GetSetMediaItemInfo_String(selectedItem, "P_NOTES", itemNotes, true);  // Save the updated notes
+                DebugMsg("Updated notes for selected media item: %s (via Return key)\n", itemNotes);
+            }
+        
+            // Provide a button to save the notes back to the media item
+            if (ImGui::Button(reaMOD_Main_ImGui_Context, "Save Notes")) {
+                GetSetMediaItemInfo_String(selectedItem, "P_NOTES", itemNotes, true);  // Save the updated notes
+                DebugMsg("Updated notes for selected media item: %s\n", itemNotes);
+            }
+        } else {
+            ImGui::Text(reaMOD_Main_ImGui_Context, "No media item is selected.");
+            lastSelectedItem = nullptr;  // Reset if no item is selected
+        }
+
+
+
+
         // ImGui::Separator(reaMOD_Main_ImGui_Context);
         ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Settings:");
 
