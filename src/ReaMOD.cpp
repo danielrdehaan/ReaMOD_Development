@@ -40,7 +40,7 @@ static int actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = 0;
 static int actionIDStopAndReleaseAllFmodEventInstances = 0;
 static int actionIDInsertParamUpdateItemForSelectedMediaItem = 0;
 static int actionIDInsertParamAutomationItemsForSelectedMediaItem = 0;
-static int actionIDPostFmodTracksListToConsole = 0;
+// static int actionIDPostFmodTracksListToConsole = 0;
 static int actionIDSearchForFmodEvent = 0;
 static int actionIDTriggerSelectedEvent = 0;
 
@@ -1633,29 +1633,29 @@ void UpdateTrackCache() {
     cachedTrackCount = currentTrackCount;
 }
 
-void PostFmodTracksListToConsole() {
-    // Update the track cache before printing, ensuring it's up-to-date.
-    UpdateTrackCache();
+// void PostFmodTracksListToConsole() {
+//     // Update the track cache before printing, ensuring it's up-to-date.
+//     UpdateTrackCache();
 
-    // If the track list is empty, print a message
-    if (fmodTracks.empty()) {
-        PostMsg("No FMOD tracks found.\n");
-        return;
-    }
+//     // If the track list is empty, print a message
+//     if (fmodTracks.empty()) {
+//         PostMsg("No FMOD tracks found.\n");
+//         return;
+//     }
 
-    // Iterate over the fmodTracks map and post each track's info to the console
-    PostMsg("FMOD Tracks:\n");
-    for (const auto& trackPair : fmodTracks) {
-        int trackIndex = trackPair.first;
-        MediaTrack* track = trackPair.second;
+//     // Iterate over the fmodTracks map and post each track's info to the console
+//     PostMsg("FMOD Tracks:\n");
+//     for (const auto& trackPair : fmodTracks) {
+//         int trackIndex = trackPair.first;
+//         MediaTrack* track = trackPair.second;
 
-        // Get the track name
-        char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
-        if (trackName) {
-            PostMsg("      Track %d: %s\n", trackIndex, trackName);
-        }
-    }
-}
+//         // Get the track name
+//         char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+//         if (trackName) {
+//             PostMsg("      Track %d: %s\n", trackIndex, trackName);
+//         }
+//     }
+// }
 
 bool isTrackActive(MediaTrack* track) {
     // Check if the track itself is muted
@@ -3295,10 +3295,10 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         InsertParamAutomationItemsForSelectedMediaItem();
         return true;
     }
-    if (command == actionIDPostFmodTracksListToConsole) {
-        PostFmodTracksListToConsole();
-        return true;
-    }
+    // if (command == actionIDPostFmodTracksListToConsole) {
+    //     PostFmodTracksListToConsole();
+    //     return true;
+    // }
     if (command == actionIDSearchForFmodEvent) {
         openFmodEventSearchWindow();
         return true;
@@ -3347,8 +3347,8 @@ void RegisterActions() {
     static custom_action_register_t actionInsertParamAutomationItemsForSelectedMediaItem = {0, "ReaMOD_InsertParamAutomationItemsForSelectedMediaItem", "ReaMOD: Insert parameter automation items for selected event item over time selection"};
     actionIDInsertParamAutomationItemsForSelectedMediaItem = plugin_register("custom_action", &actionInsertParamAutomationItemsForSelectedMediaItem);
 
-    static custom_action_register_t actionPostFmodTracksListToConsole = { 0, "ReaMOD_PostFmodTracksListToConsole", "ReaMOD: Post current list of FMOD tracks to console" };
-    actionIDPostFmodTracksListToConsole = plugin_register("custom_action", &actionPostFmodTracksListToConsole);
+    // static custom_action_register_t actionPostFmodTracksListToConsole = { 0, "ReaMOD_PostFmodTracksListToConsole", "ReaMOD: Post current list of FMOD tracks to console" };
+    // actionIDPostFmodTracksListToConsole = plugin_register("custom_action", &actionPostFmodTracksListToConsole);
 
     static custom_action_register_t actionSearchForFmodEvent = { 0, "ReaMOD_SearchForFmodEvent", "ReaMOD: Search for FMOD Event" };
     actionIDSearchForFmodEvent = plugin_register("custom_action", &actionSearchForFmodEvent);
