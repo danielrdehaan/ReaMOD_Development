@@ -899,33 +899,34 @@ void StopButtonEvent(const std::string& eventPath) {
     fmod_system->update();
 }
 
-void UpdateSelectedEventParameters() {
-    if (selectedFMODEvent.empty()) {
+bool UpdateSelectedEventParameters(const std::string& eventPath) {
+    if (eventPath.empty()) {
         selectedEventParameters.clear(); // Clear if no event is selected
-        return;
+        return false;
     }
 
     // Check if parameters are already cached for this event
-    auto it = eventParameterCache.find(selectedFMODEvent);
+    auto it = eventParameterCache.find(eventPath);
     if (it != eventParameterCache.end()) {
         // Use cached parameters
         selectedEventParameters = it->second;
-        return;
+        selectedFMODEvent = eventPath; // Update selectedFMODEvent
+        return true;
     }
 
     // Else, load parameters from FMOD and cache them
     FMOD::Studio::EventDescription* eventDesc = nullptr;
-    FMOD_RESULT result = fmod_system->getEvent(selectedFMODEvent.c_str(), &eventDesc);
+    FMOD_RESULT result = fmod_system->getEvent(eventPath.c_str(), &eventDesc);
     if (result != FMOD_OK || !eventDesc) {
-        DebugMsg("Failed to get EventDescription for event: %s\n", selectedFMODEvent.c_str());
-        return;
+        DebugMsg("Failed to get EventDescription for event: %s\n", eventPath.c_str());
+        return false;
     }
 
     int paramCount = 0;
     result = eventDesc->getParameterDescriptionCount(&paramCount);
     if (result != FMOD_OK) {
-        DebugMsg("Failed to get parameter description count for event: %s\n", selectedFMODEvent.c_str());
-        return;
+        DebugMsg("Failed to get parameter description count for event: %s\n", eventPath.c_str());
+        return false;
     }
 
     selectedEventParameters.clear(); // Clear existing parameters
@@ -933,7 +934,7 @@ void UpdateSelectedEventParameters() {
         FMOD_STUDIO_PARAMETER_DESCRIPTION paramDesc;
         result = eventDesc->getParameterDescriptionByIndex(i, &paramDesc);
         if (result != FMOD_OK) {
-            DebugMsg("Failed to get parameter description by index %d for event: %s\n", i, selectedFMODEvent.c_str());
+            DebugMsg("Failed to get parameter description by index %d for event: %s\n", i, eventPath.c_str());
             continue;
         }
 
@@ -949,7 +950,12 @@ void UpdateSelectedEventParameters() {
     }
 
     // Cache the parameters
-    eventParameterCache[selectedFMODEvent] = selectedEventParameters;
+    eventParameterCache[eventPath] = selectedEventParameters;
+
+    // Update selectedFMODEvent
+    selectedFMODEvent = eventPath;
+
+    return true;
 }
 
 // Use the ReaImGui MouseButton_Right enum or value
@@ -985,7 +991,7 @@ bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
 
         // Update the selected event when the play button is clicked
         selectedFMODEvent = event_path;
-        UpdateSelectedEventParameters(); // Call this function here
+        UpdateSelectedEventParameters(selectedFMODEvent); // Call this function here
 
         // Trigger or release the FMOD event
         if (is_active) {
@@ -2301,42 +2307,253 @@ std::string RemoveBankExtension(const std::string& filename) {
     return filename;  // Return original if no ".bank" extension is found
 }
 
-int greyDark = 0x333333FF;
-int blue = 0x395271FF;
+// Helper function to find the common prefix among a list of strings
+std::string FindCommonPrefix(const std::vector<std::string>& strings) {
+    if (strings.empty()) return "";
 
-// Function to render the Event Search Window
-void RenderEventSearchWindow() {
-    // Set the initial window size (400x300 pixels)
-    ImGui::SetNextWindowSize(reaMOD_EventSearch_ImGui_Context, 400, 300, ImGui::Cond_FirstUseEver);
-
-    // // Boolean flag to control window visibility
-    bool open = true;
-
-    // Begin the window
-    if (ImGui::Begin(reaMOD_EventSearch_ImGui_Context, "Event Search", &open, ImGui::WindowFlags_TopMost)) {
-
-        // // Display a label for the input field
-        ImGui::Text(reaMOD_EventSearch_ImGui_Context, "Event Search:");
-
-        // // Static buffer to hold user input (max 255 characters + null terminator)
-        // static char eventSearchBuffer[256] = "";    
-
-        // // Render the InputText field
-        // if (ImGui::InputText(reaMOD_Main_ImGui_Context, "##EventSearch", eventSearchBuffer, sizeof(eventSearchBuffer), ImGui::InputTextFlags_EnterReturnsTrue)) {
-        //     // When Enter is pressed, capture the input into selectedFMODEvent
-        //     selectedFMODEvent = "event:" + std::string(eventSearchBuffer);
-        //     UpdateSelectedEventParameters(); 
-        // }
-
-        // End the window
-        ImGui::End(reaMOD_EventSearch_ImGui_Context);
+    std::string prefix = strings[0];
+    for (size_t i = 1; i < strings.size(); ++i) {
+        size_t j = 0;
+        while (j < prefix.size() && j < strings[i].size() &&
+               prefix[j] == strings[i][j]) {
+            ++j;
+        }
+        prefix = prefix.substr(0, j);
+        if (prefix.empty()) break;
     }
-
-    if (!open) {
-        reaMOD_EventSearch_ImGui_Context = nullptr;
-    }
+    return prefix;
 }
 
+int greyDark = 0x333333FF;
+int blue = 0x395271FF;
+int orange = 0xFFD700FF;
+
+void RenderEventSearchWindow() {
+
+    // Check if the search window should be open
+    if (!searchFmodEventWindowOpen) {
+        return;
+    }
+    
+    // Set the initial window size
+    ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 400, 300, ImGui::Cond_FirstUseEver);
+
+    // Begin the window using the searchFmodEventWindowOpen flag
+    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost)) {
+
+        // Display a label for the input field
+        ImGui::Text(reaMOD_Main_ImGui_Context, "Event Search:");
+
+        // Static buffer to hold user input
+        static char eventSearchBuffer[256] = "";    
+
+        // Static string to hold error message
+        static std::string errorMessage;
+
+        // Static variable to keep track of selected suggestion
+        static int selectedIndex = -1;
+
+        // Flag to detect if the input text has changed
+        static std::string previousInputText;
+
+        // Set focus to the input field when the window first opens
+        if (ImGui::IsWindowAppearing(reaMOD_Main_ImGui_Context)) {
+            ImGui::SetKeyboardFocusHere(reaMOD_Main_ImGui_Context);
+        }
+
+        // Render the InputText field with Enter key detection
+        bool enterPressed = false;
+
+        enterPressed = ImGui::InputText(reaMOD_Main_ImGui_Context, "##EventSearch", eventSearchBuffer, sizeof(eventSearchBuffer));
+
+        // Get the current input text
+        std::string inputText(eventSearchBuffer);
+
+        // Check if the input text has changed
+        bool inputTextChanged = (inputText != previousInputText);
+        if (inputTextChanged) {
+            // Reset selected index when input text changes
+            selectedIndex = -1;
+            previousInputText = inputText;
+        }
+
+        // Collect all event names from the loaded banks
+        std::vector<std::string> allEventNames;
+        for (const auto& bankEventPair : bank_events) {
+            const std::vector<std::string>& eventsInBank = bankEventPair.second;
+            allEventNames.insert(allEventNames.end(), eventsInBank.begin(), eventsInBank.end());
+        }
+
+        // Filter event names based on user input
+        std::vector<std::string> filteredEventNames;
+        std::string inputTextLower = ToLower(inputText);
+
+        if (!inputTextLower.empty()) {
+            for (const std::string& eventName : allEventNames) {
+                std::string eventNameLower = ToLower(eventName);
+                if (eventNameLower.find(inputTextLower) != std::string::npos) {
+                    filteredEventNames.push_back(eventName);
+                }
+            }
+        }
+
+        if (ImGui::IsKeyPressed(reaMOD_Main_ImGui_Context, ImGui::Key_DownArrow) && !filteredEventNames.empty()) {
+            selectedIndex = (selectedIndex + 1) % filteredEventNames.size();
+        }
+        if (ImGui::IsKeyPressed(reaMOD_Main_ImGui_Context, ImGui::Key_UpArrow) && !filteredEventNames.empty()) {
+            selectedIndex = (selectedIndex - 1 + filteredEventNames.size()) % filteredEventNames.size();
+        }
+        // Handle Tab key for autocomplete
+        if (ImGui::IsKeyPressed(reaMOD_Main_ImGui_Context, ImGui::Key_Tab | ImGui::Key_RightArrow)) {
+            if (inputText.empty()) {
+                // Do nothing if input is empty
+            }
+            else if (inputText == "e" || inputText == "E") {
+                // Autocomplete 'e' or 'E' to 'event:/'
+                std::strncpy(eventSearchBuffer, "event:/", sizeof(eventSearchBuffer));
+                eventSearchBuffer[sizeof(eventSearchBuffer) - 1] = '\0'; // Ensure null-termination
+                inputText = "event:/";
+                previousInputText = inputText;
+                selectedIndex = -1;
+            }
+            else if (inputText == "s" || inputText == "S") {
+                // Autocomplete 's' or 'S' to 'snapshot:/'
+                std::strncpy(eventSearchBuffer, "snapshot:/", sizeof(eventSearchBuffer));
+                eventSearchBuffer[sizeof(eventSearchBuffer) - 1] = '\0'; // Ensure null-termination
+                inputText = "snapshot:/";
+                previousInputText = inputText;
+                selectedIndex = -1;
+            }
+            else {
+                // Find common prefix among filteredEventNames
+                if (!filteredEventNames.empty()) {
+                    std::string commonPrefix = FindCommonPrefix(filteredEventNames);
+                    if (commonPrefix.size() > inputText.size()) {
+                        // Autocomplete to the common prefix
+                        std::strncpy(eventSearchBuffer, commonPrefix.c_str(), sizeof(eventSearchBuffer));
+                        eventSearchBuffer[sizeof(eventSearchBuffer) - 1] = '\0'; // Ensure null-termination
+                        inputText = commonPrefix;
+                        previousInputText = inputText;
+                        // Optionally, set selectedIndex to first suggestion
+                        selectedIndex = 0;
+                    }
+                }
+            }
+        }
+
+        if (ImGui::IsKeyPressed(reaMOD_Main_ImGui_Context, ImGui::Key_Enter)) {
+            if (selectedIndex >= 0 && selectedIndex < filteredEventNames.size()) {
+                // User selected an event using Enter key
+                std::string candidateEventPath = filteredEventNames[selectedIndex];
+                bool eventFound = UpdateSelectedEventParameters(candidateEventPath);
+                if (eventFound) {
+                    // Event found, close the window and clear the input buffer
+                    searchFmodEventWindowOpen = false;
+                    eventSearchBuffer[0] = '\0';
+                    errorMessage.clear();
+                    selectedIndex = -1;
+                } else {
+                    DebugMsg("Event not found: %s\n", candidateEventPath.c_str());
+                    errorMessage = "Event not found: " + candidateEventPath;
+                }
+            } else if (!inputText.empty()) {
+                // Attempt to select the event matching the input text
+                std::string candidateEventPath = inputText;
+                bool eventFound = UpdateSelectedEventParameters(candidateEventPath);
+                if (eventFound) {
+                    // Event found, close the window and clear the input buffer
+                    searchFmodEventWindowOpen = false;
+                    eventSearchBuffer[0] = '\0';
+                    errorMessage.clear();
+                    selectedIndex = -1;
+                } else {
+                    DebugMsg("Event not found: %s\n", candidateEventPath.c_str());
+                    errorMessage = "Event not found: " + candidateEventPath;
+                }
+            } else {
+                DebugMsg("Event Search input is empty. No event selected.\n");
+                errorMessage = "Event Search input is empty. No event selected.";
+            }
+        }
+
+        // After handling key presses, update the filteredEventNames again if the buffer was modified by Tab
+        std::string updatedInputText(eventSearchBuffer);
+        std::string updatedInputTextLower = ToLower(updatedInputText);
+
+        // Re-filter event names based on updated input
+        std::vector<std::string> updatedFilteredEventNames;
+        if (!updatedInputTextLower.empty()) {
+            for (const std::string& eventName : allEventNames) {
+                std::string eventNameLower = ToLower(eventName);
+                if (eventNameLower.find(updatedInputTextLower) != std::string::npos) {
+                    updatedFilteredEventNames.push_back(eventName);
+                }
+            }
+        }
+
+        // Update filteredEventNames and handle selection
+        if (!updatedFilteredEventNames.empty()) {
+            filteredEventNames = updatedFilteredEventNames;
+        }
+
+        // Display the list of filtered events as suggestions
+        if (!filteredEventNames.empty()) {
+            double childWidth = 0.0f;   // Use remaining width
+            double childHeight = 150.0f; // Set desired height
+            bool border = true;          // Draw border
+
+            ImGui::BeginChild(reaMOD_Main_ImGui_Context, "EventSuggestionList", childWidth, childHeight, border);
+
+            for (int i = 0; i < filteredEventNames.size(); ++i) {
+                const std::string& eventName = filteredEventNames[i];
+                bool isSelected = (i == selectedIndex);
+
+                if (ImGui::Selectable(reaMOD_Main_ImGui_Context, eventName.c_str(), &isSelected)) {
+                    // User clicked on a suggestion
+                    bool eventFound = UpdateSelectedEventParameters(eventName);
+                    if (eventFound) {
+                        // Event found, close the window and clear the input buffer
+                        searchFmodEventWindowOpen = false;
+                        eventSearchBuffer[0] = '\0';
+                        errorMessage.clear();
+                        selectedIndex = -1;
+                    } else {
+                        DebugMsg("Event not found: %s\n", eventName.c_str());
+                        errorMessage = "Event not found: " + eventName;
+                    }
+                }
+                // Update selectedIndex based on user interaction
+                if (isSelected) {
+                    selectedIndex = i;
+                }
+            }
+
+            ImGui::EndChild(reaMOD_Main_ImGui_Context);
+        } else if (!inputText.empty()) {
+            // If there are no matches, inform the user
+            ImGui::Text(reaMOD_Main_ImGui_Context, "No matching events found.");
+        }
+
+        // Display error message if any
+        if (!errorMessage.empty()) {
+            // Assuming 'orange' is defined as an ImVec4 or use individual components
+            ImGui::TextColored(reaMOD_Main_ImGui_Context, orange, errorMessage.c_str());
+        }
+
+        // Handle Escape key to close the window
+        if (ImGui::IsKeyPressed(reaMOD_Main_ImGui_Context, ImGui::Key_Escape)) {
+            // Close the Event Search window without updating the selected event
+            searchFmodEventWindowOpen = false;
+            // Clear the input buffer and error message
+            eventSearchBuffer[0] = '\0';
+            errorMessage.clear();
+            selectedIndex = -1;
+        }
+
+        // End the window
+        ImGui::End(reaMOD_Main_ImGui_Context);
+    }
+}
 
 
 void RenderGUI() {
@@ -2431,7 +2648,7 @@ void RenderGUI() {
                                             // Pass the address of isSelected to ImGui::Selectable
                                             if (ImGui::Selectable(reaMOD_Main_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
                                                 selectedFMODEvent = event_pair.second;  // Update selected event
-                                                UpdateSelectedEventParameters();        // Call this function here
+                                                UpdateSelectedEventParameters(selectedFMODEvent);        // Call this function here
                                                 DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
                                             }
                                         }
@@ -2456,7 +2673,7 @@ void RenderGUI() {
                                                 // Pass the address of isSelected to ImGui::Selectable
                                                 if (ImGui::Selectable(reaMOD_Main_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
                                                     selectedFMODEvent = event_pair.second;  // Update selected event
-                                                    UpdateSelectedEventParameters();        // Call this function here
+                                                    UpdateSelectedEventParameters(selectedFMODEvent);        // Call this function here
                                                     DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
                                                 }
                                             }
@@ -2671,15 +2888,13 @@ void RenderGUI() {
         ImGui::Text(reaMOD_Main_ImGui_Context, "Created by Daniel Dehaan");
         ImGui::Text(reaMOD_Main_ImGui_Context, "www.danielrdehaan.com");
 
-        if (searchFmodEventWindowOpen) {
-            // RenderEventSearchWindow();
-        }
-
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
 
     // Pop the style colors
     ImGui::PopStyleColor(reaMOD_Main_ImGui_Context);
+
+    RenderEventSearchWindow();
 
     if (!open) {
         reaMOD_Main_ImGui_Context = nullptr;
@@ -2828,7 +3043,7 @@ void MonitorItemSelection() {
 
             // Set the selected event
             selectedFMODEvent = takeNameStr;
-            UpdateSelectedEventParameters();
+            UpdateSelectedEventParameters(selectedFMODEvent);
 
             // Parse item notes for parameter values
             char itemNotes[4096] = "";
