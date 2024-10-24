@@ -2502,33 +2502,38 @@ void RenderEventSearchWindow() {
             double childHeight = 150.0f; // Set desired height
             bool border = true;          // Draw border
 
-            ImGui::BeginChild(reaMOD_Main_ImGui_Context, "EventSuggestionList", childWidth, childHeight, border);
+            bool childVisible = ImGui::BeginChild(reaMOD_Main_ImGui_Context, "EventSuggestionList", childWidth, childHeight, border);
 
-            for (int i = 0; i < filteredEventNames.size(); ++i) {
-                const std::string& eventName = filteredEventNames[i];
-                bool isSelected = (i == selectedIndex);
+            if (childVisible) {
 
-                if (ImGui::Selectable(reaMOD_Main_ImGui_Context, eventName.c_str(), &isSelected)) {
-                    // User clicked on a suggestion
-                    bool eventFound = UpdateSelectedEventParameters(eventName);
-                    if (eventFound) {
-                        // Event found, close the window and clear the input buffer
-                        searchFmodEventWindowOpen = false;
-                        eventSearchBuffer[0] = '\0';
-                        errorMessage.clear();
-                        selectedIndex = -1;
-                    } else {
-                        DebugMsg("Event not found: %s\n", eventName.c_str());
-                        errorMessage = "Event not found: " + eventName;
+                for (int i = 0; i < filteredEventNames.size(); ++i) {
+                    const std::string& eventName = filteredEventNames[i];
+                    bool isSelected = (i == selectedIndex);
+
+                    if (ImGui::Selectable(reaMOD_Main_ImGui_Context, eventName.c_str(), &isSelected)) {
+                        // User clicked on a suggestion
+                        bool eventFound = UpdateSelectedEventParameters(eventName);
+                        if (eventFound) {
+                            // Event found, close the window and clear the input buffer
+                            searchFmodEventWindowOpen = false;
+                            eventSearchBuffer[0] = '\0';
+                            errorMessage.clear();
+                            selectedIndex = -1;
+                        } else {
+                            DebugMsg("Event not found: %s\n", eventName.c_str());
+                            errorMessage = "Event not found: " + eventName;
+                        }
+                    }
+                    
+                    // Update selectedIndex based on user interaction
+                    if (isSelected) {
+                        selectedIndex = i;
                     }
                 }
-                // Update selectedIndex based on user interaction
-                if (isSelected) {
-                    selectedIndex = i;
-                }
+
+                ImGui::EndChild(reaMOD_Main_ImGui_Context);
             }
 
-            ImGui::EndChild(reaMOD_Main_ImGui_Context);
         } else if (!inputText.empty()) {
             // If there are no matches, inform the user
             ImGui::Text(reaMOD_Main_ImGui_Context, "No matching events found.");
