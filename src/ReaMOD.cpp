@@ -302,6 +302,11 @@ void RetrieveGlobalParameters() {
     globalParameters.clear();           // Clear any existing parameters
     groupedGlobalParameters.clear();    // Clear existing grouped parameters
 
+    // If no banks are loaded, no need to retrieve parameters
+    if (loaded_banks.empty()) {
+        return;
+    }
+
     // Get the number of global parameters
     int numGlobalParameters = 0;
     FMOD_RESULT result = fmod_system->getParameterDescriptionCount(&numGlobalParameters);
@@ -335,15 +340,14 @@ void RetrieveGlobalParameters() {
             globalParam.currentValue = currentValue;
         }
 
-
         // Extract prefix from parameter name
         std::string paramName = paramDesc.name;
         size_t pos = paramName.find_first_of("_");
         std::string prefix;
-        if (pos != std::string::npos) {
+        if (pos != std::string::npos && pos > 0) {
             prefix = paramName.substr(0, pos);
         } else {
-            prefix = paramName;
+            prefix = "No Prefix";
         }
 
         // Add this global parameter to the appropriate group
@@ -401,15 +405,34 @@ void LoadBank(const std::string& bank_path, bool load_sample_data = true) {
     }
 }
 
+void UnloadAllBanks() {
+    // Iterate over all loaded banks and unload them
+    for (auto& bankPair : loaded_banks) {
+        FMOD::Studio::Bank* bank = bankPair.second;
+        if (bank) {
+            bank->unload();
+        }
+    }
+    
+    //Update FMOD System
+    fmod_system->update();
+
+    // Clear the maps and vectors after unloading banks
+    loaded_banks.clear();
+    bank_files.clear();
+    bank_load_states.clear();
+    bank_events.clear();
+    masterStringEvents.clear();
+    globalParameters.clear();
+    groupedGlobalParameters.clear();
+}
+
 // Function to find all .bank files in the "Build/Desktop/" directory relative to the selected .fspro file
 void FindBankFiles(const std::string& fspro_dir) {
     std::string bank_directory = fspro_dir + "/Build/Desktop/";
 
-    // Clear the previous list of .bank files and toggle states
-    bank_files.clear();
-    bank_load_states.clear();
-    bank_events.clear();
-    loaded_banks.clear();
+    // Unload all previously loaded banks
+    UnloadAllBanks();
 
     // Temporary vector for holding other bank files
     std::vector<std::string> other_bank_files;
@@ -500,6 +523,8 @@ void OpenFileDialog() {
     
     // Extract the file name from the full path and search for .bank files
     if (retval) {
+        // Unload any previously loaded banks
+        UnloadAllBanks();
         // Find the last '/' or '\\' to extract the file name and directory
         std::string file_path(selected_file_path);
         size_t last_slash_pos = file_path.find_last_of('/');
@@ -520,12 +545,10 @@ void OpenFileDialog() {
 
         // Find the .bank files in the "Build/Desktop/" directory
         FindBankFiles(fspro_directory);
+        RetrieveGlobalParameters();
     } else {
-        // If no file is selected, display the default message and clear the bank file list
-        std::strncpy(selected_file_name, "No project selected.", FILE_PATH_BUFFER_SIZE - 1);
-        bank_files.clear();
-        bank_load_states.clear();
-        bank_events.clear();
+        // Unload any previously loaded banks
+        UnloadAllBanks();
     }
 }
 
@@ -1872,17 +1895,13 @@ void SaveStateToFile(const std::string& filePath = "") {
 
     // Determine the default file name
     if (filePath.empty()) {
-        // If no file path is provided, determine the default name
         if (!currentDisplayedFileName.empty() && currentDisplayedFileName != "No ReaMOD session loaded.") {
-            // If a .ReaMOD file is already loaded, use its name
             finalFilePath = currentDisplayedFileName + ".ReaMOD";
         } else {
-            // Otherwise, use the currently open Reaper project name
             std::string reaperProjectName = GetCurrentReaperProjectName();
             finalFilePath = reaperProjectName + ".ReaMOD";
         }
     } else {
-        // Use the provided file path
         finalFilePath = filePath;
     }
 
@@ -1901,11 +1920,37 @@ void SaveStateToFile(const std::string& filePath = "") {
     outFile << "item_sync_selection=" << syncSelectedEventWithItemSelection << "\n";
     outFile << "update_item_insertion_length_from_last_time_selection=" << updateItemInsertionLength << "\n";
 
-    outFile << "<bank_files>\n";
+    // Separate Master.bank and other bank files
+    std::string master_bank_file;
+    bool master_bank_loaded = false;
+    std::vector<std::pair<std::string, bool>> other_banks;
+
     for (size_t i = 0; i < bank_files.size(); ++i) {
-        outFile << "bank_file=" << bank_files[i] << "\n";
-        outFile << "load_state=" << (bank_load_states[i] ? 1 : 0) << "\n";
+        if (bank_files[i].find("Master.bank") != std::string::npos) {
+            master_bank_file = bank_files[i];
+            master_bank_loaded = bank_load_states[i];
+        } else {
+            other_banks.emplace_back(bank_files[i], bank_load_states[i]);
+        }
     }
+
+    // Sort other bank files
+    std::sort(other_banks.begin(), other_banks.end());
+
+    outFile << "<bank_files>\n";
+
+    // Write Master.bank first if it exists
+    if (!master_bank_file.empty()) {
+        outFile << "bank_file=" << master_bank_file << "\n";
+        outFile << "load_state=" << (master_bank_loaded ? 1 : 0) << "\n";
+    }
+
+    // Write other bank files
+    for (const auto& bank_pair : other_banks) {
+        outFile << "bank_file=" << bank_pair.first << "\n";
+        outFile << "load_state=" << (bank_pair.second ? 1 : 0) << "\n";
+    }
+
     outFile << "</bank_files>\n";
 
     outFile.close();
@@ -1930,11 +1975,33 @@ void SaveStateToFile(const std::string& filePath = "") {
     }
 }
 
+#include <string>
+#include <vector>
+#include <fstream>
+#include <algorithm>
+#include <exception>
+#include <filesystem> // For fs::exists and last_write_time
+namespace fs = std::filesystem;
+
+// Utility function to trim leading and trailing whitespace from a string
+std::string TrimString(const std::string& str) {
+    const char* whitespace = " \t\n\r";
+    size_t start = str.find_first_not_of(whitespace);
+    if (start == std::string::npos)
+        return ""; // All whitespace
+
+    size_t end = str.find_last_not_of(whitespace);
+    return str.substr(start, end - start + 1);
+}
+
 void LoadStateFromFile(const std::string& filePath) {
     if (!IsFMODInitialized()) {
         DebugMsg("FMOD system is not initialized. Cannot load state from file.\n");
         return;
     }
+
+    // Unload all currently loaded banks to prevent conflicts
+    UnloadAllBanks();
 
     std::ifstream inFile(filePath);
     if (!inFile.is_open()) {
@@ -1958,65 +2025,150 @@ void LoadStateFromFile(const std::string& filePath) {
     bool master_bank_loaded = false;
 
     while (std::getline(inFile, line)) {
-        if (line.rfind("fspro_file=", 0) == 0) {
-            std::strncpy(selected_file_path, line.substr(11).c_str(), FILE_PATH_BUFFER_SIZE - 1);
-            selected_file_path[FILE_PATH_BUFFER_SIZE - 1] = '\0';
-            DebugMsg("Loaded fspro_file: %s\n", selected_file_path);
+        // Trim leading and trailing whitespace from line
+        line = TrimString(line);
 
-            std::string file_path(selected_file_path);
-            size_t last_slash_pos = file_path.find_last_of("/\\");
-            std::string file_name = file_path.substr(last_slash_pos + 1);
-            std::strncpy(selected_file_name, file_name.c_str(), FILE_PATH_BUFFER_SIZE - 1);
-            fsproDirectory = file_path.substr(0, last_slash_pos);
+        if (line.empty()) {
+            continue; // Skip empty lines
+        }
 
-            std::string masterStringsBankPath = fsproDirectory + "/Build/Desktop/Master.strings.bank";
-            if (fs::exists(masterStringsBankPath)) {
-                LoadBank(masterStringsBankPath, false);
-                masterStringsBankLoaded = true;
-                DebugMsg("Master.strings.bank loaded from: %s\n", masterStringsBankPath.c_str());
-            } else {
-                DebugMsg("Master.strings.bank not found in: %s\n", masterStringsBankPath.c_str());
-            }
-        } else if (line.rfind("lookahead_time_ms=", 0) == 0) {
-            lookAheadTimeMs = std::stoi(line.substr(18));
-            DebugMsg("Loaded lookahead_time_ms: %d\n", lookAheadTimeMs);
-        } else if (line.rfind("move_cursor_after_insert=", 0) == 0) {
-            moveCursorAfterInsert = std::stoi(line.substr(25)) != 0;
-            DebugMsg("Loaded move_cursor_after_insert: %d\n", moveCursorAfterInsert);
-        } else if (line.rfind("num_frames_for_item=", 0) == 0) {
-            numFramesForItem = std::stoi(line.substr(20));
-            DebugMsg("Loaded num_frames_for_item: %d\n", numFramesForItem);
-        } else if (line.rfind("item_sync_selection=", 0) == 0) {
-            syncSelectedEventWithItemSelection = std::stoi(line.substr(20)) != 0;
-            DebugMsg("Loaded item_sync_selection: %d\n", syncSelectedEventWithItemSelection);
-        } else if (line.rfind("update_item_insertion_length_from_last_time_selection=", 0) == 0) {
-            updateItemInsertionLength = std::stoi(line.substr(52)) != 0;
-            DebugMsg("Loaded update_item_insertion_length: %d\n", updateItemInsertionLength);
-        } else if (line == "<bank_files>") {
-            while (std::getline(inFile, line) && line != "</bank_files>") {
-                if (line.rfind("bank_file=", 0) == 0) {
-                    std::string bank_file = line.substr(10);
-                    if (bank_file.find("Master.bank") != std::string::npos) {
-                        master_bank_file = bank_file;
-                    } else {
-                        other_bank_files.push_back(bank_file);
-                    }
-                } else if (line.rfind("load_state=", 0) == 0) {
-                    bool load_state = std::stoi(line.substr(11)) != 0;
-                    if (!master_bank_file.empty() && other_bank_files.size() == other_bank_load_states.size()) {
-                        master_bank_loaded = load_state;
-                    } else {
-                        other_bank_load_states.push_back(load_state);
-                    }
-                    DebugMsg("Loaded bank_file: %s, load_state: %d\n",
-                             (other_bank_files.size() > 0 ? other_bank_files.back().c_str() : master_bank_file.c_str()),
-                             load_state);
+        if (line == "<bank_files>") {
+            // Parse bank files section
+            while (std::getline(inFile, line)) {
+                line = TrimString(line);
+                if (line.empty()) {
+                    continue; // Skip empty lines
                 }
+                if (line == "</bank_files>") {
+                    break; // End of bank_files section
+                }
+
+                size_t equalsPos = line.find('=');
+                if (equalsPos == std::string::npos) {
+                    DebugMsg("Error: Invalid line in bank_files section: %s\n", line.c_str());
+                    continue; // Skip invalid lines
+                }
+
+                std::string key = line.substr(0, equalsPos);
+                std::string value = line.substr(equalsPos + 1);
+
+                if (key == "bank_file") {
+                    std::string bank_file = value;
+
+                    // Read the next non-empty line for load_state
+                    while (std::getline(inFile, line) && TrimString(line).empty()) {
+                        // Skip empty lines
+                    }
+
+                    if (inFile.eof()) {
+                        DebugMsg("Error: Unexpected end of file after bank_file in .ReaMOD file.\n");
+                        break; // Handle error as needed
+                    }
+
+                    line = TrimString(line);
+
+                    size_t equalsPos = line.find('=');
+                    if (equalsPos == std::string::npos) {
+                        DebugMsg("Error: Invalid line in bank_files section: %s\n", line.c_str());
+                        continue; // Skip invalid lines
+                    }
+
+                    std::string key = line.substr(0, equalsPos);
+                    std::string value = line.substr(equalsPos + 1);
+
+                    if (key == "load_state") {
+                        bool load_state = false;
+                        try {
+                            load_state = (std::stoi(value) != 0);
+                        } catch (const std::exception& e) {
+                            DebugMsg("Error parsing load_state value: %s\n", e.what());
+                            continue; // Skip invalid entries
+                        }
+
+                        if (bank_file.find("Master.bank") != std::string::npos) {
+                            master_bank_file = bank_file;
+                            master_bank_loaded = load_state;
+                        } else {
+                            other_bank_files.push_back(bank_file);
+                            other_bank_load_states.push_back(load_state);
+                        }
+
+                        DebugMsg("Loaded bank_file: %s, load_state: %d\n", bank_file.c_str(), load_state);
+                    } else {
+                        DebugMsg("Error: Expected load_state after bank_file in .ReaMOD file.\n");
+                        continue; // Skip invalid entries
+                    }
+                } else {
+                    DebugMsg("Error: Unexpected key in bank_files section: %s\n", key.c_str());
+                    continue; // Skip invalid entries
+                }
+            }
+        } else {
+            // General key=value parsing
+            size_t equalsPos = line.find('=');
+            if (equalsPos == std::string::npos) {
+                DebugMsg("Error: Invalid line in .ReaMOD file: %s\n", line.c_str());
+                continue; // Skip invalid lines
+            }
+
+            std::string key = line.substr(0, equalsPos);
+            std::string value = line.substr(equalsPos + 1);
+
+            // Now process key and value
+            try {
+                if (key == "fspro_file") {
+                    // Process fspro_file
+                    std::strncpy(selected_file_path, value.c_str(), FILE_PATH_BUFFER_SIZE - 1);
+                    selected_file_path[FILE_PATH_BUFFER_SIZE - 1] = '\0';
+                    DebugMsg("Loaded fspro_file: %s\n", selected_file_path);
+
+                    std::string file_path(selected_file_path);
+                    size_t last_slash_pos = file_path.find_last_of("/\\");
+                    std::string file_name = file_path.substr(last_slash_pos + 1);
+                    std::strncpy(selected_file_name, file_name.c_str(), FILE_PATH_BUFFER_SIZE - 1);
+                    fsproDirectory = file_path.substr(0, last_slash_pos);
+
+                    std::string masterStringsBankPath = fsproDirectory + "/Build/Desktop/Master.strings.bank";
+                    if (fs::exists(masterStringsBankPath)) {
+                        LoadBank(masterStringsBankPath, false);
+                        masterStringsBankLoaded = true;
+                        DebugMsg("Master.strings.bank loaded from: %s\n", masterStringsBankPath.c_str());
+                    } else {
+                        DebugMsg("Master.strings.bank not found in: %s\n", masterStringsBankPath.c_str());
+                    }
+                } else if (key == "lookahead_time_ms") {
+                    lookAheadTimeMs = std::stoi(value);
+                    DebugMsg("Loaded lookahead_time_ms: %d\n", lookAheadTimeMs);
+                } else if (key == "move_cursor_after_insert") {
+                    moveCursorAfterInsert = (std::stoi(value) != 0);
+                    DebugMsg("Loaded move_cursor_after_insert: %d\n", moveCursorAfterInsert);
+                } else if (key == "num_frames_for_item") {
+                    numFramesForItem = std::stoi(value);
+                    DebugMsg("Loaded num_frames_for_item: %d\n", numFramesForItem);
+                } else if (key == "item_sync_selection") {
+                    syncSelectedEventWithItemSelection = (std::stoi(value) != 0);
+                    DebugMsg("Loaded item_sync_selection: %d\n", syncSelectedEventWithItemSelection);
+                } else if (key == "update_item_insertion_length_from_last_time_selection") {
+                    updateItemInsertionLength = (std::stoi(value) != 0);
+                    DebugMsg("Loaded update_item_insertion_length: %d\n", updateItemInsertionLength);
+                } else {
+                    DebugMsg("Error: Unknown key in .ReaMOD file: %s\n", key.c_str());
+                    continue; // Skip unknown keys
+                }
+            } catch (const std::exception& e) {
+                DebugMsg("Error parsing value for key %s: %s\n", key.c_str(), e.what());
+                continue; // Skip invalid entries
             }
         }
     }
 
     inFile.close();
+
+    // Ensure that other_bank_files and other_bank_load_states have the same size
+    if (other_bank_files.size() != other_bank_load_states.size()) {
+        DebugMsg("Error: Mismatch in bank files and load states count.\n");
+        return; // Handle error as needed
+    }
 
     // Sort and manage the bank files
     std::vector<std::pair<std::string, bool>> sorted_banks;
@@ -2036,11 +2188,24 @@ void LoadStateFromFile(const std::string& filePath) {
         bank_load_states.push_back(bank_pair.second);
     }
 
-    if (masterStringsBankLoaded) {
-        for (size_t i = 0; i < bank_files.size(); ++i) {
-            if (bank_load_states[i] && bank_files[i].find("Master.strings.bank") == std::string::npos) {
-                LoadBank(bank_files[i]);
-            }
+    // Verify that bank_files and bank_load_states have the same size
+    if (bank_files.size() != bank_load_states.size()) {
+        DebugMsg("Error: bank_files and bank_load_states have mismatched sizes: %zu vs %zu\n",
+                 bank_files.size(), bank_load_states.size());
+        return; // Handle error as needed
+    }
+
+    // Debug messages to verify bank files and load states
+    DebugMsg("Total bank_files parsed: %zu\n", bank_files.size());
+    DebugMsg("Total bank_load_states parsed: %zu\n", bank_load_states.size());
+    for (size_t i = 0; i < bank_files.size(); ++i) {
+        DebugMsg("Bank file: %s, Load state: %d\n", bank_files[i].c_str(), bank_load_states[i]);
+    }
+
+    // Load the banks according to their load states
+    for (size_t i = 0; i < bank_files.size(); ++i) {
+        if (bank_load_states[i] && bank_files[i].find("Master.strings.bank") == std::string::npos) {
+            LoadBank(bank_files[i]);
         }
     }
 
@@ -2064,6 +2229,7 @@ void LoadStateFromFile(const std::string& filePath) {
         formattedLastSaveTimestamp.clear();
     }
 
+    // Retrieve global parameters after loading banks
     RetrieveGlobalParameters();
 }
 
@@ -2310,42 +2476,84 @@ void RenderGUI() {
 
         // Global Parameters Section
         ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Global Parameters:");
-        
+    
         RetrieveGlobalParameters();
-        
+    
         if (!groupedGlobalParameters.empty()) {
-            // Loop over each group
-            for (auto& group : groupedGlobalParameters) {
+            // Separate "No Prefix" group from others
+            std::map<std::string, std::vector<GlobalParameter>> otherGroups;
+            std::vector<GlobalParameter> noPrefixParameters;
+    
+            for (const auto& group : groupedGlobalParameters) {
+                if (group.first == "No Prefix") {
+                    noPrefixParameters = group.second;
+                } else {
+                    otherGroups[group.first] = group.second;
+                }
+            }
+    
+            // Loop over each group except "No Prefix"
+            for (auto& group : otherGroups) {
                 const std::string& groupName = group.first;
                 std::vector<GlobalParameter>& parameters = group.second;
-        
+    
                 // Display the group name as a collapsible tree node
                 if (ImGui::TreeNode(reaMOD_Main_ImGui_Context, groupName.c_str())) {
-        
+    
                     // Loop over parameters in the group
                     for (auto& globalParam : parameters) {
                         float previousValue = globalParam.currentValue;
-        
+    
                         double doubleValue = static_cast<double>(globalParam.currentValue);
                         double doubleMin = static_cast<double>(globalParam.minValue);
                         double doubleMax = static_cast<double>(globalParam.maxValue);
-        
+    
                         // Use SliderDouble to create a slider for the parameter
                         ImGui::SliderDouble(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), &doubleValue, doubleMin, doubleMax);
-        
+    
                         // Update the currentValue with the new value from the slider
                         globalParam.currentValue = static_cast<float>(doubleValue);
-        
+    
                         // If the value has changed, update the global parameter in FMOD
                         if (previousValue != globalParam.currentValue) {
                             fmod_system->setParameterByName(globalParam.name.c_str(), globalParam.currentValue);
                             fmod_system->update();
                         }
                     }
-        
+    
                     ImGui::TreePop(reaMOD_Main_ImGui_Context); // End the group tree node
                 }
             }
+    
+            // Now display "No Prefix" parameters within a collapsible folder
+            if (!noPrefixParameters.empty()) {
+                if (ImGui::TreeNode(reaMOD_Main_ImGui_Context, "Uncategorized")) {
+    
+                    // Loop over parameters in "No Prefix" group
+                    for (auto& globalParam : noPrefixParameters) {
+                        float previousValue = globalParam.currentValue;
+    
+                        double doubleValue = static_cast<double>(globalParam.currentValue);
+                        double doubleMin = static_cast<double>(globalParam.minValue);
+                        double doubleMax = static_cast<double>(globalParam.maxValue);
+    
+                        // Use SliderDouble to create a slider for the parameter
+                        ImGui::SliderDouble(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), &doubleValue, doubleMin, doubleMax);
+    
+                        // Update the currentValue with the new value from the slider
+                        globalParam.currentValue = static_cast<float>(doubleValue);
+    
+                        // If the value has changed, update the global parameter in FMOD
+                        if (previousValue != globalParam.currentValue) {
+                            fmod_system->setParameterByName(globalParam.name.c_str(), globalParam.currentValue);
+                            fmod_system->update();
+                        }
+                    }
+    
+                    ImGui::TreePop(reaMOD_Main_ImGui_Context); // End the "Uncategorized" tree node
+                }
+            }
+    
         } else {
             ImGui::Text(reaMOD_Main_ImGui_Context, "No global parameters.");
         }
