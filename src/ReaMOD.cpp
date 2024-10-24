@@ -33,7 +33,7 @@ namespace fs = std::filesystem;  // Alias for easier use of filesystem operation
 
 // Declare the global variable to store the custom action ID
 static int actionIdOpenCloseReaMODWindow = 0;
-static int actionIdAddMarkerWithSelectedEvent = 0;
+// static int actionIdAddMarkerWithSelectedEvent = 0;
 static int actionIdAddItemWithSelectedEventAtEditCursor = 0;
 static int actionIdAddItemWithSelectedEventWithinTimeSelection = 0;
 static int actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = 0;
@@ -63,7 +63,7 @@ std::vector<std::string> bank_files; // Store the list of found .bank files and 
 std::vector<bool> bank_load_states;
 std::unordered_map<std::string, FMOD::Studio::Bank*> loaded_banks;  // Map of loaded banks
 std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map of events in each bank
-std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
+// std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
 std::unordered_map<MediaItem*, bool> triggeredItems; // Global variable to store whether an item has already triggered
 std::unordered_map<std::string, bool> buttonStates; // Global state map to store the color toggle state for each button
 
@@ -74,7 +74,7 @@ double previousPlayPosition = 0.0;
 double lastCallTime = 0.0;
 int previousPlayState = 0;
 
-// Look-ahead time for marker triggering
+// Look-ahead time for event triggering
 int lookAheadTimeMs = 60;  // Default look-ahead time set to 0 milliseconds
 
 // Task management
@@ -567,28 +567,28 @@ void PlayEvent(const std::string& event_path) {
     fmod_system->update();
 }
 
-bool isAddingMarker = false;
+// bool isAddingMarker = false;
 
-void AddMarkerWithSelectedEvent() {
-    if (isAddingMarker) return; // Prevent re-entrant calls
-    isAddingMarker = true;
+// void AddMarkerWithSelectedEvent() {
+//     if (isAddingMarker) return; // Prevent re-entrant calls
+//     isAddingMarker = true;
 
-    if (selectedFMODEvent.empty()) {
-        PostMsg("No FMOD event has been triggered yet.\n");
-        return;
-    }
+//     if (selectedFMODEvent.empty()) {
+//         PostMsg("No FMOD event has been triggered yet.\n");
+//         return;
+//     }
 
-    // Get the current edit cursor position
-    double cursorPosition = GetCursorPosition();
+//     // Get the current edit cursor position
+//     double cursorPosition = GetCursorPosition();
 
-    // Create a new marker at the cursor position with the event's full path as the name
-    int color = 0; // Use default color
-    AddProjectMarker2(nullptr, false, cursorPosition, 0.0, selectedFMODEvent.c_str(), -1, color);
+//     // Create a new marker at the cursor position with the event's full path as the name
+//     int color = 0; // Use default color
+//     AddProjectMarker2(nullptr, false, cursorPosition, 0.0, selectedFMODEvent.c_str(), -1, color);
 
-    DebugMsg("Marker added for last FMOD event: %s\n", selectedFMODEvent.c_str());
+//     DebugMsg("Marker added for last FMOD event: %s\n", selectedFMODEvent.c_str());
 
-    isAddingMarker = false; // Reset flag after completion
-}
+//     isAddingMarker = false; // Reset flag after completion
+// }
 
 void AddItemWithSelectedEventAtEditCursor() {
     if (selectedFMODEvent.empty()) {
@@ -1040,56 +1040,56 @@ bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
     return is_active;
 }
 
-void CheckMarkers(double playPosition) {
-    if (CountProjectMarkers == nullptr || EnumProjectMarkers == nullptr) {
-        DebugMsg("Marker functions are not available.\n");
-        return;
-    }
+// void CheckMarkers(double playPosition) {
+//     if (CountProjectMarkers == nullptr || EnumProjectMarkers == nullptr) {
+//         DebugMsg("Marker functions are not available.\n");
+//         return;
+//     }
 
-    int numMarkers = 0, numRegions = 0;
-    CountProjectMarkers(nullptr, &numMarkers, &numRegions);  // Count markers and regions
+//     int numMarkers = 0, numRegions = 0;
+//     CountProjectMarkers(nullptr, &numMarkers, &numRegions);  // Count markers and regions
 
-    int totalMarkersAndRegions = numMarkers + numRegions;
-    double checkAheadWindow = 1.0;  // Check markers 1 second ahead of play position
-    double tolerance = 0.04;        // Small tolerance to account for floating-point inaccuracies
+//     int totalMarkersAndRegions = numMarkers + numRegions;
+//     double checkAheadWindow = 1.0;  // Check markers 1 second ahead of play position
+//     double tolerance = 0.04;        // Small tolerance to account for floating-point inaccuracies
 
-    // Convert lookAheadTimeMs to seconds
-    double lookAheadTimeSeconds = lookAheadTimeMs / 1000.0;
+//     // Convert lookAheadTimeMs to seconds
+//     double lookAheadTimeSeconds = lookAheadTimeMs / 1000.0;
 
-    for (int i = 0; i < totalMarkersAndRegions; ++i) {
-        bool isRegion = false;
-        double markerPosition = 0.0, regionEnd = 0.0;
-        const char* name = nullptr;
-        int markerIndex = 0;  // Marker index from Reaper
+//     for (int i = 0; i < totalMarkersAndRegions; ++i) {
+//         bool isRegion = false;
+//         double markerPosition = 0.0, regionEnd = 0.0;
+//         const char* name = nullptr;
+//         int markerIndex = 0;  // Marker index from Reaper
 
-        // Corrected order of arguments for EnumProjectMarkers
-        if (EnumProjectMarkers(i, &isRegion, &markerPosition, &regionEnd, &name, &markerIndex)) {
-            if (name == nullptr) continue;  // Skip invalid markers
+//         // Corrected order of arguments for EnumProjectMarkers
+//         if (EnumProjectMarkers(i, &isRegion, &markerPosition, &regionEnd, &name, &markerIndex)) {
+//             if (name == nullptr) continue;  // Skip invalid markers
 
-            std::string markerName(name);
+//             std::string markerName(name);
 
-            // Adjust marker position by look-ahead time
-            double adjustedMarkerPosition = markerPosition - lookAheadTimeSeconds;
+//             // Adjust marker position by look-ahead time
+//             double adjustedMarkerPosition = markerPosition - lookAheadTimeSeconds;
 
-            // Only check markers that are within the 1-second window ahead of the play position
-            if (adjustedMarkerPosition >= playPosition && adjustedMarkerPosition <= playPosition + checkAheadWindow) {
-                DebugMsg("Checking marker %d: %s at position %.2f\n", markerIndex, markerName.c_str(), markerPosition);
+//             // Only check markers that are within the 1-second window ahead of the play position
+//             if (adjustedMarkerPosition >= playPosition && adjustedMarkerPosition <= playPosition + checkAheadWindow) {
+//                 DebugMsg("Checking marker %d: %s at position %.2f\n", markerIndex, markerName.c_str(), markerPosition);
 
-                // Trigger the event when the playhead reaches or passes the marker's position (with tolerance)
-                if (playPosition >= adjustedMarkerPosition - tolerance && playPosition <= adjustedMarkerPosition + tolerance) {
-                    // Check if this marker was already triggered
-                    if (!triggeredMarkers[markerIndex]) {
-                        DebugMsg("Triggering event for marker: %s at position %.2f\n", markerName.c_str(), markerPosition);
-                        PlayEvent(markerName);  // Trigger the FMOD event or snapshot
-                        triggeredMarkers[markerIndex] = true;  // Mark this marker as triggered
-                    }
-                }
-            }
-        } else {
-            DebugMsg("Failed to retrieve marker %d\n", i);
-        }
-    }
-}
+//                 // Trigger the event when the playhead reaches or passes the marker's position (with tolerance)
+//                 if (playPosition >= adjustedMarkerPosition - tolerance && playPosition <= adjustedMarkerPosition + tolerance) {
+//                     // Check if this marker was already triggered
+//                     if (!triggeredMarkers[markerIndex]) {
+//                         DebugMsg("Triggering event for marker: %s at position %.2f\n", markerName.c_str(), markerPosition);
+//                         PlayEvent(markerName);  // Trigger the FMOD event or snapshot
+//                         triggeredMarkers[markerIndex] = true;  // Mark this marker as triggered
+//                     }
+//                 }
+//             }
+//         } else {
+//             DebugMsg("Failed to retrieve marker %d\n", i);
+//         }
+//     }
+// }
 
 // Function to split a string by a delimiter into a vector of strings
 std::string GetItemGUID(MediaItem* item) {
@@ -2998,7 +2998,7 @@ void MonitorPlayback() {
             DebugMsg("Playback started. Stopped and released all FMOD event instances.\n");
 
             // Reset any necessary state variables
-            triggeredMarkers.clear();            // Clear triggered markers
+            // triggeredMarkers.clear();            // Clear triggered markers
             triggeredItems.clear();              // Clear triggered items
             activeEventInstances.clear();        // Clear active event instances
             // trackCacheUpdatedDuringPlayback = false; // Reset track cache flag
@@ -3013,7 +3013,7 @@ void MonitorPlayback() {
         // If playhead moved backward (looping, scrubbing, or jump)
         if (playPosition < previousPlayPosition) {
             DebugMsg("Playhead moved backward. Resetting triggered markers.\n");
-            triggeredMarkers.clear();            // Clear all triggered markers to allow retriggering
+            // triggeredMarkers.clear();            // Clear all triggered markers to allow retriggering
             triggeredItems.clear();              // Clear all triggered items to allow retriggering
         }
 
@@ -3021,7 +3021,7 @@ void MonitorPlayback() {
         previousPlayPosition = playPosition;
 
         // Check markers and trigger FMOD events based on marker positions
-        CheckMarkers(playPosition);
+        // CheckMarkers(playPosition);
 
         // Check items on tracks named "FMOD" or "fmod" for event or snapshot notes
         CheckItems(playPosition);
@@ -3267,10 +3267,10 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         toggleReaMODWindow();
         return true;
     }
-    if (command == actionIdAddMarkerWithSelectedEvent) {
-        AddMarkerWithSelectedEvent();
-        return true;
-    }
+    // if (command == actionIdAddMarkerWithSelectedEvent) {
+    //     AddMarkerWithSelectedEvent();
+    //     return true;
+    // }
     if (command == actionIdAddItemWithSelectedEventAtEditCursor) {
         AddItemWithSelectedEventAtEditCursor();
         return true;
@@ -3320,8 +3320,8 @@ void RegisterActions() {
     actionIdOpenCloseReaMODWindow = plugin_register("custom_action", &actionOpenReaMODWindowReg);  // Assign the action ID to actionIdOpenCloseReaMODWindow
 
     // Register the new custom action for adding a marker with the selected event at edit cursor
-    static custom_action_register_t actionAddMarkerWithLastFMODEventReg = { 0, "ReaMOD_AddMarkerWithLastFMODEvent", "ReaMOD: Add Marker with Last FMOD Event" };
-    actionIdAddMarkerWithSelectedEvent = plugin_register("custom_action", &actionAddMarkerWithLastFMODEventReg);
+    // static custom_action_register_t actionAddMarkerWithLastFMODEventReg = { 0, "ReaMOD_AddMarkerWithLastFMODEvent", "ReaMOD: Add Marker with Last FMOD Event" };
+    // actionIdAddMarkerWithSelectedEvent = plugin_register("custom_action", &actionAddMarkerWithLastFMODEventReg);
 
     // Register the new custom action for adding a item with the selected event at edit cursor
     static custom_action_register_t actionAddItemWithLastFMODEvent = { 0, "ReaMOD_AddItemWithLastFMODEvent", "ReaMOD: Add Item with selected event at edit cursor" };
