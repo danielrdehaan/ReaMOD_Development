@@ -68,7 +68,7 @@ std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map o
 std::unordered_map<MediaItem*, bool> triggeredItems; // Global variable to store whether an item has already triggered
 std::unordered_map<std::string, bool> buttonStates; // Global state map to store the color toggle state for each button
 
-std::string selectedFMODEvent = "No event selected";  // Global or static variable to store the selected event
+std::string selectedFMODEvent = "";  // Global or static variable to store the selected event
 
 // Global variables to track playback
 double previousPlayPosition = 0.0;
@@ -2756,13 +2756,16 @@ void RenderGUI() {
             }
         }
         ImGui::Text(reaMOD_Main_ImGui_Context, "");
-
-        // Global Parameters Section
-        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Global Parameters:");
     
+
+        // Render Global Parameters Section if loaded FMOD Project has global paramters
         RetrieveGlobalParameters();
     
         if (!groupedGlobalParameters.empty()) {
+
+            // Global Parameters Section
+            ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Global Parameters:");
+            
             // Separate "No Prefix" group from others
             std::map<std::string, std::vector<GlobalParameter>> otherGroups;
             std::vector<GlobalParameter> noPrefixParameters;
@@ -2836,109 +2839,109 @@ void RenderGUI() {
                     ImGui::TreePop(reaMOD_Main_ImGui_Context); // End the "Uncategorized" tree node
                 }
             }
-    
-        } else {
-            ImGui::Text(reaMOD_Main_ImGui_Context, "No global parameters.");
+            ImGui::Text(reaMOD_Main_ImGui_Context, "");
         }
 
 
 
-        ImGui::Text(reaMOD_Main_ImGui_Context, "");
-
-        // New section for selected event and parameters
-        // ImGui::Separator(reaMOD_Main_ImGui_Context);
-        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Selected Event:");
+        // Render Section for selected event and parameters if event is selected
+        if (!selectedFMODEvent.empty()) {
+            // ImGui::Separator(reaMOD_Main_ImGui_Context);
+            ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Selected Event:");
+        
+            // Render the play button
+            std::string play_button_label = "Play##SelectedEvent";
+            RenderPlayButton(reaMOD_Main_ImGui_Context, play_button_label, selectedFMODEvent);
+            ImGui::SameLine(reaMOD_Main_ImGui_Context);
+            // Display the selected event name
+            ImGui::Text(reaMOD_Main_ImGui_Context, selectedFMODEvent.c_str());
+        
+            // Get the event instance for the selected event
+            FMOD::Studio::EventInstance* eventInstance = nullptr;
     
-        // Render the play button
-        std::string play_button_label = "Play##SelectedEvent";
-        RenderPlayButton(reaMOD_Main_ImGui_Context, play_button_label, selectedFMODEvent);
-        ImGui::SameLine(reaMOD_Main_ImGui_Context);
-        // Display the selected event name
-        ImGui::Text(reaMOD_Main_ImGui_Context, selectedFMODEvent.c_str());
-    
-        // Get the event instance for the selected event
-        FMOD::Studio::EventInstance* eventInstance = nullptr;
-
-        // Check if the selected event is being played via the play button
-        auto it = playButtonEventInstances.find(selectedFMODEvent);
-        if (it != playButtonEventInstances.end()) {
-            eventInstance = it->second;
-        }
-
-        // If sync with selected item is enabled and an item is selected, get the event instance from activeEventInstances
-        if (syncSelectedEventWithItemSelection && lastSelectedItem != nullptr) {
-            std::string itemGUID = GetItemGUID(lastSelectedItem);
-            auto instanceIt = activeEventInstances.find(itemGUID);
-            if (instanceIt != activeEventInstances.end()) {
-                eventInstance = instanceIt->second.instance;
+            // Check if the selected event is being played via the play button
+            auto it = playButtonEventInstances.find(selectedFMODEvent);
+            if (it != playButtonEventInstances.end()) {
+                eventInstance = it->second;
             }
-        }
-
-        // Flag to detect if any slider is active
-        bool anySliderActive = false;
-
-        // Display sliders for the event's parameters using SliderDouble
-        for (auto& param : selectedEventParameters) {
-            float previousValue = param.currentValue;
-
-            double doubleValue = static_cast<double>(param.currentValue);
-            double doubleMin = static_cast<double>(param.minValue);
-            double doubleMax = static_cast<double>(param.maxValue);
-
-            // Use SliderDouble to create a slider for the parameter
-            ImGui::SliderDouble(reaMOD_Main_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax);
-
-            if (ImGui::IsItemActive(reaMOD_Main_ImGui_Context)) {
-                anySliderActive = true;
+    
+            // If sync with selected item is enabled and an item is selected, get the event instance from activeEventInstances
+            if (syncSelectedEventWithItemSelection && lastSelectedItem != nullptr) {
+                std::string itemGUID = GetItemGUID(lastSelectedItem);
+                auto instanceIt = activeEventInstances.find(itemGUID);
+                if (instanceIt != activeEventInstances.end()) {
+                    eventInstance = instanceIt->second.instance;
+                }
             }
-
-            // Update the currentValue with the new value from the slider
-            param.currentValue = static_cast<float>(doubleValue);
-
-            // If the value has changed and the slider is active, update the FMOD event instance
-            if (previousValue != param.currentValue && anySliderActive) {
+    
+            // Flag to detect if any slider is active
+            bool anySliderActive = false;
+    
+            // Display sliders for the event's parameters using SliderDouble
+            for (auto& param : selectedEventParameters) {
+                float previousValue = param.currentValue;
+    
+                double doubleValue = static_cast<double>(param.currentValue);
+                double doubleMin = static_cast<double>(param.minValue);
+                double doubleMax = static_cast<double>(param.maxValue);
+    
+                // Use SliderDouble to create a slider for the parameter
+                ImGui::SliderDouble(reaMOD_Main_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax);
+    
+                if (ImGui::IsItemActive(reaMOD_Main_ImGui_Context)) {
+                    anySliderActive = true;
+                }
+    
+                // Update the currentValue with the new value from the slider
+                param.currentValue = static_cast<float>(doubleValue);
+    
+                // If the value has changed and the slider is active, update the FMOD event instance
+                if (previousValue != param.currentValue && anySliderActive) {
+                    if (eventInstance) {
+                        eventInstance->setParameterByName(param.name.c_str(), param.currentValue);
+                        fmod_system->update();
+                    }
+    
+                    // Update the cached parameter value
+                    auto& cachedParams = eventParameterCache[selectedFMODEvent];
+                    for (auto& cachedParam : cachedParams) {
+                        if (cachedParam.name == param.name) {
+                            cachedParam.currentValue = param.currentValue;
+                            break;
+                        }
+                    }
+                }
+            }
+    
+            // After the loop, if no sliders are active and REAPER is playing, update parameter values from event instance
+            if (!anySliderActive && (GetPlayState() & 1)) {
                 if (eventInstance) {
-                    eventInstance->setParameterByName(param.name.c_str(), param.currentValue);
+                    for (auto& param : selectedEventParameters) {
+                        float value = 0.0f;
+                        FMOD_RESULT result = eventInstance->getParameterByName(param.name.c_str(), &value);
+                        if (result == FMOD_OK) {
+                            param.currentValue = value;
+                        }
+                    }
                     fmod_system->update();
                 }
-
-                // Update the cached parameter value
-                auto& cachedParams = eventParameterCache[selectedFMODEvent];
-                for (auto& cachedParam : cachedParams) {
-                    if (cachedParam.name == param.name) {
-                        cachedParam.currentValue = param.currentValue;
-                        break;
-                    }
-                }
             }
+    
+            ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Sync with selected item", &syncSelectedEventWithItemSelection);
+            ImGui::Text(reaMOD_Main_ImGui_Context, "");
         }
-
-        // After the loop, if no sliders are active and REAPER is playing, update parameter values from event instance
-        if (!anySliderActive && (GetPlayState() & 1)) {
-            if (eventInstance) {
-                for (auto& param : selectedEventParameters) {
-                    float value = 0.0f;
-                    FMOD_RESULT result = eventInstance->getParameterByName(param.name.c_str(), &value);
-                    if (result == FMOD_OK) {
-                        param.currentValue = value;
-                    }
-                }
-                fmod_system->update();
-            }
-        }
-
-        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Sync with selected item", &syncSelectedEventWithItemSelection);
-        ImGui::Text(reaMOD_Main_ImGui_Context, "");
-
-        // New section to display and edit the notes of the selected media item
-        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Selected Media Item Notes:");
         
+
+        
+        // Render Selected Media Item's notes if an item is selected.
         // Retrieve the currently selected media item
         MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0);
         static char itemNotes[4096] = "";  // Static buffer to persist across frames
         static MediaItem* lastSelectedItem = nullptr;  // To track if the selected item has changed
         
         if (selectedItem) {
+            // New section to display and edit the notes of the selected media item
+            ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Selected Media Item Notes:");
             // If the selected item has changed, load the notes
             if (selectedItem != lastSelectedItem) {
                 GetSetMediaItemInfo_String(selectedItem, "P_NOTES", itemNotes, false);
@@ -2959,8 +2962,8 @@ void RenderGUI() {
                 GetSetMediaItemInfo_String(selectedItem, "P_NOTES", itemNotes, true);  // Save the updated notes
                 DebugMsg("Updated notes for selected media item: %s\n", itemNotes);
             }
+            ImGui::Text(reaMOD_Main_ImGui_Context, "");
         } else {
-            ImGui::Text(reaMOD_Main_ImGui_Context, "No media item is selected.");
             lastSelectedItem = nullptr;  // Reset if no item is selected
         }
 
