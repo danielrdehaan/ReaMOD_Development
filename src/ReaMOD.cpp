@@ -44,6 +44,9 @@ static int actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem = 0;
 // static int actionIDPostFmodTracksListToConsole = 0;
 static int actionIDSearchForFmodEvent = 0;
 static int actionIDTriggerSelectedEvent = 0;
+static int actionIDToggleDebugOnOff = 0;
+
+bool debugMessages = false;
 
 
 // ImGui context
@@ -189,12 +192,20 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
     }
 }
 
+void toggleDebugMessagesOnOff() {
+    if (debugMessages == true){
+        debugMessages = false;
+    } else {
+        debugMessages = true;
+    }
+}
+
 // A function for showing debug messages in Reaper's console.
 void DebugMsg(const char* fmt, ...) {
     // This function can accept fully formated messages
     // or messages that require additional formating.
     // e.g. DebugMsg("Event %d path not found", i);
-    if (DEBUG == true) { // only show messages if DEBUG is true
+    if (debugMessages == true) { // only show messages if debugMessages is true
         if (ShowConsoleMsg == nullptr) {
         return; // If ShowConsoleMsg is not initialized, do nothing
         }
@@ -711,6 +722,16 @@ void AddItemWithSelectedEventWithinTimeSelection() {
     if (!newItem) {
         PostMsg("Failed to create a new MIDI item.\n");
         return;
+    }
+
+    // Update the numFramesForItem if the checkbox is checked
+    double itemLength = timeSelEnd = timeSelStart;
+    if (updateItemInsertionLength == true) {
+        bool dropFrame = false;
+        double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame); // Get the project frame rate
+
+        // Convert the item length (in seconds) to frames based on the frame rate
+        numFramesForItem = static_cast<int>(itemLength * frameRate);
     }
 
     // Add a new take to the item (it will be MIDI by default)
@@ -3509,6 +3530,10 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         InsertEventParameterJSFXForSelectedMediaItem();
         return true;
     }
+    if (command == actionToggleDebugOnOff) {
+        toggleDebugMessagesOnOff();
+        return true;
+    }
 
 
     return false;
@@ -3560,6 +3585,9 @@ void RegisterActions() {
 
     static custom_action_register_t actionInsertParamEnvelopesForSelectedEventOnSelectedItem = { 0, "ReaMOD_InsertParamEnvelopesForSelectedEventOnSelectedItem", "ReaMOD: Insert parameter envelopes for selected FMOD event on selected media item" };
     actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem = plugin_register("custom_action", &actionInsertParamEnvelopesForSelectedEventOnSelectedItem);
+
+    static custom_action_register_t actionToggleDebugOnOff = { 0, "ReaMOD_ToggleDebugMessagesOnOff", "ReaMOD: Toggle posting debug messages on/off." };
+    actionIDToggleDebugOnOff = plugin_register("custom_action", &actionToggleDebugOnOff);
 
 }
 
