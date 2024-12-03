@@ -3530,7 +3530,7 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         InsertEventParameterJSFXForSelectedMediaItem();
         return true;
     }
-    if (command == actionToggleDebugOnOff) {
+    if (command == actionIDToggleDebugOnOff) {
         toggleDebugMessagesOnOff();
         return true;
     }
