@@ -189,6 +189,8 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         CreateNewMIDIItemInProj = reinterpret_cast<decltype(CreateNewMIDIItemInProj)>(rec->GetFunc("CreateNewMIDIItemInProj"));
         TakeFX_GetEnvelope = reinterpret_cast<decltype(TakeFX_GetEnvelope)>(rec->GetFunc("TakeFX_GetEnvelope"));                // Load TakeFX_GetEnvelope
         Envelope_Evaluate = reinterpret_cast<decltype(Envelope_Evaluate)>(rec->GetFunc("Envelope_Evaluate"));                    // Load Envelope_Evaluate
+        NamedCommandLookup = reinterpret_cast<decltype(NamedCommandLookup)>(rec->GetFunc("NamedCommandLookup"));
+        Main_OnCommandEx = reinterpret_cast<decltype(Main_OnCommandEx)>(rec->GetFunc("Main_OnCommandEx"));
     }
 }
 
@@ -2649,7 +2651,7 @@ void RenderGUI() {
     ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_WindowBg, greyDark);
 
     bool open = true;  // Open flag for the window
-    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing)) {
+    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoNavInputs)) {
 
         // Display the formatted ReaMOD session text
         ImGui::Text(reaMOD_Main_ImGui_Context, "ReaMOD Session: ");
@@ -3017,6 +3019,29 @@ void RenderGUI() {
 
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
+
+    // THIS IS THE PART YOU ARE WORKING ON TO AVOID THE REAMOD WINDOW RETAINING FOCUS
+    // SO KEYBOARD SHORTCUTS GET SENT TO THE MAIN WINDOW
+    // After rendering the window, check if it's focused
+    // if (ImGui::IsWindowFocused(reaMOD_Main_ImGui_Context, ImGui::FocusedFlags_RootAndChildWindows))
+    // {
+    //     DebugMsg("ReaMOD Window is in focus... \n");
+    //     // Get the command ID for the action
+    //     int commandId = NamedCommandLookup("_S&M_WNMAIN");
+    //     if (commandId)
+    //     {
+    //         void* hwnd = nullptr; // On macOS, window handles are void*
+    //         ReaProject* proj = EnumProjects(-1, nullptr, 0); // Gets the current project
+    
+    //         Main_OnCommandEx(commandId, 0, proj);
+    //         DebugMsg("Focus returned to Reaper's main window. \n");
+    //     }
+    //     else
+    //     {
+    //         // Handle the case where the command is not found
+    //         ShowMessageBox("SWS Extension is required for this feature.", "Error", 0);
+    //     }
+    // }
 
     // Pop the style colors
     ImGui::PopStyleColor(reaMOD_Main_ImGui_Context);
