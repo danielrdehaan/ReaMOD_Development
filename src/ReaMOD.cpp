@@ -189,8 +189,7 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         CreateNewMIDIItemInProj = reinterpret_cast<decltype(CreateNewMIDIItemInProj)>(rec->GetFunc("CreateNewMIDIItemInProj"));
         TakeFX_GetEnvelope = reinterpret_cast<decltype(TakeFX_GetEnvelope)>(rec->GetFunc("TakeFX_GetEnvelope"));                // Load TakeFX_GetEnvelope
         Envelope_Evaluate = reinterpret_cast<decltype(Envelope_Evaluate)>(rec->GetFunc("Envelope_Evaluate"));                    // Load Envelope_Evaluate
-        NamedCommandLookup = reinterpret_cast<decltype(NamedCommandLookup)>(rec->GetFunc("NamedCommandLookup"));
-        Main_OnCommandEx = reinterpret_cast<decltype(Main_OnCommandEx)>(rec->GetFunc("Main_OnCommandEx"));
+        GetSetProjectInfo = reinterpret_cast<decltype(GetSetProjectInfo)>(rec->GetFunc("GetSetProjectInfo"));
     }
 }
 
@@ -1749,6 +1748,9 @@ void MonitorEnvelopesForEventItem(MediaItem_Take* take, const std::string& itemG
 
     int fxIndex = 0; // Assuming JSFX is the first FX in the chain
 
+    double projectSampleRate = GetSetProjectInfo(nullptr, "PROJECT_SRATE", 0.0, false);
+    if (projectSampleRate <= 0.0) projectSampleRate = 48000.0; // fallback if project SR is not set
+
     for (int paramIndex = 0; paramIndex < selectedEventParameters.size(); ++paramIndex) {
         // Retrieve the envelope for this parameter
         TrackEnvelope* envelope = TakeFX_GetEnvelope(take, fxIndex, paramIndex, false); // Don't create if it doesn't exist
@@ -1760,7 +1762,7 @@ void MonitorEnvelopesForEventItem(MediaItem_Take* take, const std::string& itemG
         // Evaluate the envelope at the current play position
         double playPosition = GetPlayPosition();
         double envelopeValue = 0.0;
-        bool result = Envelope_Evaluate(envelope, playPosition, 0, 0, &envelopeValue, nullptr, nullptr, 0);
+        bool result = Envelope_Evaluate(envelope, playPosition, projectSampleRate, 1, &envelopeValue, nullptr, nullptr, 0);
         if (result) {
             DebugMsg("Envelope value for parameter %s at position %.2f: %.2f\n", selectedEventParameters[paramIndex].name.c_str(), playPosition, envelopeValue);
 
@@ -2651,7 +2653,7 @@ void RenderGUI() {
     ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_WindowBg, greyDark);
 
     bool open = true;  // Open flag for the window
-    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoNavInputs)) {
+    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing)) {
 
         // Display the formatted ReaMOD session text
         ImGui::Text(reaMOD_Main_ImGui_Context, "ReaMOD Session: ");
@@ -3019,29 +3021,6 @@ void RenderGUI() {
 
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
-
-    // THIS IS THE PART YOU ARE WORKING ON TO AVOID THE REAMOD WINDOW RETAINING FOCUS
-    // SO KEYBOARD SHORTCUTS GET SENT TO THE MAIN WINDOW
-    // After rendering the window, check if it's focused
-    // if (ImGui::IsWindowFocused(reaMOD_Main_ImGui_Context, ImGui::FocusedFlags_RootAndChildWindows))
-    // {
-    //     DebugMsg("ReaMOD Window is in focus... \n");
-    //     // Get the command ID for the action
-    //     int commandId = NamedCommandLookup("_S&M_WNMAIN");
-    //     if (commandId)
-    //     {
-    //         void* hwnd = nullptr; // On macOS, window handles are void*
-    //         ReaProject* proj = EnumProjects(-1, nullptr, 0); // Gets the current project
-    
-    //         Main_OnCommandEx(commandId, 0, proj);
-    //         DebugMsg("Focus returned to Reaper's main window. \n");
-    //     }
-    //     else
-    //     {
-    //         // Handle the case where the command is not found
-    //         ShowMessageBox("SWS Extension is required for this feature.", "Error", 0);
-    //     }
-    // }
 
     // Pop the style colors
     ImGui::PopStyleColor(reaMOD_Main_ImGui_Context);
