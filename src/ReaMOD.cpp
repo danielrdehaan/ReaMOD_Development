@@ -40,6 +40,7 @@ static int actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = 0;
 static int actionIDStopAndReleaseAllFmodEventInstances = 0;
 static int actionIDInsertParamUpdateItemForSelectedMediaItem = 0;
 static int actionIDInsertParamAutomationItemsForSelectedMediaItem = 0;
+static int actionIDInsertPositionInterpolationItemsForSelectedMediaItem = 0;
 static int actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem = 0;
 // static int actionIDPostFmodTracksListToConsole = 0;
 static int actionIDSearchForFmodEvent = 0;
@@ -283,6 +284,24 @@ std::string Trim(const std::string& str) {
         return ""; // All spaces
     size_t last = str.find_last_not_of(" \t\n\r");
     return str.substr(first, (last - first + 1));
+}
+
+// Function to split a string by a delimiter into a vector of strings
+std::vector<std::string> SplitString(const std::string& str, const std::string& delimiter) {
+    std::vector<std::string> tokens;
+    size_t start = 0;
+    size_t end = str.find(delimiter);
+    
+    while (end != std::string::npos) {
+        tokens.push_back(str.substr(start, end - start));
+        start = end + delimiter.length();
+        end = str.find(delimiter, start);
+    }
+    
+    // Add the last token
+    tokens.push_back(str.substr(start));
+    
+    return tokens;
 }
 
 // Initialize FMOD system
@@ -1196,10 +1215,26 @@ void InsertParamUpdateItemForSelectedMediaItem() {
     // Set the item position to the cursor
     GetSetMediaItemInfo(newItem, "D_POSITION", &cursorPosition);
 
-    // Calculate the item length based on the frame rate and the number of frames
+    // Determine the number of frames from current time selection
+    double timeSelStart, timeSelEnd;
+    GetSet_LoopTimeRange(false, false, &timeSelStart, &timeSelEnd, false);
+
+    if (timeSelEnd <= timeSelStart) {
+        PostMsg("No valid time selection exists to determine number of frames.\n");
+        return;
+    }
+
+    double timeSelectionLength = timeSelEnd - timeSelStart;
+
     bool dropFrame = false;
     double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame);
-    double itemLength = numFramesForItem / frameRate; // Set the length to the specified number of frames
+
+    // Calculate the number of frames for this item from the time selection
+    double totalSeconds = timeSelectionLength; 
+    int framesFromTimeSelection = static_cast<int>(totalSeconds * frameRate);
+    if (framesFromTimeSelection < 1) framesFromTimeSelection = 1; // At least one frame
+
+    double itemLength = framesFromTimeSelection / frameRate; // length in seconds
 
     // Set the calculated length for the item
     GetSetMediaItemInfo(newItem, "D_LENGTH", &itemLength);
@@ -1223,12 +1258,167 @@ void InsertParamUpdateItemForSelectedMediaItem() {
     UpdateArrange();
 
     if (moveCursorAfterInsert) {
-        // Move the edit cursor forward by the number of frames
+        // Move the edit cursor forward by the item length
         double newCursorPosition = cursorPosition + itemLength;
         SetEditCurPos(newCursorPosition, true, false);
     }
 
     DebugMsg("Inserted param update item at position %.2f with GUID: %s\n", cursorPosition, guidStr.c_str());
+}
+
+
+void InsertPositionInterpolationItemsForSelectedMediaItem() {
+    // Get the first selected media item
+    MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0);
+    if (!selectedItem) {
+        PostMsg("No media item is selected.\n");
+        return;
+    }
+
+    // Retrieve the GUID of the selected media item
+    std::string guidStr = GetItemGUID(selectedItem);
+    if (guidStr.empty()) {
+        PostMsg("Failed to retrieve GUID for the selected media item.\n");
+        return;
+    }
+
+    // Prompt the user only for start and end positions (6 values: sx, sy, sz, ex, ey, ez)
+    char userInputs[512] = "";
+    if (!GetUserInputs("Position Interpolation", 6, 
+        "Start X,Start Y,Start Z,End X,End Y,End Z", 
+        userInputs, sizeof(userInputs))) 
+    {
+        PostMsg("User cancelled the input dialog.\n");
+        return;
+    }
+
+    // Parse the user inputs
+    // Expected 6 values: sx, sy, sz, ex, ey, ez
+    std::vector<std::string> inputValues = SplitString(userInputs, ",");
+    if (inputValues.size() != 6) {
+        PostMsg("Invalid input. Please provide 6 values: sx, sy, sz, ex, ey, ez.\n");
+        return;
+    }
+
+    double sx = std::stod(Trim(inputValues[0]));
+    double sy = std::stod(Trim(inputValues[1]));
+    double sz = std::stod(Trim(inputValues[2]));
+    double ex = std::stod(Trim(inputValues[3]));
+    double ey = std::stod(Trim(inputValues[4]));
+    double ez = std::stod(Trim(inputValues[5]));
+
+    // Get the current edit cursor position
+    double cursorPosition = GetCursorPosition();
+
+    // Get the currently selected track
+    MediaTrack* selectedTrack = GetTrack(nullptr, 0); // Default to track 0 if none is selected
+    int trackCount = CountTracks(nullptr);
+
+    // Find the first selected track
+    for (int i = 0; i < trackCount; ++i) {
+        MediaTrack* track = GetTrack(nullptr, i);
+        if (*(bool*)GetSetMediaTrackInfo(track, "I_SELECTED", nullptr)) {
+            selectedTrack = track;
+            break;
+        }
+    }
+
+    if (!selectedTrack) {
+        PostMsg("No track is selected.\n");
+        return;
+    }
+
+    // Determine number of frames from current time selection
+    double timeSelStart, timeSelEnd;
+    GetSet_LoopTimeRange(false, false, &timeSelStart, &timeSelEnd, false);
+
+    if (timeSelEnd <= timeSelStart) {
+        PostMsg("No valid time selection exists to determine number of frames.\n");
+        return;
+    }
+
+    double timeSelectionLength = timeSelEnd - timeSelStart;
+    bool dropFrame = false;
+    double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame);
+    if (frameRate <= 0.0) {
+        PostMsg("Invalid frame rate.\n");
+        return;
+    }
+
+    int numFrames = static_cast<int>(timeSelectionLength * frameRate);
+    if (numFrames < 2) numFrames = 2; // At least two frames for interpolation
+
+    double frameDuration = 1.0 / frameRate;
+
+    // Interpolate positions for each frame
+    for (int i = 0; i < numFrames; ++i) {
+        double t = (double)i / (double)(numFrames - 1);
+        double x = sx + t * (ex - sx);
+        double y = sy + t * (ey - sy);
+        double z = sz + t * (ez - sz);
+
+        double itemPosition = cursorPosition + i * frameDuration;
+        double itemLength = frameDuration;
+
+        // Add a media item on the selected track at itemPosition
+        MediaItem* newItem = AddMediaItemToTrack(selectedTrack);
+        if (!newItem) {
+            PostMsg("Failed to create a new item.\n");
+            continue; // Move to the next frame
+        }
+
+        // Set the item position and length
+        GetSetMediaItemInfo(newItem, "D_POSITION", &itemPosition);
+        GetSetMediaItemInfo(newItem, "D_LENGTH", &itemLength);
+
+        // Add a new take to the item
+        MediaItem_Take* newTake = AddTakeToMediaItem(newItem);
+        if (!newTake) {
+            PostMsg("Failed to create a new take for the item.\n");
+            continue;
+        }
+
+        // Build the item's notes
+        std::string itemNotes = "GUID=" + guidStr + "\n";
+        char posLine[256];
+        snprintf(posLine, sizeof(posLine), "position: x=%.3f,y=%.3f,z=%.3f", x, y, z);
+        itemNotes += posLine;
+
+        GetSetMediaItemInfo_String(newItem, "P_NOTES", const_cast<char*>(itemNotes.c_str()), true);
+
+        // Optionally set the take name to reflect the frame number
+        char takeName[128];
+        snprintf(takeName, sizeof(takeName), "param:Frame=%d", i);
+        GetSetMediaItemTakeInfo_String(newTake, "P_NAME", takeName, true);
+    }
+
+    // Update the arrangement view
+    UpdateArrange();
+
+    // Move the edit cursor after the last inserted item if desired
+    if (moveCursorAfterInsert) {
+        double newCursorPosition = cursorPosition + (numFrames * frameDuration);
+        SetEditCurPos(newCursorPosition, true, false);
+    }
+
+    DebugMsg("Inserted %d position interpolation items from (%.2f,%.2f,%.2f) to (%.2f,%.2f,%.2f) based on time selection.\n",
+             numFrames, sx, sy, sz, ex, ey, ez);
+}
+
+// Helper function to extract float values from lines like "x=1.0"
+bool ExtractFloatValue(const std::string &line, const std::string &key, float &outValue) {
+    size_t start = line.find(key);
+    if (start == std::string::npos) return false;
+    start += key.size();
+    // Find the next comma or end of line
+    size_t end = line.find(',', start);
+    std::string valStr = (end == std::string::npos) ? line.substr(start) : line.substr(start, end - start);
+    try {
+        outValue = std::stof(valStr);
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 void ParseAndApplyNotes(FMOD::Studio::EventInstance* eventInstance, const std::vector<std::string>& noteLines) {
@@ -1238,6 +1428,16 @@ void ParseAndApplyNotes(FMOD::Studio::EventInstance* eventInstance, const std::v
     }
 
     DebugMsg("ParseAndApplyNotes: Number of note lines to process: %d\n", static_cast<int>(noteLines.size()));
+
+    // Retrieve current 3D attributes (or initialize with defaults if failed)
+    FMOD_3D_ATTRIBUTES attributes;
+    FMOD_RESULT attrResult = eventInstance->get3DAttributes(&attributes);
+    if (attrResult != FMOD_OK) {
+        attributes.position = {0.0f, 0.0f, 0.0f};
+        attributes.velocity = {0.0f, 0.0f, 0.0f};
+        attributes.forward  = {0.0f, 0.0f, 1.0f};
+        attributes.up       = {0.0f, 1.0f, 0.0f};
+    }
 
     for (const auto& line : noteLines) {
         if (line.empty()) {
@@ -1306,29 +1506,50 @@ void ParseAndApplyNotes(FMOD::Studio::EventInstance* eventInstance, const std::v
             // Release the snapshot instance after starting it
             snapshotInstance->release();
         }
+        // Handling position updates
+        else if (line.rfind("position:", 0) == 0) {
+            float x=0.0f, y=0.0f, z=0.0f;
+            if (ExtractFloatValue(line, "x=", x) &&
+                ExtractFloatValue(line, "y=", y) &&
+                ExtractFloatValue(line, "z=", z))
+            {
+                attributes.position = { x, y, z };
+                DebugMsg("ParseAndApplyNotes: Set 3D position to X=%.2f, Y=%.2f, Z=%.2f\n", x, y, z);
+            } else {
+                DebugMsg("ParseAndApplyNotes: Failed to parse position line: %s\n", line.c_str());
+            }
+        }
+        // Handling orientation updates
+        else if (line.rfind("orientation:", 0) == 0) {
+            float fx=0.0f, fy=0.0f, fz=1.0f;
+            float ux=0.0f, uy=1.0f, uz=0.0f;
+            if (ExtractFloatValue(line, "fx=", fx) &&
+                ExtractFloatValue(line, "fy=", fy) &&
+                ExtractFloatValue(line, "fz=", fz) &&
+                ExtractFloatValue(line, "ux=", ux) &&
+                ExtractFloatValue(line, "uy=", uy) &&
+                ExtractFloatValue(line, "uz=", uz))
+            {
+                attributes.forward = { fx, fy, fz };
+                attributes.up      = { ux, uy, uz };
+                DebugMsg("ParseAndApplyNotes: Set 3D orientation F=(%.2f, %.2f, %.2f), U=(%.2f, %.2f, %.2f)\n", fx, fy, fz, ux, uy, uz);
+            } else {
+                DebugMsg("ParseAndApplyNotes: Failed to parse orientation line: %s\n", line.c_str());
+            }
+        }
         // Unknown line format
         else {
             DebugMsg("ParseAndApplyNotes: Unknown note line format: %s\n", line.c_str());
         }
     }
-}
 
-// Function to split a string by a delimiter into a vector of strings
-std::vector<std::string> SplitString(const std::string& str, const std::string& delimiter) {
-    std::vector<std::string> tokens;
-    size_t start = 0;
-    size_t end = str.find(delimiter);
-    
-    while (end != std::string::npos) {
-        tokens.push_back(str.substr(start, end - start));
-        start = end + delimiter.length();
-        end = str.find(delimiter, start);
+    // Apply the updated 3D attributes
+    FMOD_RESULT setAttrResult = eventInstance->set3DAttributes(&attributes);
+    if (setAttrResult != FMOD_OK) {
+        DebugMsg("ParseAndApplyNotes: Failed to set 3D attributes, FMOD result: %d\n", setAttrResult);
+    } else {
+        DebugMsg("ParseAndApplyNotes: 3D attributes updated successfully.\n");
     }
-    
-    // Add the last token
-    tokens.push_back(str.substr(start));
-    
-    return tokens;
 }
 
 void ProcessItemNotes(MediaItem* item, int itemIndex, int trackIndex, FMOD::Studio::EventInstance* eventInstance) {
@@ -3518,6 +3739,10 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         InsertParamAutomationItemsForSelectedMediaItem();
         return true;
     }
+    if (command == actionIDInsertPositionInterpolationItemsForSelectedMediaItem) {
+        InsertPositionInterpolationItemsForSelectedMediaItem();
+        return true;
+    }
     // if (command == actionIDPostFmodTracksListToConsole) {
     //     PostFmodTracksListToConsole();
     //     return true;
@@ -3577,6 +3802,10 @@ void RegisterActions() {
     // Register the custom action for inserting parameter automation items
     static custom_action_register_t actionInsertParamAutomationItemsForSelectedMediaItem = {0, "ReaMOD_InsertParamAutomationItemsForSelectedMediaItem", "ReaMOD: Insert parameter automation items for selected event item over time selection"};
     actionIDInsertParamAutomationItemsForSelectedMediaItem = plugin_register("custom_action", &actionInsertParamAutomationItemsForSelectedMediaItem);
+
+    // Register the custom action for inserting parameter automation items
+    static custom_action_register_t actionInsertPositionInterpolationItemsForSelectedMediaItem = {0, "ReaMOD_actionInsertPositionInterpolationItemsForSelectedMediaItem", "ReaMOD: Insert position interpolation items for selected media item over time selection"};
+    actionIDInsertPositionInterpolationItemsForSelectedMediaItem = plugin_register("custom_action", &actionInsertPositionInterpolationItemsForSelectedMediaItem);
 
     // static custom_action_register_t actionPostFmodTracksListToConsole = { 0, "ReaMOD_PostFmodTracksListToConsole", "ReaMOD: Post current list of FMOD tracks to console" };
     // actionIDPostFmodTracksListToConsole = plugin_register("custom_action", &actionPostFmodTracksListToConsole);
