@@ -45,10 +45,17 @@ set(SOURCE_FILES
 add_library(reaper_ReaMODPlugin SHARED ${SOURCE_FILES})
 
 # Link FMOD libraries to the correct target (reaper_ReaMODPlugin)
-target_link_libraries(reaper_ReaMODPlugin
-    fmod
-    fmodstudio
-)
+if(WIN32)
+    target_link_libraries(reaper_ReaMODPlugin
+        fmod_vc
+        fmodstudio_vc
+    )
+else()
+    target_link_libraries(reaper_ReaMODPlugin
+        fmod
+        fmodstudio
+    )
+endif()
 
 # Mac-specific settings to remove the "lib" prefix and set .dylib suffix
 if(APPLE)
