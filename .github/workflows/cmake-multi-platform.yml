@@ -82,11 +82,11 @@ jobs:
         run: ctest --build-config ${{ matrix.build_type }}
       
       - name: Collect plugin artifacts
-          shell: bash
-          run: |
-            rel_dir="${{ steps.strings.outputs.workspace }}/Releases"
-            mkdir -p "$rel_dir"
-            find "${{ steps.strings.outputs.build-output-dir }}" -type f \( -name reaper_ReaMODPlugin.dll -o -name reaper_ReaMOD_Plugin.dylib \) -exec cp {} "$rel_dir/" \;
+        shell: bash
+        run: |
+          rel_dir="${{ steps.strings.outputs.workspace }}/Releases"
+          mkdir -p "$rel_dir"
+          find "${{ steps.strings.outputs.build-output-dir }}" -type f \( -name reaper_ReaMODPlugin.dll -o -name reaper_ReaMOD_Plugin.dylib \) -exec cp {} "$rel_dir/" \;
 
       - name: Upload plugin artifact
         uses: actions/upload-artifact@v4
