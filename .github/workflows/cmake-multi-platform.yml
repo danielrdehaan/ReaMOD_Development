@@ -80,3 +80,11 @@ jobs:
         shell: bash
         working-directory: ${{ steps.strings.outputs.build-output-dir }}
         run: ctest --build-config ${{ matrix.build_type }}
+      
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ReaMOD-${{ matrix.os }}-${{ matrix.build_type }}
+          path: |
+            ${{ steps.strings.outputs.build-output-dir }}/**/reaper_ReaMODPlugin.dll
+            ${{ steps.strings.outputs.build-output-dir }}/**/reaper_ReaMOD_Plugin.dylib
