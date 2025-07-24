@@ -84,7 +84,7 @@ jobs:
       - name: Collect plugin artifacts
         shell: bash
         run: |
-          rel_dir="${{ steps.strings.outputs.workspace }}/Releases"
+          rel_dir="${{ steps.strings.outputs.workspace }}/releases"
           mkdir -p "$rel_dir"
           find "${{ steps.strings.outputs.build-output-dir }}" -type f \( -name reaper_ReaMODPlugin.dll -o -name reaper_ReaMOD_Plugin.dylib \) -exec cp {} "$rel_dir/" \;
 
