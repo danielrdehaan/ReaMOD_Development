@@ -9,8 +9,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(REAPER_SDK_DIR "${CMAKE_SOURCE_DIR}/reaper-sdk")
 set(REAPER_REAIMGUI_DIR "${CMAKE_SOURCE_DIR}/ReaImGui")
 
-# Path to FMOD API
-set(FMOD_API_DIR "${CMAKE_SOURCE_DIR}/fmod")
+# Path to FMOD API - select the subdirectory for the current platform
+if(APPLE)
+    set(FMOD_API_DIR "${CMAKE_SOURCE_DIR}/fmod/Mac")
+elseif(WIN32)
+    set(FMOD_API_DIR "${CMAKE_SOURCE_DIR}/fmod/Windows")
+endif()
 
 # Path to tinyfiledialogs
 set(TINYFILEDIALOGS_DIR "${CMAKE_SOURCE_DIR}/tinyfiledialogs")
