@@ -81,10 +81,21 @@ jobs:
         working-directory: ${{ steps.strings.outputs.build-output-dir }}
         run: ctest --build-config ${{ matrix.build_type }}
       
+      - name: Collect plugin artifacts
+        shell: bash
+        run: |
+          rel_dir="${{ steps.strings.outputs.workspace }}/Releases"
+          mkdir -p "$rel_dir"
+          shopt -s globstar
+          for f in "${{ steps.strings.outputs.build-output-dir }}"/**/reaper_ReaMODPlugin.dll \
+                   "${{ steps.strings.outputs.build-output-dir }}"/**/reaper_ReaMOD_Plugin.dylib; do
+            if [ -f "$f" ]; then
+              cp "$f" "$rel_dir/"
+            fi
+          done
+
       - name: Upload plugin artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: ReaMOD-${{ matrix.os }}-${{ matrix.build_type }}
-          path: |
-            ${{ steps.strings.outputs.build-output-dir }}/**/reaper_ReaMODPlugin.dll
-            ${{ steps.strings.outputs.build-output-dir }}/**/reaper_ReaMOD_Plugin.dylib
+          path: Releases/**
