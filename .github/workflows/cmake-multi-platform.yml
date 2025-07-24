@@ -57,17 +57,20 @@ jobs:
         id: strings
         shell: bash
         run: |
-          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
-  
+          # Convert backslashes to slashes for bash compatibility
+          ws="${GITHUB_WORKSPACE//\\//}"
+          echo "build-output-dir=$ws/build" >> "$GITHUB_OUTPUT"
+          echo "workspace=$ws" >> "$GITHUB_OUTPUT"
+
       - name: Configure CMake
         shell: bash
         run: |
           cmake \
-          -B ${{ steps.strings.outputs.build-output-dir }} \
-          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
-          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-          -S ${{ github.workspace }}
+            -B "${{ steps.strings.outputs.build-output-dir }}" \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
+            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -S "${{ steps.strings.outputs.workspace }}"
 
       - name: Build
         shell: bash
