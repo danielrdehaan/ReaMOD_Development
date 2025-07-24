@@ -95,7 +95,7 @@ jobs:
           done
 
       - name: Upload plugin artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ReaMOD-${{ matrix.os }}-${{ matrix.build_type }}
           path: Releases/**
