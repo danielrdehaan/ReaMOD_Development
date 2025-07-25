@@ -12,6 +12,35 @@ ReaMOD is a plugin for [REAPER](https://www.reaper.fm/), a digital audio worksta
 - **Session Management**: Save and load plugin states (`.ReaMOD` files) for consistent sessions across projects.
 - **Custom Actions**: Provides custom actions that can be assigned to keyboard shortcuts or toolbar buttons for quick access.
 
+## Installation
+
+1. Download and install the latest version of the SWS/S&M Extension for Reaper: https://www.sws-extension.org/
+
+  Warning: Mac users after copy/pasting the sws extension file in to the Reaper's User Plugins folder you must approve the .dylib file by first right clicking on the .dylib file and selecting Open. An alert willl appear informing the user that this operation is not safe. Acknowledge the alert then go to System Settings > Privacy & Security and scroll toward the bottom. You should see a button labeled "Open Anyway" next to a message saying that "reaper_sws-x86_64.dylib was blocked to protect your Mac." Click the "Open Anyway" button. On the resulting pop-up alert click "Open Anayway" and enter your user password if prompted. Then proceed to the next step of these installation instructions.
+
+2. Relaunch Reaper and confirm that the SWS Extension has been succesfully installed by checking that an "Extension" dropdown menu has appeared in Reaper's Menu Bar.
+
+3. Download and install ReaPack from https://reapack.com.
+
+4. Restart REAPER after installing ReaPack.
+  
+  Warning: Users of macOS Catalina or newer may need to click on "Allow Anyway" in System Preferences > Security & Privacy after launching REAPER once for ReaPack to load when installed for the first time. Restart REAPER after approving.
+
+5. Open ReaPack from the menu bar Extensions > ReaPack > Browse Packages... and install the "ReaImGui: ReaScript binding for Dear ImGui" extensions:
+
+6. Restart Reaper
+
+7. Download the latest build for your operating system
+
+    - Mac
+    - Windows
+
+8. Unzip the downloaded file and copy/paste the .dll (Windows) or .dylib (Mac) file into the Reaper Resources Path/UserPlugins.
+    
+    Warning: Mac users must approve the .dylib file by first right clicking on the .dylib file and selecting Open. An alert willl appear informing the user that this operation is not safe. Acknowledge the alert then go to System Settings > Privacy & Security and scroll toward the bottom. You should see a button labeled "Open Anyway" next to a message saying that "reaper_ReaMOD_Plugin.dylib was blocked to protect your Mac." Click the "Open Anyway" button. On the resulting pop-up alert click "Open Anayway" and enter your user password if prompted. Then proceed to the next step of these installation instructions.
+
+9. If Reaper is running restart Reaper.
+
 ## Usage
 
 ### Opening the ReaMOD Window
