@@ -260,11 +260,11 @@ bool IsFMODInitialized() {
         FMOD_RESULT result = fmod_system->getCoreSystem(&coreSystem);  // Get the core system
         
         if (result == FMOD_OK && coreSystem) {
-            // DebugMsg("FMOD System is initialized.\n");
+            DebugMsg("FMOD System is initialized.\n");
             return true;  // FMOD is initialized
         }
     }
-    // DebugMsg("FMOD System is NOT initialized.\n");
+    DebugMsg("FMOD System is NOT initialized.\n");
     return false;  // FMOD is not initialized
 }
 
