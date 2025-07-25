@@ -69,6 +69,7 @@ if(APPLE)
         MACOSX_RPATH ON
         BUILD_RPATH "@loader_path"
         INSTALL_RPATH "@loader_path"
+        BUILD_WITH_INSTALL_RPATH ON
         CMAKE_INSTALL_RPATH_USE_LINK_PATH OFF
     )
 endif()
