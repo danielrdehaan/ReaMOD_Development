@@ -60,10 +60,12 @@ endif()
 # Mac-specific settings to remove the "lib" prefix, set .dylib suffix,
 # and search for FMOD libraries relative to the plugin location
 if(APPLE)
+    set(CMAKE_INSTALL_RPATH "@loader_path")
+    set(CMAKE_INSTALL_RPATH_USE_LINK_PATH OFF)
     set_target_properties(reaper_ReaMODPlugin PROPERTIES
-        PREFIX ""  # This removes the 'lib' prefix
+        PREFIX ""
         SUFFIX ".dylib"
-        OUTPUT_NAME "reaper_ReaMOD_Plugin"  # Custom output name
+        OUTPUT_NAME "reaper_ReaMOD_Plugin"
         MACOSX_RPATH ON
         BUILD_RPATH "@loader_path"
         INSTALL_RPATH "@loader_path"

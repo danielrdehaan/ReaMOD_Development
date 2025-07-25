@@ -1,3 +1,0 @@
-/Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles/reaper_ReaMODPlugin.dir
-/Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles/edit_cache.dir
-/Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles/rebuild_cache.dir
