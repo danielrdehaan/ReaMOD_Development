@@ -57,11 +57,15 @@ else()
     )
 endif()
 
-# Mac-specific settings to remove the "lib" prefix and set .dylib suffix
+# Mac-specific settings to remove the "lib" prefix, set .dylib suffix,
+# and search for FMOD libraries relative to the plugin location
 if(APPLE)
     set_target_properties(reaper_ReaMODPlugin PROPERTIES
         PREFIX ""  # This removes the 'lib' prefix
         SUFFIX ".dylib"
         OUTPUT_NAME "reaper_ReaMOD_Plugin"  # Custom output name
+        MACOSX_RPATH ON
+        BUILD_RPATH "@loader_path"
+        INSTALL_RPATH "@loader_path"
     )
 endif()
