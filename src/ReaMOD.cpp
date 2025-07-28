@@ -17,6 +17,11 @@
 #include "fmod_errors.h"
 #include "reaper_plugin.h"
 #include "tinyfiledialogs.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 
 #define REAPERAPI_IMPLEMENT
@@ -91,6 +96,13 @@ MediaItem* lastSelectedItem = nullptr;
 
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
+#ifdef _WIN32
+static HMODULE fmodStudioHandle = nullptr;
+static HMODULE fmodCoreHandle = nullptr;
+#else
+static void* fmodStudioHandle = nullptr;
+static void* fmodCoreHandle = nullptr;
+#endif
 
 // Define the ParameterInfo struct
 struct ParameterInfo {
@@ -243,6 +255,84 @@ std::string Trim(const std::string& str) {
         return ""; // All spaces
     size_t last = str.find_last_not_of(" \t\n\r");
     return str.substr(first, (last - first + 1));
+}
+
+// Determine the directory of this plugin
+std::string GetPluginDirectory(REAPER_PLUGIN_HINSTANCE instance) {
+#ifdef _WIN32
+    char path[MAX_PATH];
+    GetModuleFileNameA((HMODULE)instance, path, MAX_PATH);
+    std::string dir(path);
+    size_t pos = dir.find_last_of("\\/");
+    if (pos != std::string::npos) dir = dir.substr(0, pos);
+    return dir;
+#else
+    Dl_info info;
+    dladdr((void*)GetPluginDirectory, &info);
+    std::string dir(info.dli_fname ? info.dli_fname : "");
+    size_t pos = dir.find_last_of('/');
+    if (pos != std::string::npos) dir = dir.substr(0, pos);
+    return dir;
+#endif
+}
+
+// Load FMOD libraries from the provided directory
+bool LoadFMODLibraries(const std::string& directory) {
+#ifdef _WIN32
+    std::string studioPath = directory + "\\fmodstudio.dll";
+    std::string corePath = directory + "\\fmod.dll";
+    fmodStudioHandle = LoadLibraryA(studioPath.c_str());
+    if (!fmodStudioHandle) {
+        PostMsg("Failed to load fmodstudio.dll from %s\n", studioPath.c_str());
+        return false;
+    }
+    fmodCoreHandle = LoadLibraryA(corePath.c_str());
+    if (!fmodCoreHandle) {
+        PostMsg("Failed to load fmod.dll from %s\n", corePath.c_str());
+        FreeLibrary(fmodStudioHandle);
+        fmodStudioHandle = nullptr;
+        return false;
+    }
+#else
+    std::string studioPath = directory + "/libfmodstudio.dylib";
+    std::string corePath = directory + "/libfmod.dylib";
+    fmodStudioHandle = dlopen(studioPath.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    if (!fmodStudioHandle) {
+        PostMsg("Failed to load libfmodstudio.dylib from %s\n", studioPath.c_str());
+        return false;
+    }
+    fmodCoreHandle = dlopen(corePath.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    if (!fmodCoreHandle) {
+        PostMsg("Failed to load libfmod.dylib from %s\n", corePath.c_str());
+        dlclose(fmodStudioHandle);
+        fmodStudioHandle = nullptr;
+        return false;
+    }
+#endif
+    return true;
+}
+
+// Unload previously loaded FMOD libraries
+void UnloadFMODLibraries() {
+#ifdef _WIN32
+    if (fmodStudioHandle) {
+        FreeLibrary(fmodStudioHandle);
+        fmodStudioHandle = nullptr;
+    }
+    if (fmodCoreHandle) {
+        FreeLibrary(fmodCoreHandle);
+        fmodCoreHandle = nullptr;
+    }
+#else
+    if (fmodStudioHandle) {
+        dlclose(fmodStudioHandle);
+        fmodStudioHandle = nullptr;
+    }
+    if (fmodCoreHandle) {
+        dlclose(fmodCoreHandle);
+        fmodCoreHandle = nullptr;
+    }
+#endif
 }
 
 // Initialize FMOD system
@@ -2508,10 +2598,14 @@ void toggleReaMODWindow() {
         ImGui::init(plugin_getapi);
         reaMOD_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
 
-        // Initialize FMOD only if it's not already initialized
+        // Initialize FMOD only if it's not already initialized and libraries loaded
         if (!IsFMODInitialized()) {
-            InitializeFMOD();  // Initialize the FMOD system
-            playbackTaskId = AddTask(MonitorPlayback);  // Add playback monitoring
+            if (fmodStudioHandle && fmodCoreHandle) {
+                InitializeFMOD();  // Initialize the FMOD system
+                playbackTaskId = AddTask(MonitorPlayback);  // Add playback monitoring
+            } else {
+                PostMsg("FMOD libraries not loaded. Cannot initialize FMOD.\n");
+            }
         }
 
         // Add the GUI rendering task and store its ID
@@ -2620,7 +2714,17 @@ void RegisterActions() {
 extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT( REAPER_PLUGIN_HINSTANCE instance, reaper_plugin_info_t *rec) {
     if (!rec) return 0;  // If rec is null, clean up
     if (rec->caller_version != REAPER_PLUGIN_VERSION) return 0;  // Check for compatibility
-    
+
+    std::string pluginDir = GetPluginDirectory(instance);
+#ifdef _WIN32
+    std::string fmodDir = pluginDir + "\\ReaMOD";
+#else
+    std::string fmodDir = pluginDir + "/ReaMOD";
+#endif
+    if (!LoadFMODLibraries(fmodDir)) {
+        PostMsg("Failed to load FMOD libraries from %s\n", fmodDir.c_str());
+    }
+
     LoadReaperAPIFunctions(rec);  // Load API functions
     RegisterActions(); // Register custom action and command hook
 
@@ -2636,4 +2740,5 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT void REAPER_PLUGIN_EXIT() {
     StopAllEvents();
     RemoveTask(playbackTaskId);
     plugin_register("-timer", reinterpret_cast<void*>(&OnTimer));
+    UnloadFMODLibraries();
 }
