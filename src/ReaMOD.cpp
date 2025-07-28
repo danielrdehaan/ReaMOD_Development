@@ -17,11 +17,6 @@
 #include "fmod_errors.h"
 #include "reaper_plugin.h"
 #include "tinyfiledialogs.h"
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
 
 
 #define REAPERAPI_IMPLEMENT
@@ -96,13 +91,6 @@ MediaItem* lastSelectedItem = nullptr;
 
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
-#ifdef _WIN32
-static HMODULE fmodStudioHandle = nullptr;
-static HMODULE fmodCoreHandle = nullptr;
-#else
-static void* fmodStudioHandle = nullptr;
-static void* fmodCoreHandle = nullptr;
-#endif
 
 // Define the ParameterInfo struct
 struct ParameterInfo {
@@ -257,84 +245,6 @@ std::string Trim(const std::string& str) {
     return str.substr(first, (last - first + 1));
 }
 
-// Determine the directory of this plugin
-std::string GetPluginDirectory(REAPER_PLUGIN_HINSTANCE instance) {
-#ifdef _WIN32
-    char path[MAX_PATH];
-    GetModuleFileNameA((HMODULE)instance, path, MAX_PATH);
-    std::string dir(path);
-    size_t pos = dir.find_last_of("\\/");
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    return dir;
-#else
-    Dl_info info;
-    dladdr((void*)GetPluginDirectory, &info);
-    std::string dir(info.dli_fname ? info.dli_fname : "");
-    size_t pos = dir.find_last_of('/');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    return dir;
-#endif
-}
-
-// Load FMOD libraries from the provided directory
-bool LoadFMODLibraries(const std::string& directory) {
-#ifdef _WIN32
-    std::string studioPath = directory + "\\fmodstudio.dll";
-    std::string corePath = directory + "\\fmod.dll";
-    fmodStudioHandle = LoadLibraryA(studioPath.c_str());
-    if (!fmodStudioHandle) {
-        PostMsg("Failed to load fmodstudio.dll from %s\n", studioPath.c_str());
-        return false;
-    }
-    fmodCoreHandle = LoadLibraryA(corePath.c_str());
-    if (!fmodCoreHandle) {
-        PostMsg("Failed to load fmod.dll from %s\n", corePath.c_str());
-        FreeLibrary(fmodStudioHandle);
-        fmodStudioHandle = nullptr;
-        return false;
-    }
-#else
-    std::string studioPath = directory + "/libfmodstudio.dylib";
-    std::string corePath = directory + "/libfmod.dylib";
-    fmodStudioHandle = dlopen(studioPath.c_str(), RTLD_NOW | RTLD_GLOBAL);
-    if (!fmodStudioHandle) {
-        PostMsg("Failed to load libfmodstudio.dylib from %s\n", studioPath.c_str());
-        return false;
-    }
-    fmodCoreHandle = dlopen(corePath.c_str(), RTLD_NOW | RTLD_GLOBAL);
-    if (!fmodCoreHandle) {
-        PostMsg("Failed to load libfmod.dylib from %s\n", corePath.c_str());
-        dlclose(fmodStudioHandle);
-        fmodStudioHandle = nullptr;
-        return false;
-    }
-#endif
-    return true;
-}
-
-// Unload previously loaded FMOD libraries
-void UnloadFMODLibraries() {
-#ifdef _WIN32
-    if (fmodStudioHandle) {
-        FreeLibrary(fmodStudioHandle);
-        fmodStudioHandle = nullptr;
-    }
-    if (fmodCoreHandle) {
-        FreeLibrary(fmodCoreHandle);
-        fmodCoreHandle = nullptr;
-    }
-#else
-    if (fmodStudioHandle) {
-        dlclose(fmodStudioHandle);
-        fmodStudioHandle = nullptr;
-    }
-    if (fmodCoreHandle) {
-        dlclose(fmodCoreHandle);
-        fmodCoreHandle = nullptr;
-    }
-#endif
-}
-
 // Initialize FMOD system
 void InitializeFMOD() {
     FMOD::Studio::System::create(&fmod_system);
@@ -350,11 +260,11 @@ bool IsFMODInitialized() {
         FMOD_RESULT result = fmod_system->getCoreSystem(&coreSystem);  // Get the core system
         
         if (result == FMOD_OK && coreSystem) {
-            DebugMsg("FMOD System is initialized.\n");
+            // DebugMsg("FMOD System is initialized.\n");
             return true;  // FMOD is initialized
         }
     }
-    DebugMsg("FMOD System is NOT initialized.\n");
+    // DebugMsg("FMOD System is NOT initialized.\n");
     return false;  // FMOD is not initialized
 }
 
@@ -1510,13 +1420,6 @@ void ReleaseFMODEventInstance(const std::string& itemGUID) {
 std::unordered_map<int, MediaTrack*> fmodTracks;
 int cachedTrackCount = 0;
 
-std::string ToLower(const std::string& str) {
-    std::string lowerStr(str.size(), ' '); // Initialize with the same size
-    std::transform(str.begin(), str.end(), lowerStr.begin(),
-                   [](unsigned char c){ return std::tolower(c); });
-    return lowerStr;
-}
-
 void UpdateTrackCache() {
     int currentTrackCount = CountTracks(nullptr);
     if (currentTrackCount != cachedTrackCount) {
@@ -1527,14 +1430,10 @@ void UpdateTrackCache() {
             if (!track) continue;
 
             // Get the track name
-            char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
-            if (trackNameChar) {
-                std::string trackName(trackNameChar);
-                std::string lowerTrackName = ToLower(trackName);
-                if (lowerTrackName.find("fmod") != std::string::npos) {
-                    // If the track name contains "fmod" in any case, add it to the map
-                    fmodTracks[i] = track;
-                }
+            char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+            if (trackName && (strstr(trackName, "FMOD") || strstr(trackName, "fmod"))) {
+                // If the track name contains "FMOD" or "fmod", add it to the map
+                fmodTracks[i] = track;
             }
         }
         cachedTrackCount = currentTrackCount;
@@ -1542,16 +1441,9 @@ void UpdateTrackCache() {
         // Check for name changes
         for (auto it = fmodTracks.begin(); it != fmodTracks.end();) {
             MediaTrack* track = it->second;
-            char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
-            if (!trackNameChar) {
-                // If track name is null, remove it from the map
-                it = fmodTracks.erase(it);
-                continue;
-            }
-            std::string trackName(trackNameChar);
-            std::string lowerTrackName = ToLower(trackName);
-            if (lowerTrackName.find("fmod") == std::string::npos) {
-                // If track name no longer contains "fmod", remove it from the map
+            char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+            if (!trackName || (!strstr(trackName, "FMOD") && !strstr(trackName, "fmod"))) {
+                // If track name no longer matches, remove it from the map
                 it = fmodTracks.erase(it);
             } else {
                 ++it;
@@ -1564,13 +1456,9 @@ void UpdateTrackCache() {
                 MediaTrack* track = GetTrack(nullptr, i);
                 if (!track) continue;
 
-                char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
-                if (trackNameChar) {
-                    std::string trackName(trackNameChar);
-                    std::string lowerTrackName = ToLower(trackName);
-                    if (lowerTrackName.find("fmod") != std::string::npos) {
-                        fmodTracks[i] = track;
-                    }
+                char* trackName = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
+                if (trackName && (strstr(trackName, "FMOD") || strstr(trackName, "fmod"))) {
+                    fmodTracks[i] = track;
                 }
             }
         }
@@ -2598,14 +2486,10 @@ void toggleReaMODWindow() {
         ImGui::init(plugin_getapi);
         reaMOD_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
 
-        // Initialize FMOD only if it's not already initialized and libraries loaded
+        // Initialize FMOD only if it's not already initialized
         if (!IsFMODInitialized()) {
-            if (fmodStudioHandle && fmodCoreHandle) {
-                InitializeFMOD();  // Initialize the FMOD system
-                playbackTaskId = AddTask(MonitorPlayback);  // Add playback monitoring
-            } else {
-                PostMsg("FMOD libraries not loaded. Cannot initialize FMOD.\n");
-            }
+            InitializeFMOD();  // Initialize the FMOD system
+            playbackTaskId = AddTask(MonitorPlayback);  // Add playback monitoring
         }
 
         // Add the GUI rendering task and store its ID
@@ -2714,17 +2598,7 @@ void RegisterActions() {
 extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT( REAPER_PLUGIN_HINSTANCE instance, reaper_plugin_info_t *rec) {
     if (!rec) return 0;  // If rec is null, clean up
     if (rec->caller_version != REAPER_PLUGIN_VERSION) return 0;  // Check for compatibility
-
-    std::string pluginDir = GetPluginDirectory(instance);
-#ifdef _WIN32
-    std::string fmodDir = pluginDir + "\\ReaMOD";
-#else
-    std::string fmodDir = pluginDir + "/ReaMOD";
-#endif
-    if (!LoadFMODLibraries(fmodDir)) {
-        PostMsg("Failed to load FMOD libraries from %s\n", fmodDir.c_str());
-    }
-
+    
     LoadReaperAPIFunctions(rec);  // Load API functions
     RegisterActions(); // Register custom action and command hook
 
@@ -2740,5 +2614,4 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT void REAPER_PLUGIN_EXIT() {
     StopAllEvents();
     RemoveTask(playbackTaskId);
     plugin_register("-timer", reinterpret_cast<void*>(&OnTimer));
-    UnloadFMODLibraries();
 }

@@ -49,9 +49,7 @@ if(WIN32)
     target_link_libraries(reaper_ReaMODPlugin
         fmod_vc
         fmodstudio_vc
-        delayimp
     )
-    target_link_options(reaper_ReaMODPlugin PRIVATE "/DELAYLOAD:fmod.dll" "/DELAYLOAD:fmodstudio.dll")
 else()
     target_link_libraries(reaper_ReaMODPlugin
         fmod
@@ -59,19 +57,11 @@ else()
     )
 endif()
 
-# Mac-specific settings to remove the "lib" prefix, set .dylib suffix,
-# and search for FMOD libraries relative to the plugin location
+# Mac-specific settings to remove the "lib" prefix and set .dylib suffix
 if(APPLE)
-    set(CMAKE_INSTALL_RPATH "@loader_path/ReaMOD")
-    set(CMAKE_INSTALL_RPATH_USE_LINK_PATH OFF)
     set_target_properties(reaper_ReaMODPlugin PROPERTIES
-        PREFIX ""
+        PREFIX ""  # This removes the 'lib' prefix
         SUFFIX ".dylib"
-        OUTPUT_NAME "reaper_ReaMOD_Plugin"
-        MACOSX_RPATH ON
-        BUILD_RPATH "@loader_path/ReaMOD"
-        INSTALL_RPATH "@loader_path/ReaMOD"
-        BUILD_WITH_INSTALL_RPATH ON
-        CMAKE_INSTALL_RPATH_USE_LINK_PATH OFF
+        OUTPUT_NAME "reaper_ReaMOD_Plugin"  # Custom output name
     )
 endif()
