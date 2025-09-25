@@ -9,12 +9,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(REAPER_SDK_DIR "${CMAKE_SOURCE_DIR}/reaper-sdk")
 set(REAPER_REAIMGUI_DIR "${CMAKE_SOURCE_DIR}/ReaImGui")
 
-# Path to FMOD API - select the subdirectory for the current platform
-if(APPLE)
-    set(FMOD_API_DIR "${CMAKE_SOURCE_DIR}/fmod/Mac")
-elseif(WIN32)
-    set(FMOD_API_DIR "${CMAKE_SOURCE_DIR}/fmod/Windows")
-endif()
+# Path to FMOD API
+set(FMOD_API_DIR "${CMAKE_SOURCE_DIR}/fmod")
 
 # Path to tinyfiledialogs
 set(TINYFILEDIALOGS_DIR "${CMAKE_SOURCE_DIR}/tinyfiledialogs")
@@ -45,17 +41,10 @@ set(SOURCE_FILES
 add_library(reaper_ReaMODPlugin SHARED ${SOURCE_FILES})
 
 # Link FMOD libraries to the correct target (reaper_ReaMODPlugin)
-if(WIN32)
-    target_link_libraries(reaper_ReaMODPlugin
-        fmod_vc
-        fmodstudio_vc
-    )
-else()
-    target_link_libraries(reaper_ReaMODPlugin
-        fmod
-        fmodstudio
-    )
-endif()
+target_link_libraries(reaper_ReaMODPlugin
+    fmod
+    fmodstudio
+)
 
 # Mac-specific settings to remove the "lib" prefix and set .dylib suffix
 if(APPLE)
