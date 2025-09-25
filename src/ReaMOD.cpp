@@ -35,7 +35,6 @@ namespace fs = std::filesystem;
 
 // Custom action ID Variables
 static int actionIdOpenCloseReaMODWindow = 0;
-static int actionIdAddMarkerWithSelectedEvent = 0;
 static int actionIdAddItemWithSelectedEventAtEditCursor = 0;
 static int actionIdAddItemWithSelectedEventWithinTimeSelection = 0;
 static int actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = 0;
@@ -57,17 +56,22 @@ std::vector<std::string> bank_files; // Store the list of found .bank files and 
 std::vector<bool> bank_load_states; //Store the state of each bank file (loaded/unloaded = true/false)
 std::unordered_map<std::string, FMOD::Studio::Bank*> loaded_banks;  // Map of loaded banks
 std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map of events in each bank
-std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
 std::unordered_map<MediaItem*, bool> triggeredItems; // Global variable to store whether an item has already triggered
 std::string selectedFMODEvent = "No event selected";  // Global or static variable to store the selected event
 
 // Global variables to track playback
-double previousPlayPosition = 0.0;
-double lastCallTime = 0.0;
-int previousPlayState = 0;
-
-// Look-ahead time for marker triggering
+double previousPlayPosition = 0.0; // store Reaper's previous play position
+double lastCallTime = 0.0; // store the last time a playback call was made
+int previousPlayState = 0; // Store the previous play state
 int lookAheadTimeMs = 60;  // Default look-ahead time set to 0 milliseconds
+std::string lastTriggeredFMODEvent; // last triggered FMOD event path
+std::string lastSaveTimestamp; // Global variable to store the last modified timestamp
+std::string formattedLastSaveTimestamp; // Holds the formatted "Last Save" text
+int numFramesForItem = 10; // Default number of frames for the inserted item
+bool moveCursorAfterInsert = true; // Default to true, meaning the cursor moves forward by default
+bool updateItemInsertionLength = true; // bool for setting if the item length should be updated or not
+bool syncSelectedEventWithItemSelection = true; // bool for if FMOD event follows Reaper item selection
+MediaItem* lastSelectedItem = nullptr; // pointer to last selected media item
 
 // Task management
 std::unordered_map<int, std::function<void()>> taskMap;
@@ -75,19 +79,6 @@ int nextTaskId = 0;
 int guiTaskId = -1;
 int playbackTaskId = -1;
 int itemSelectionTaskId = -1;
-
-
-// Global variable to store the last triggered FMOD event path
-std::string lastTriggeredFMODEvent;
-
-std::string lastSaveTimestamp; // Global variable to store the last modified timestamp
-std::string formattedLastSaveTimestamp; // Holds the formatted "Last Save" text
-
-int numFramesForItem = 10; // Default number of frames for the inserted item
-bool moveCursorAfterInsert = true; // Default to true, meaning the cursor moves forward by default
-bool updateItemInsertionLength = true; 
-bool syncSelectedEventWithItemSelection = true;
-MediaItem* lastSelectedItem = nullptr;
 
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
@@ -107,7 +98,6 @@ std::vector<ParameterInfo> selectedEventParameters;
 // Map to store cached parameters for each event
 std::unordered_map<std::string, std::vector<ParameterInfo>> eventParameterCache;
 
-
 // Define the EventInstanceData struct
 struct EventInstanceData {
     FMOD::Studio::EventInstance* instance;
@@ -120,7 +110,7 @@ std::unordered_map<std::string, EventInstanceData> activeEventInstances;
 // Declare the function pointer for BR_GetMediaItemGUID
 void (*BR_GetMediaItemGUID)(MediaItem* item, char* guidStringOut, int guidStringOut_sz) = nullptr;
 
-
+// Load all needed Reaper API Functions
 void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
     if (rec && rec->GetFunc) {
         GetUserFileNameForRead = (bool (*)(char*, const char*, const char*))rec->GetFunc("GetUserFileNameForRead");
@@ -130,9 +120,6 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         ShowConsoleMsg = reinterpret_cast<decltype(ShowConsoleMsg)>(rec->GetFunc("ShowConsoleMsg"));
         GetPlayState = reinterpret_cast<decltype(GetPlayState)>(rec->GetFunc("GetPlayState"));
         GetPlayPosition = reinterpret_cast<decltype(GetPlayPosition)>(rec->GetFunc("GetPlayPosition"));
-        EnumProjectMarkers = reinterpret_cast<decltype(EnumProjectMarkers)>(rec->GetFunc("EnumProjectMarkers"));
-        CountProjectMarkers = reinterpret_cast<decltype(CountProjectMarkers)>(rec->GetFunc("CountProjectMarkers"));
-        AddProjectMarker2 = reinterpret_cast<decltype(AddProjectMarker2)>(rec->GetFunc("AddProjectMarker2"));
         GetCursorPosition = reinterpret_cast<decltype(GetCursorPosition)>(rec->GetFunc("GetCursorPosition"));
         CountTracks = reinterpret_cast<decltype(CountTracks)>(rec->GetFunc("CountTracks"));
         GetTrack = reinterpret_cast<decltype(GetTrack)>(rec->GetFunc("GetTrack"));
@@ -200,6 +187,7 @@ void DebugMsg(const char* fmt, ...) {
 }
 
 // A function for showing messages in Reaper's console.
+// Seperate from DebugMsg() for posting message to end user rather than during development/debugging
 void PostMsg(const char* fmt, ...) {
     // This function is intended for non-debug related messages.
     // This function can accept fully formated messages
@@ -237,6 +225,7 @@ void PostMsg(const char* fmt, ...) {
     va_end(args);
 }
 
+// Helper function to trim strings
 std::string Trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\n\r");
     if (first == std::string::npos)
@@ -432,6 +421,7 @@ void OpenFileDialog() {
     }
 }
 
+// Function to Play and FMOD event
 void PlayEvent(const std::string& event_path) {
     FMOD::Studio::EventDescription* event_description = nullptr;
     fmod_system->getEvent(event_path.c_str(), &event_description);
@@ -445,29 +435,7 @@ void PlayEvent(const std::string& event_path) {
     fmod_system->update();
 }
 
-bool isAddingMarker = false;
-
-void AddMarkerWithSelectedEvent() {
-    if (isAddingMarker) return; // Prevent re-entrant calls
-    isAddingMarker = true;
-
-    if (selectedFMODEvent.empty()) {
-        PostMsg("No FMOD event has been triggered yet.\n");
-        return;
-    }
-
-    // Get the current edit cursor position
-    double cursorPosition = GetCursorPosition();
-
-    // Create a new marker at the cursor position with the event's full path as the name
-    int color = 0; // Use default color
-    AddProjectMarker2(nullptr, false, cursorPosition, 0.0, selectedFMODEvent.c_str(), -1, color);
-
-    DebugMsg("Marker added for last FMOD event: %s\n", selectedFMODEvent.c_str());
-
-    isAddingMarker = false; // Reset flag after completion
-}
-
+// Function to add a media item with the selected FMOD event at the current edit cursor location
 void AddItemWithSelectedEventAtEditCursor() {
     if (selectedFMODEvent.empty()) {
         PostMsg("No FMOD event has been triggered yet.\n");
@@ -544,6 +512,7 @@ void AddItemWithSelectedEventAtEditCursor() {
     DebugMsg("Item added at position %.2f with take name: %s\n", cursorPosition, selectedFMODEvent.c_str());
 }
 
+// Function to add currently selected FMOD event within the current time selection on the selected track
 void AddItemWithSelectedEventWithinTimeSelection() {
     if (selectedFMODEvent.empty()) {
         PostMsg("No FMOD event has been triggered yet.\n");
@@ -630,6 +599,7 @@ void AddItemWithSelectedEventWithinTimeSelection() {
     DebugMsg("Item added within time selection from %.2f to %.2f with take name: %s\n", timeSelStart, timeSelEnd, selectedFMODEvent.c_str());
 }
 
+// Function to update length of future inserted items based upon current time selection
 void UpdateNumFramesForItemInsertionFromCurrentTimeSelection() {
     // Check if a time selection exists
     double timeSelStart, timeSelEnd;
@@ -728,6 +698,7 @@ std::map<std::string, std::map<std::string, std::vector<std::pair<std::string, s
     return grouped_folders;
 }
 
+// Function to copy string to system clipboard
 void CopyToClipboard(const std::string& text) {
     if (!reaMOD_ImGui_Context) {
         DebugMsg("ImGui context is not available, cannot copy to clipboard.\n");
@@ -747,6 +718,7 @@ void CopyToClipboard(const std::string& text) {
 // Map for storing event instances triggered by the ReaMOD window play buttons
 std::unordered_map<std::string, FMOD::Studio::EventInstance*> playButtonEventInstances;
 
+// Function to trigger an FMOD event when user clicks a playbutton
 void PlayButtonEvent(const std::string& eventPath) {
     FMOD::Studio::EventDescription* eventDesc = nullptr;
     fmod_system->getEvent(eventPath.c_str(), &eventDesc);
@@ -769,6 +741,7 @@ void PlayButtonEvent(const std::string& eventPath) {
     fmod_system->update();
 }
 
+// Function to steop an FMOD event when a stop button is clicked
 void StopButtonEvent(const std::string& eventPath) {
     auto it = playButtonEventInstances.find(eventPath);
     if (it != playButtonEventInstances.end()) {
@@ -779,6 +752,7 @@ void StopButtonEvent(const std::string& eventPath) {
     fmod_system->update();
 }
 
+// Function to update the parameters of a selcted event
 void UpdateSelectedEventParameters() {
     if (selectedFMODEvent.empty()) {
         selectedEventParameters.clear(); // Clear if no event is selected
@@ -883,57 +857,6 @@ bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
     return is_active;
 }
 
-void CheckMarkers(double playPosition) {
-    if (CountProjectMarkers == nullptr || EnumProjectMarkers == nullptr) {
-        DebugMsg("Marker functions are not available.\n");
-        return;
-    }
-
-    int numMarkers = 0, numRegions = 0;
-    CountProjectMarkers(nullptr, &numMarkers, &numRegions);  // Count markers and regions
-
-    int totalMarkersAndRegions = numMarkers + numRegions;
-    double checkAheadWindow = 1.0;  // Check markers 1 second ahead of play position
-    double tolerance = 0.04;        // Small tolerance to account for floating-point inaccuracies
-
-    // Convert lookAheadTimeMs to seconds
-    double lookAheadTimeSeconds = lookAheadTimeMs / 1000.0;
-
-    for (int i = 0; i < totalMarkersAndRegions; ++i) {
-        bool isRegion = false;
-        double markerPosition = 0.0, regionEnd = 0.0;
-        const char* name = nullptr;
-        int markerIndex = 0;  // Marker index from Reaper
-
-        // Corrected order of arguments for EnumProjectMarkers
-        if (EnumProjectMarkers(i, &isRegion, &markerPosition, &regionEnd, &name, &markerIndex)) {
-            if (name == nullptr) continue;  // Skip invalid markers
-
-            std::string markerName(name);
-
-            // Adjust marker position by look-ahead time
-            double adjustedMarkerPosition = markerPosition - lookAheadTimeSeconds;
-
-            // Only check markers that are within the 1-second window ahead of the play position
-            if (adjustedMarkerPosition >= playPosition && adjustedMarkerPosition <= playPosition + checkAheadWindow) {
-                DebugMsg("Checking marker %d: %s at position %.2f\n", markerIndex, markerName.c_str(), markerPosition);
-
-                // Trigger the event when the playhead reaches or passes the marker's position (with tolerance)
-                if (playPosition >= adjustedMarkerPosition - tolerance && playPosition <= adjustedMarkerPosition + tolerance) {
-                    // Check if this marker was already triggered
-                    if (!triggeredMarkers[markerIndex]) {
-                        DebugMsg("Triggering event for marker: %s at position %.2f\n", markerName.c_str(), markerPosition);
-                        PlayEvent(markerName);  // Trigger the FMOD event or snapshot
-                        triggeredMarkers[markerIndex] = true;  // Mark this marker as triggered
-                    }
-                }
-            }
-        } else {
-            DebugMsg("Failed to retrieve marker %d\n", i);
-        }
-    }
-}
-
 // Function to split a string by a delimiter into a vector of strings
 std::string GetItemGUID(MediaItem* item) {
     if (!item) {
@@ -952,6 +875,7 @@ std::string GetItemGUID(MediaItem* item) {
     return std::string(guidStr);
 }
 
+// Function to copy selected media items GUID to system clipboard
 void CopySelectedMediaItemGUIDToClipboard() {
     // Get the first selected media item (ignoring track selection)
     MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0); // Pass 0 to get the first selected item
@@ -976,6 +900,7 @@ void CopySelectedMediaItemGUIDToClipboard() {
     DebugMsg("Copied selected media item GUID to clipboard: %s\n", guidStr.c_str());
 }
 
+// Function to insert a media item that will update a specific parameter for the currently selected media item
 void InsertParamUpdateItemForSelectedMediaItem() {
     // Get the first selected media item (ignoring track selection)
     MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0); // Pass 0 to get the first selected item
@@ -1060,7 +985,7 @@ void InsertParamUpdateItemForSelectedMediaItem() {
     DebugMsg("Inserted param update item at position %.2f with GUID: %s\n", cursorPosition, guidStr.c_str());
 }
 
-
+// Function to parse a media item's notes and apply any found event parameter values to the corrisponding FMOD event
 void ParseAndApplyNotes(FMOD::Studio::EventInstance* eventInstance, const std::vector<std::string>& noteLines) {
     if (!eventInstance) {
         DebugMsg("ParseAndApplyNotes: eventInstance is null, skipping.\n");
@@ -1161,6 +1086,7 @@ std::vector<std::string> SplitString(const std::string& str, const std::string& 
     return tokens;
 }
 
+// Function to retrieving any contents of a media items notes and then parsing and applying via ParseAndApplyNotes()
 void ProcessItemNotes(MediaItem* item, int itemIndex, int trackIndex, FMOD::Studio::EventInstance* eventInstance) {
     if (!item) {
         DebugMsg("ProcessItemNotes: Item is null, skipping.\n");
@@ -1192,6 +1118,7 @@ void ProcessItemNotes(MediaItem* item, int itemIndex, int trackIndex, FMOD::Stud
     ParseAndApplyNotes(eventInstance, noteLines);
 }
 
+// Function to change a specific parameter's value over a selected time range and interpolating between a given starting and ending value over each frame.
 void InsertParamAutomationItemsForSelectedMediaItem() {
     // Get the first selected media item
     MediaItem* selectedItem = GetSelectedMediaItem(nullptr, 0); // Pass 0 to get the first selected item
@@ -1335,6 +1262,7 @@ void InsertParamAutomationItemsForSelectedMediaItem() {
     UpdateArrange();
 }
 
+// Function for creating an FMOD event Instance
 void CreateFMODEventInstance(const std::string& eventPath, MediaItem* item, double startPosition, double endPosition) {
     if (!fmod_system) {
         DebugMsg("FMOD system is not initialized. Cannot create event instance.\n");
@@ -1390,6 +1318,7 @@ void CreateFMODEventInstance(const std::string& eventPath, MediaItem* item, doub
     fmod_system->update();
 }
 
+// Function for releasing an existing FMOD event instance
 void ReleaseFMODEventInstance(const std::string& itemGUID) {
     DebugMsg("Releasing FMOD event instance for item GUID: %s\n", itemGUID.c_str());
 
@@ -1417,6 +1346,7 @@ void ReleaseFMODEventInstance(const std::string& itemGUID) {
     fmod_system->update();
 }
 
+// Function for monitoring which tracks within the current Reaper project are contained inside a parent track named "FMOD" or that have track names containing "FMOD"
 std::unordered_map<int, MediaTrack*> fmodTracks;
 int cachedTrackCount = 0;
 
@@ -1465,6 +1395,8 @@ void UpdateTrackCache() {
     }
 }
 
+
+// Function for checking items for FMOD event or parameter calls within `fmodTracks`
 void CheckItems(double playPosition) {
     UpdateTrackCache(); // Refresh the track cache before checking items
 
@@ -1588,6 +1520,7 @@ void CheckItems(double playPosition) {
 
 bool trackCacheUpdatedDuringPlayback = false; // Flag to track if the cache has been updated during playback
 
+// Function for releasing all currently active FMOD event instances
 void ReleaseAllEventInstances() {
     DebugMsg("Releasing all active FMOD event instances.\n");
 
@@ -1620,6 +1553,7 @@ void ReleaseAllEventInstances() {
     fmod_system->update();  // Ensure FMOD processes all the release calls
 }
 
+// Function to release and stop all active FMOD events
 void stopReleaseALLFMODEventInstances(){
     ReleaseAllEventInstances();
     StopAllEvents();
@@ -1666,6 +1600,7 @@ std::string getReaMODFileName(const std::string& filePath) {
     return baseFileName;
 }
 
+// Function for saving the ReaMOD preference file to disk as a .reaMOD file
 void SaveStateToFile(const std::string& filePath = "") {
     std::string finalFilePath;
 
@@ -1727,6 +1662,7 @@ void SaveStateToFile(const std::string& filePath = "") {
     }
 }
 
+// Function to load a saved .reaMOD file from disk
 void LoadStateFromFile(const std::string& filePath) {
     if (!IsFMODInitialized()) {
         DebugMsg("FMOD system is not initialized. Cannot load state from file.\n");
@@ -1856,6 +1792,7 @@ void LoadStateFromFile(const std::string& filePath) {
     }
 }
 
+// Function for displaying a saving dialog window
 void SaveStateDialog() {
     // Determine the default file name
     std::string defaultFileName;
@@ -1896,6 +1833,7 @@ void SaveStateDialog() {
     }
 }
 
+// Function for displaying a load state dialog window
 void LoadStateDialog() {
     const char* filterPatterns[2] = { "*.ReaMOD", "*.*" };
     const char* loadPath = tinyfd_openFileDialog(
@@ -1924,6 +1862,7 @@ std::string RemoveBankExtension(const std::string& filename) {
     return filename;  // Return original if no ".bank" extension is found
 }
 
+// Main Function for rendering the ReaMOD GUI
 void RenderGUI() {
     ImGui::SetNextWindowSize(reaMOD_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
@@ -2202,7 +2141,7 @@ void RenderGUI() {
     }
 }
 
-
+// Function for updated event play states
 void UpdateEventPlayStates() {
     bool stateChanged = false;
 
@@ -2239,6 +2178,7 @@ void UpdateEventPlayStates() {
     }
 }
 
+// Main function for monitoring Reaper's current playback state
 void MonitorPlayback() {
     if (!IsFMODInitialized()) {
         DebugMsg("FMOD system is not initialized. Skipping playback monitoring.\n");
@@ -2264,7 +2204,6 @@ void MonitorPlayback() {
             DebugMsg("Playback started. Stopped and released all FMOD event instances.\n");
 
             // Reset any necessary state variables
-            triggeredMarkers.clear();            // Clear triggered markers
             triggeredItems.clear();              // Clear triggered items
             activeEventInstances.clear();        // Clear active event instances
             trackCacheUpdatedDuringPlayback = false; // Reset track cache flag
@@ -2278,16 +2217,12 @@ void MonitorPlayback() {
 
         // If playhead moved backward (looping, scrubbing, or jump)
         if (playPosition < previousPlayPosition) {
-            DebugMsg("Playhead moved backward. Resetting triggered markers.\n");
-            triggeredMarkers.clear();            // Clear all triggered markers to allow retriggering
+            DebugMsg("Playhead moved backward. Resetting triggered items.\n");
             triggeredItems.clear();              // Clear all triggered items to allow retriggering
         }
 
         // Update previous play position
         previousPlayPosition = playPosition;
-
-        // Check markers and trigger FMOD events based on marker positions
-        CheckMarkers(playPosition);
 
         // Check items on tracks named "FMOD" or "fmod" for event or snapshot notes
         CheckItems(playPosition);
@@ -2303,6 +2238,7 @@ void MonitorPlayback() {
     UpdateEventPlayStates();
 }
 
+// Function for monitoring current item selection in Reaper
 void MonitorItemSelection() {
     DebugMsg("MonitorItemSelection called.\n");
 
@@ -2458,6 +2394,7 @@ void OnTimer() {
     }
 }
 
+// Function to automatically load a .reaMOD file found in the directory of the loaded Reaper project file
 void AutoLoadReaMODFile() {
     std::string reaperProjectName = GetCurrentReaperProjectName();
     if (!reaperProjectName.empty() && reaperProjectName != "Untitled") {
@@ -2480,6 +2417,7 @@ void AutoLoadReaMODFile() {
     }
 }
 
+// Function to toggle the visibility of the ReaMOD window
 void toggleReaMODWindow() {
     if (!reaMOD_ImGui_Context) {
         // First-time setup: initialize ReaImGui and FMOD, and start rendering
@@ -2525,10 +2463,6 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         toggleReaMODWindow();
         return true;
     }
-    if (command == actionIdAddMarkerWithSelectedEvent) {
-        AddMarkerWithSelectedEvent();
-        return true;
-    }
     if (command == actionIdAddItemWithSelectedEventAtEditCursor) {
         AddItemWithSelectedEventAtEditCursor();
         return true;
@@ -2557,16 +2491,13 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
     return false;
 }
 
+// Function to register ReaMOD's custom Reaper actions
 void RegisterActions() {
     plugin_register("hookcommand2", reinterpret_cast<void*>(&commandHook));  // Hook the action
     
     // Register the existing custom action for toggling the ReaMOD window
     static custom_action_register_t actionOpenReaMODWindowReg = { 0, "ReaMOD_OpenCloseReaMODWindow", "ReaMOD: Open/Close Window" };
     actionIdOpenCloseReaMODWindow = plugin_register("custom_action", &actionOpenReaMODWindowReg);  // Assign the action ID to actionIdOpenCloseReaMODWindow
-
-    // Register the new custom action for adding a marker with the selected event at edit cursor
-    static custom_action_register_t actionAddMarkerWithLastFMODEventReg = { 0, "ReaMOD_AddMarkerWithLastFMODEvent", "ReaMOD: Add Marker with Last FMOD Event" };
-    actionIdAddMarkerWithSelectedEvent = plugin_register("custom_action", &actionAddMarkerWithLastFMODEventReg);
 
     // Register the new custom action for adding a item with the selected event at edit cursor
     static custom_action_register_t actionAddItemWithLastFMODEvent = { 0, "ReaMOD_AddItemWithLastFMODEvent", "ReaMOD: Add Item with selected event at edit cursor" };
