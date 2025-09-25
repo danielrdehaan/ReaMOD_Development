@@ -4,13 +4,13 @@
 #include <cstring>
 #include <vector>
 #include <unordered_map>
-#include <map>        // Use for storing hierarchical paths
-#include <set>        // Use for sorted folder paths
-#include <filesystem> // C++17 file system operations
+#include <map>
+#include <set>
+#include <filesystem>
 #include <functional>
 #include <chrono>
 #include <thread>
-#include <fstream> // Include for file I/O operations
+#include <fstream>
 #include <ctime>
 #include "fmod_studio.hpp"
 #include "fmod.hpp"
@@ -27,11 +27,13 @@
 
 #define FILE_PATH_BUFFER_SIZE 1024
 
+// Enable/Disable posting debug messages to Reaper's Console Window.
 #define DEBUG true
 
-namespace fs = std::filesystem;  // Alias for easier use of filesystem operations
+// Alias for easier use of filesystem operations
+namespace fs = std::filesystem;
 
-// Declare the global variable to store the custom action ID
+// Custom action ID Variables
 static int actionIdOpenCloseReaMODWindow = 0;
 static int actionIdAddMarkerWithSelectedEvent = 0;
 static int actionIdAddItemWithSelectedEventAtEditCursor = 0;
@@ -41,7 +43,6 @@ static int actionIDStopAndReleaseAllFmodEventInstances = 0;
 static int actionIDInsertParamUpdateItemForSelectedMediaItem = 0;
 static int actionIDInsertParamAutomationItemsForSelectedMediaItem = 0;
 
-
 // ImGui context
 ImGui_Context* reaMOD_ImGui_Context = nullptr;
 char selected_file_path[FILE_PATH_BUFFER_SIZE] = "";  // Full path of selected .fspro file
@@ -50,15 +51,14 @@ std::string currentReaMODFileName = " ";
 std::string currentDisplayedFileName = " ";
 bool reaModWindowOpen = true;
 
-
+// FMOD Bank Data
 std::vector<std::string> masterStringEvents;  // Store event paths from Master.strings.bank
 std::vector<std::string> bank_files; // Store the list of found .bank files and their toggle states
-std::vector<bool> bank_load_states;
+std::vector<bool> bank_load_states; //Store the state of each bank file (loaded/unloaded = true/false)
 std::unordered_map<std::string, FMOD::Studio::Bank*> loaded_banks;  // Map of loaded banks
 std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map of events in each bank
 std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
 std::unordered_map<MediaItem*, bool> triggeredItems; // Global variable to store whether an item has already triggered
-
 std::string selectedFMODEvent = "No event selected";  // Global or static variable to store the selected event
 
 // Global variables to track playback
