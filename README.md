@@ -7,8 +7,8 @@ ReaMOD is a plugin for [REAPER](https://www.reaper.fm/), a digital audio worksta
 - **FMOD Project Integration**: Load and manage FMOD Studio projects and banks directly within REAPER.
 - **Event Browsing and Playback**: Browse through FMOD events and snapshots, play them back, and integrate them into your REAPER projects.
 - **Parameter Control**: Adjust FMOD event parameters using GUI sliders, and have these changes reflected in real-time.
-- **Marker and Item Insertion**: Insert markers and items associated with FMOD events into the REAPER timeline, allowing for precise synchronization.
-- **Playback Monitoring**: Monitor REAPER's playback and trigger FMOD events based on markers or items.
+- **Item Insertion**: Insert items associated with FMOD events into the REAPER timeline, allowing for precise synchronization.
+- **Playback Monitoring**: Monitor REAPER's playback and trigger FMOD events based with items.
 - **Session Management**: Save and load plugin states (`.ReaMOD` files) for consistent sessions across projects.
 - **Custom Actions**: Provides custom actions that can be assigned to keyboard shortcuts or toolbar buttons for quick access.
 
@@ -75,11 +75,10 @@ ReaMOD is a plugin for [REAPER](https://www.reaper.fm/), a digital audio worksta
 - In the `Selected Event` section, use the sliders to adjust the event's parameters.
 - If the event is currently playing, changes to the sliders will affect the event in real-time.
 
-### Inserting Markers and Items
+### Inserting Items
 
-- Use the provided custom actions to insert markers or items associated with the selected FMOD event:
+- Use the provided custom actions to insert items associated with the selected FMOD event:
 
-  - **Add Marker with Last FMOD Event**: Inserts a marker at the edit cursor with the selected event.
   - **Add Item with selected event at edit cursor**: Inserts an item at the edit cursor on the selected track with the selected event.
   - **Add Item with selected event within current time selection**: Inserts an item spanning the time selection with the selected event.
 
@@ -87,7 +86,7 @@ ReaMOD is a plugin for [REAPER](https://www.reaper.fm/), a digital audio worksta
 
 ### Playback Integration
 
-- When you play back your REAPER project, the plugin will monitor playback and trigger FMOD events based on markers or items.
+- When you play back your REAPER project, the plugin will monitor playback and trigger FMOD events based on items.
 - Events will start and stop in sync with REAPER's timeline.
 
 ### Saving and Loading Plugin State
@@ -101,7 +100,6 @@ ReaMOD is a plugin for [REAPER](https://www.reaper.fm/), a digital audio worksta
 The plugin provides several custom actions for enhanced workflow:
 
 - **ReaMOD: Open/Close Window**
-- **ReaMOD: Add Marker with Last FMOD Event**
 - **ReaMOD: Add Item with selected event at edit cursor**
 - **ReaMOD: Add Item with selected event within current time selection**
 - **ReaMOD: Update number of frames for item insertion from current time selection**
