@@ -148,7 +148,7 @@ class Bank : public Detail::Handle<FMOD_STUDIO_BANK> {
     FMOD_RESULT loadSampleData();
     FMOD_RESULT unload();
     FMOD_RESULT getEventCount(int* count);
-    FMOD_RESULT getEventList(EventDescription** array, int capacity, int* count);
+    FMOD_RESULT getEventList(Detail::EventDescription** array, int capacity, int* count);
     FMOD_RESULT getStringCount(int* count);
     FMOD_RESULT getStringInfo(int index, FMOD_GUID* id, char* path, int size, int* retrieved);
 };
@@ -160,7 +160,7 @@ class EventDescription : public Detail::Handle<FMOD_STUDIO_EVENTDESCRIPTION> {
         : Detail::Handle<FMOD_STUDIO_EVENTDESCRIPTION>(event) {}
 
     FMOD_RESULT getPath(char* path, int size, int* retrieved);
-    FMOD_RESULT createInstance(EventInstance** instance);
+    FMOD_RESULT createInstance(Detail::EventInstance** instance);
     FMOD_RESULT getParameterDescriptionCount(int* count);
     FMOD_RESULT getParameterDescriptionByIndex(int index, FMOD_STUDIO_PARAMETER_DESCRIPTION* description);
 };
