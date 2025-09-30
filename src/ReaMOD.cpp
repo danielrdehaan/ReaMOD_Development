@@ -12,9 +12,9 @@
 #include <thread>
 #include <fstream>
 #include <ctime>
-#include "fmod_studio.hpp"
-#include "fmod.hpp"
-#include "fmod_errors.h"
+#include <sstream>
+#include <iomanip>
+#include "FMODDynLoad.h"
 #include "reaper_plugin.h"
 #include "tinyfiledialogs.h"
 
@@ -118,6 +118,7 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         plugin_register = reinterpret_cast<decltype(plugin_register)>(rec->GetFunc("plugin_register"));
         ShowMessageBox = reinterpret_cast<decltype(ShowMessageBox)>(rec->GetFunc("ShowMessageBox"));
         ShowConsoleMsg = reinterpret_cast<decltype(ShowConsoleMsg)>(rec->GetFunc("ShowConsoleMsg"));
+        GetResourcePath = reinterpret_cast<decltype(GetResourcePath)>(rec->GetFunc("GetResourcePath"));
         GetPlayState = reinterpret_cast<decltype(GetPlayState)>(rec->GetFunc("GetPlayState"));
         GetPlayPosition = reinterpret_cast<decltype(GetPlayPosition)>(rec->GetFunc("GetPlayPosition"));
         GetCursorPosition = reinterpret_cast<decltype(GetCursorPosition)>(rec->GetFunc("GetCursorPosition"));
@@ -235,9 +236,87 @@ std::string Trim(const std::string& str) {
 }
 
 // Initialize FMOD system
+constexpr unsigned int kRequiredFMODVersion = 0x00020309;
+
 void InitializeFMOD() {
-    FMOD::Studio::System::create(&fmod_system);
-    fmod_system->initialize(512, FMOD_STUDIO_INIT_NORMAL, FMOD_INIT_NORMAL, 0);
+    if (!FMODDynLoad::Initialize(GetResourcePath, ShowMessageBox, kRequiredFMODVersion)) {
+        if (ShowMessageBox) {
+            std::string message = "Failed to load FMOD libraries.\n" + FMODDynLoad::GetLastError();
+            ShowMessageBox(message.c_str(), "ReaMOD - FMOD Error", 0);
+        }
+        return;
+    }
+
+    FMOD_SYSTEM* versionCheckSystem = nullptr;
+    FMOD_RESULT result = ReaMOD_FMOD_System_Create(&versionCheckSystem);
+    if (result != FMOD_OK || !versionCheckSystem) {
+        if (ShowMessageBox) {
+            std::ostringstream oss;
+            oss << "FMOD_System_Create failed (error code " << result << ").";
+            const std::string message = oss.str();
+            ShowMessageBox(message.c_str(), "ReaMOD - FMOD Error", 0);
+        }
+        FMODDynLoad::Shutdown();
+        return;
+    }
+
+    unsigned int detectedVersion = 0;
+    result = ReaMOD_FMOD_System_GetVersion(versionCheckSystem, &detectedVersion);
+    if (result != FMOD_OK) {
+        if (ShowMessageBox) {
+            std::ostringstream oss;
+            oss << "FMOD_System_GetVersion failed (error code " << result << ").";
+            const std::string message = oss.str();
+            ShowMessageBox(message.c_str(), "ReaMOD - FMOD Error", 0);
+        }
+        ReaMOD_FMOD_System_Release(versionCheckSystem);
+        FMODDynLoad::Shutdown();
+        return;
+    }
+
+    ReaMOD_FMOD_System_Release(versionCheckSystem);
+
+    if (detectedVersion != kRequiredFMODVersion) {
+        if (ShowMessageBox) {
+            std::ostringstream oss;
+            oss << "ReaMOD requires FMOD Studio API build 0x" << std::uppercase << std::hex << kRequiredFMODVersion
+                << " but found 0x" << detectedVersion << std::nouppercase << std::dec << ".\n\n"
+                << "Place the FMOD Studio API files in: "
+                << (FMODDynLoad::GetBasePath() / "fmod" / "api").string() << "\n"
+                << "Expected layout: ReaMOD/fmod/api/core/lib/... and ReaMOD/fmod/api/studio/lib/...";
+            const std::string message = oss.str();
+            ShowMessageBox(message.c_str(), "ReaMOD - FMOD Version Mismatch", 0);
+        }
+        FMODDynLoad::Shutdown();
+        return;
+    }
+
+    result = FMOD::Studio::System::create(&fmod_system);
+    if (result != FMOD_OK || !fmod_system) {
+        if (ShowMessageBox) {
+            std::ostringstream oss;
+            oss << "FMOD::Studio::System::create failed (error code " << result << ").";
+            const std::string message = oss.str();
+            ShowMessageBox(message.c_str(), "ReaMOD - FMOD Error", 0);
+        }
+        FMODDynLoad::Shutdown();
+        return;
+    }
+
+    result = fmod_system->initialize(512, FMOD_STUDIO_INIT_NORMAL, FMOD_INIT_NORMAL, nullptr);
+    if (result != FMOD_OK) {
+        if (ShowMessageBox) {
+            std::ostringstream oss;
+            oss << "FMOD system initialization failed (error code " << result << ").";
+            const std::string message = oss.str();
+            ShowMessageBox(message.c_str(), "ReaMOD - FMOD Error", 0);
+        }
+        fmod_system->release();
+        fmod_system = nullptr;
+        FMODDynLoad::Shutdown();
+        return;
+    }
+
     DebugMsg("Initializing FMOD System.\n");
 }
 
