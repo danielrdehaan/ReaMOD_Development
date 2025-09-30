@@ -22,7 +22,6 @@ const std::filesystem::path& GetBasePath();
 #define FMOD_System_Create ReaMOD_FMOD_System_Create
 #define FMOD_System_GetVersion ReaMOD_FMOD_System_GetVersion
 #define FMOD_System_Release ReaMOD_FMOD_System_Release
-
 #define FMOD_Studio_System_Create ReaMOD_FMOD_Studio_System_Create
 #define FMOD_Studio_System_Initialize ReaMOD_FMOD_Studio_System_Initialize
 #define FMOD_Studio_System_GetCoreSystem ReaMOD_FMOD_Studio_System_GetCoreSystem
@@ -32,31 +31,34 @@ const std::filesystem::path& GetBasePath();
 #define FMOD_Studio_System_GetBus ReaMOD_FMOD_Studio_System_GetBus
 #define FMOD_Studio_System_SetParameterByName ReaMOD_FMOD_Studio_System_SetParameterByName
 #define FMOD_Studio_System_Release ReaMOD_FMOD_Studio_System_Release
-
 #define FMOD_Studio_Bank_LoadSampleData ReaMOD_FMOD_Studio_Bank_LoadSampleData
 #define FMOD_Studio_Bank_Unload ReaMOD_FMOD_Studio_Bank_Unload
 #define FMOD_Studio_Bank_GetEventCount ReaMOD_FMOD_Studio_Bank_GetEventCount
 #define FMOD_Studio_Bank_GetEventList ReaMOD_FMOD_Studio_Bank_GetEventList
+#define FMOD_Studio_Bank_GetStringCount ReaMOD_FMOD_Studio_Bank_GetStringCount
 #define FMOD_Studio_Bank_GetStringInfo ReaMOD_FMOD_Studio_Bank_GetStringInfo
-
 #define FMOD_Studio_EventDescription_GetPath ReaMOD_FMOD_Studio_EventDescription_GetPath
 #define FMOD_Studio_EventDescription_CreateInstance ReaMOD_FMOD_Studio_EventDescription_CreateInstance
 #define FMOD_Studio_EventDescription_GetParameterDescriptionCount ReaMOD_FMOD_Studio_EventDescription_GetParameterDescriptionCount
 #define FMOD_Studio_EventDescription_GetParameterDescriptionByIndex ReaMOD_FMOD_Studio_EventDescription_GetParameterDescriptionByIndex
-
 #define FMOD_Studio_EventInstance_Start ReaMOD_FMOD_Studio_EventInstance_Start
 #define FMOD_Studio_EventInstance_Stop ReaMOD_FMOD_Studio_EventInstance_Stop
 #define FMOD_Studio_EventInstance_Release ReaMOD_FMOD_Studio_EventInstance_Release
 #define FMOD_Studio_EventInstance_SetParameterByName ReaMOD_FMOD_Studio_EventInstance_SetParameterByName
 #define FMOD_Studio_EventInstance_GetParameterByName ReaMOD_FMOD_Studio_EventInstance_GetParameterByName
 #define FMOD_Studio_EventInstance_GetPlaybackState ReaMOD_FMOD_Studio_EventInstance_GetPlaybackState
-
 #define FMOD_Studio_Bus_StopAllEvents ReaMOD_FMOD_Studio_Bus_StopAllEvents
 #endif
 
+#if __has_include("fmod_studio.hpp")
+#define FMODDYNLOAD_HAS_SDK 1
 #include "fmod_studio.hpp"
 #include "fmod.hpp"
 #include "fmod_errors.h"
+#else
+#include "FMODMinimal.hpp"
+#endif
+
 
 // Wrapper function declarations exposed by the dynamic loader.
 extern "C" {
@@ -87,6 +89,9 @@ FMOD_RESULT F_CALL ReaMOD_FMOD_Studio_Bank_GetEventCount(FMOD_STUDIO_BANK* bank,
 FMOD_RESULT F_CALL ReaMOD_FMOD_Studio_Bank_GetEventList(FMOD_STUDIO_BANK* bank,
                                                         FMOD_STUDIO_EVENTDESCRIPTION** array,
                                                         int capacity, int* count);
+
+FMOD_RESULT F_CALL ReaMOD_FMOD_Studio_Bank_GetStringCount(FMOD_STUDIO_BANK* bank, int* count);
+
 FMOD_RESULT F_CALL ReaMOD_FMOD_Studio_Bank_GetStringInfo(FMOD_STUDIO_BANK* bank, int index,
                                                          FMOD_GUID* id, char* path, int size, int* retrieved);
 

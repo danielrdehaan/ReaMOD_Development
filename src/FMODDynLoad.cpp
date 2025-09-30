@@ -64,6 +64,7 @@ using FMOD_Studio_Bank_LoadSampleData_Fn = FMOD_RESULT(F_CALL*)(FMOD_STUDIO_BANK
 using FMOD_Studio_Bank_Unload_Fn = FMOD_RESULT(F_CALL*)(FMOD_STUDIO_BANK*);
 using FMOD_Studio_Bank_GetEventCount_Fn = FMOD_RESULT(F_CALL*)(FMOD_STUDIO_BANK*, int*);
 using FMOD_Studio_Bank_GetEventList_Fn = FMOD_RESULT(F_CALL*)(FMOD_STUDIO_BANK*, FMOD_STUDIO_EVENTDESCRIPTION**, int, int*);
+using FMOD_Studio_Bank_GetStringCount_Fn = FMOD_RESULT(F_CALL*)(FMOD_STUDIO_BANK*, int*);
 using FMOD_Studio_Bank_GetStringInfo_Fn = FMOD_RESULT(F_CALL*)(FMOD_STUDIO_BANK*, int, FMOD_GUID*, char*, int, int*);
 using FMOD_Studio_EventDescription_GetPath_Fn = FMOD_RESULT(F_CALL*)(FMOD_STUDIO_EVENTDESCRIPTION*, char*, int, int*);
 using FMOD_Studio_EventDescription_CreateInstance_Fn = FMOD_RESULT(F_CALL*)(FMOD_STUDIO_EVENTDESCRIPTION*, FMOD_STUDIO_EVENTINSTANCE**);
@@ -93,6 +94,7 @@ FMOD_Studio_Bank_LoadSampleData_Fn pFMOD_Studio_Bank_LoadSampleData = nullptr;
 FMOD_Studio_Bank_Unload_Fn pFMOD_Studio_Bank_Unload = nullptr;
 FMOD_Studio_Bank_GetEventCount_Fn pFMOD_Studio_Bank_GetEventCount = nullptr;
 FMOD_Studio_Bank_GetEventList_Fn pFMOD_Studio_Bank_GetEventList = nullptr;
+FMOD_Studio_Bank_GetStringCount_Fn pFMOD_Studio_Bank_GetStringCount = nullptr;
 FMOD_Studio_Bank_GetStringInfo_Fn pFMOD_Studio_Bank_GetStringInfo = nullptr;
 FMOD_Studio_EventDescription_GetPath_Fn pFMOD_Studio_EventDescription_GetPath = nullptr;
 FMOD_Studio_EventDescription_CreateInstance_Fn pFMOD_Studio_EventDescription_CreateInstance = nullptr;
@@ -133,6 +135,7 @@ void ResetState() {
     pFMOD_Studio_Bank_Unload = nullptr;
     pFMOD_Studio_Bank_GetEventCount = nullptr;
     pFMOD_Studio_Bank_GetEventList = nullptr;
+    pFMOD_Studio_Bank_GetStringCount = nullptr;
     pFMOD_Studio_Bank_GetStringInfo = nullptr;
     pFMOD_Studio_EventDescription_GetPath = nullptr;
     pFMOD_Studio_EventDescription_CreateInstance = nullptr;
@@ -145,6 +148,9 @@ void ResetState() {
     pFMOD_Studio_EventInstance_GetParameterByName = nullptr;
     pFMOD_Studio_EventInstance_GetPlaybackState = nullptr;
     pFMOD_Studio_Bus_StopAllEvents = nullptr;
+#if !defined(FMODDYNLOAD_HAS_SDK)
+    FMOD::Detail::ClearCaches();
+#endif
 }
 
 template <typename Fn>
@@ -294,6 +300,10 @@ bool Initialize(GetResourcePathFunc getResourcePath,
         ResetState();
         return false;
     }
+    if (!LoadFunction(g_studioLibrary, "FMOD_Studio_Bank_GetStringCount", pFMOD_Studio_Bank_GetStringCount, "FMOD studio")) {
+        ResetState();
+        return false;
+    }
     if (!LoadFunction(g_studioLibrary, "FMOD_Studio_Bank_GetStringInfo", pFMOD_Studio_Bank_GetStringInfo, "FMOD studio")) {
         ResetState();
         return false;
@@ -352,6 +362,9 @@ bool Initialize(GetResourcePathFunc getResourcePath,
 
 void Shutdown() {
     ResetState();
+#if !defined(FMODDYNLOAD_HAS_SDK)
+    FMOD::Detail::ClearCaches();
+#endif
     g_lastError.clear();
 }
 
@@ -494,6 +507,13 @@ FMOD_RESULT F_CALL ReaMOD_FMOD_Studio_Bank_GetEventList(FMOD_STUDIO_BANK* bank,
         return FMOD_ERR_UNINITIALIZED;
     }
     return pFMOD_Studio_Bank_GetEventList(bank, array, capacity, count);
+}
+
+FMOD_RESULT F_CALL ReaMOD_FMOD_Studio_Bank_GetStringCount(FMOD_STUDIO_BANK* bank, int* count) {
+    if (!pFMOD_Studio_Bank_GetStringCount) {
+        return FMOD_ERR_UNINITIALIZED;
+    }
+    return pFMOD_Studio_Bank_GetStringCount(bank, count);
 }
 
 FMOD_RESULT F_CALL ReaMOD_FMOD_Studio_Bank_GetStringInfo(FMOD_STUDIO_BANK* bank, int index,
