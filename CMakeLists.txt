@@ -9,42 +9,36 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(REAPER_SDK_DIR "${CMAKE_SOURCE_DIR}/reaper-sdk")
 set(REAPER_REAIMGUI_DIR "${CMAKE_SOURCE_DIR}/ReaImGui")
 
-# Path to FMOD API
-set(FMOD_API_DIR "${CMAKE_SOURCE_DIR}/fmod")
-
 # Path to tinyfiledialogs
 set(TINYFILEDIALOGS_DIR "${CMAKE_SOURCE_DIR}/tinyfiledialogs")
 
-# Add include directories for Reaper SDK, ReaImGui, FMOD, and tinyfiledialogs
+# Optional path to the FMOD Studio API headers (not required for configuration)
+set(FMOD_SDK_DIR "" CACHE PATH "Path to the FMOD Studio API (headers only)")
+
+# Add include directories for Reaper SDK, ReaImGui, and tinyfiledialogs
 include_directories(
     ${REAPER_SDK_DIR}
-    ${FMOD_API_DIR}/core/inc
-    ${FMOD_API_DIR}/studio/inc
     ${CMAKE_SOURCE_DIR}/reaper-sdk/WDL
     ${REAPER_REAIMGUI_DIR}  # Include ReaImGui directory
     ${TINYFILEDIALOGS_DIR}  # Include tinyfiledialogs directory
 )
 
-# Link FMOD libraries
-link_directories(
-    ${FMOD_API_DIR}/core/lib
-    ${FMOD_API_DIR}/studio/lib
-)
+if(FMOD_SDK_DIR)
+    include_directories(
+        ${FMOD_SDK_DIR}/core/inc
+        ${FMOD_SDK_DIR}/studio/inc
+    )
+endif()
 
 # Define the source files
 set(SOURCE_FILES
     src/ReaMOD.cpp  # Path to your source files
+    src/FMODDynLoad.cpp
     ${TINYFILEDIALOGS_DIR}/tinyfiledialogs.c  # Add tinyfiledialogs source file
 )
 
 # Add the shared library target for macOS or Linux (.dylib / .so)
 add_library(reaper_ReaMODPlugin SHARED ${SOURCE_FILES})
-
-# Link FMOD libraries to the correct target (reaper_ReaMODPlugin)
-target_link_libraries(reaper_ReaMODPlugin
-    fmod
-    fmodstudio
-)
 
 # Mac-specific settings to remove the "lib" prefix and set .dylib suffix
 if(APPLE)
