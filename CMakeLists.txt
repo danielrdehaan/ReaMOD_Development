@@ -13,7 +13,7 @@ set(REAPER_REAIMGUI_DIR "${CMAKE_SOURCE_DIR}/ReaImGui")
 set(TINYFILEDIALOGS_DIR "${CMAKE_SOURCE_DIR}/tinyfiledialogs")
 
 # Optional path to the FMOD Studio API headers (not required for configuration)
-set(FMOD_SDK_DIR "" CACHE PATH "Path to the FMOD Studio API (headers only)")
+# set(FMOD_SDK_DIR "${CMAKE_SOURCE_DIR}/fmod)")
 
 # Add include directories for Reaper SDK, ReaImGui, and tinyfiledialogs
 include_directories(
