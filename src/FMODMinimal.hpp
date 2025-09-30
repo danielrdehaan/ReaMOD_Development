@@ -94,6 +94,12 @@ struct FMOD_STUDIO_PARAMETER_DESCRIPTION {
     FMOD_GUID guid;
 };
 
+namespace Studio {
+class EventDescription;
+class EventInstance;
+class Bus;
+} // namespace Studio
+
 namespace Detail {
 
 inline std::uint32_t GetHeaderVersion() {
@@ -115,11 +121,9 @@ class Handle {
     HandleType* handle_ = nullptr;
 };
 
-class System;
-class Bank;
-class EventDescription;
-class EventInstance;
-class Bus;
+using EventDescription = FMOD::Studio::EventDescription;
+using EventInstance = FMOD::Studio::EventInstance;
+using Bus = FMOD::Studio::Bus;
 
 EventDescription* AcquireEventDescription(FMOD_STUDIO_EVENTDESCRIPTION* handle);
 Bus* AcquireBus(FMOD_STUDIO_BUS* handle);
@@ -148,7 +152,7 @@ class Bank : public Detail::Handle<FMOD_STUDIO_BANK> {
     FMOD_RESULT loadSampleData();
     FMOD_RESULT unload();
     FMOD_RESULT getEventCount(int* count);
-    FMOD_RESULT getEventList(Detail::EventDescription** array, int capacity, int* count);
+    FMOD_RESULT getEventList(FMOD::Studio::EventDescription** array, int capacity, int* count);
     FMOD_RESULT getStringCount(int* count);
     FMOD_RESULT getStringInfo(int index, FMOD_GUID* id, char* path, int size, int* retrieved);
 };
@@ -414,7 +418,7 @@ inline FMOD_RESULT Bank::getEventCount(int* count) {
     return FMOD_Studio_Bank_GetEventCount(this->getRaw(), count);
 }
 
-inline FMOD_RESULT Bank::getEventList(EventDescription** array, int capacity, int* count) {
+inline FMOD_RESULT Bank::getEventList(FMOD::Studio::EventDescription** array, int capacity, int* count) {
     if (!array || capacity <= 0) {
         return FMOD_OK;
     }
