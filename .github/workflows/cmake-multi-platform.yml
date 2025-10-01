@@ -17,7 +17,7 @@ jobs:
     env:
       BUILD_TYPE: Release
       BUILD_DIR: ${{ github.workspace }}/build
-      ARTIFACTS_DIR: ${{ github.workspace }}/artifacts  # <-- absolute path
+      ARTIFACTS_DIR: ${{ github.workspace }}/artifacts  # absolute path
 
     steps:
       - name: Checkout
@@ -73,7 +73,6 @@ jobs:
           DYLIB="${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib"
           ZIPFILE="${ARTIFACTS_DIR}/ReaMOD Reaper Extension for Mac.zip"
           rm -f "$ZIPFILE"
-          # -j = junk paths (stores only the file, not the build/ directory path)
           zip -j "$ZIPFILE" "$DYLIB"
           ls -lh "${ARTIFACTS_DIR}"
 
@@ -100,6 +99,6 @@ jobs:
 
             Includes:
             - ReaMOD Reaper Extension for Mac.zip (contains: reaper_ReaMOD_Plugin.dylib, universal arm64 + x86_64)
-          files: ${{ env.ARTIFACTS_DIR }}/ReaMOD Reaper Extension for Mac.zip
+          files: ${{ env.ARTIFACTS_DIR }}/ReaMOD(Mac).zip
           fail_on_unmatched_files: true
-          replace_assets: true
+          overwrite_files: true   # <-- correct key
