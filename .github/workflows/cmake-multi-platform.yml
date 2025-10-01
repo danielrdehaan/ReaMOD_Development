@@ -26,6 +26,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           clean: true
+          # fetch-depth: 0  # uncomment if you ever need full history
+
+      - name: Compute UTC timestamp
+        run: echo "STAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_ENV"
 
       - name: Clean build + artifacts + releases
         run: |
@@ -65,11 +69,14 @@ jobs:
             echo "ERROR: Found absolute RPATH(s):"; echo "$RPATHS" | grep '^/'; exit 5
           fi
 
+      - name: Empty releases dir (robust)
+        run: |
+          # Fully recreate to ensure it's empty (including hidden files)
+          rm -rf "${RELEASES_DIR}"
+          mkdir -p "${RELEASES_DIR}"
+
       - name: Place artifacts
         run: |
-          # Empty releases/ dir first
-          rm -rf "${RELEASES_DIR:?}"/*
-          # Copy new dylib into artifacts + releases
           cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${ARTIFACTS_DIR}/reaper_ReaMOD_Plugin.dylib"
           cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${RELEASES_DIR}/reaper_ReaMOD_Plugin.dylib"
           echo "Contents of releases/:"
@@ -83,15 +90,13 @@ jobs:
             artifacts/reaper_ReaMOD_Plugin.dylib
             releases/reaper_ReaMOD_Plugin.dylib
 
-      - name: Compute UTC timestamp
-        id: ts
-        run: echo "utc=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
-
       - name: Commit releases/ to the repo
         if: github.event_name == 'push' && github.ref == 'refs/heads/Main'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
+          # This picks up deletions as well by using -A on the releases/ pathspec
+          add_options: -A
+          file_pattern: releases/
           commit_message: >
-            CI: macOS universal build - ${{ steps.ts.outputs.utc }}
+            CI: macOS universal build - ${{ env.STAMP }}
             (run ${{ github.run_number }} @ ${{ github.sha }})
-          file_pattern: releases/reaper_ReaMOD_Plugin.dylib
