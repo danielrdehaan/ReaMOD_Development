@@ -7,6 +7,10 @@ on:
     branches: [ "Main" ]
   workflow_dispatch: {}
 
+# Needed so the workflow can commit files back into the repo
+permissions:
+  contents: write
+
 jobs:
   macos-universal:
     runs-on: macos-latest
@@ -79,10 +83,10 @@ jobs:
             artifacts/reaper_ReaMOD_Plugin.dylib
             releases/reaper_ReaMOD_Plugin.dylib
 
-      # Commit the file in releases/ back to the repo (requires write perms)
+      # Commit the file in releases/ back to the repo (only on direct pushes to Main; avoid PRs)
       - name: Commit releases/ to the repo
-         if: github.ref == 'refs/heads/Main'
-         uses: stefanzweifel/git-auto-commit-action@v5
-         with:
-           commit_message: "CI: add macOS universal artifact to releases/"
-           file_pattern: releases/reaper_ReaMOD_Plugin.dylib
+        if: github.event_name == 'push' && github.ref == 'refs/heads/Main'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "CI: add macOS universal artifact to releases/ [skip ci]"
+          file_pattern: releases/reaper_ReaMOD_Plugin.dylib
