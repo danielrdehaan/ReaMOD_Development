@@ -18,14 +18,13 @@ jobs:
     env:
       BUILD_TYPE: Release
       BUILD_DIR: ${{ github.workspace }}/build
-      ARTIFACTS_DIR: artifacts  # <- use 'artifacts/' consistently
+      ARTIFACTS_DIR: artifacts
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           clean: true
-          # fetch-depth: 0  # uncomment if you ever need full history
 
       - name: Compute timestamps (human + tag-safe)
         run: |
@@ -70,19 +69,21 @@ jobs:
             echo "ERROR: Found absolute RPATH(s):"; echo "$RPATHS" | grep '^/'; exit 5
           fi
 
-      - name: Place artifacts
+      - name: Package into Zip
         run: |
-          cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${ARTIFACTS_DIR}/reaper_ReaMOD_Plugin.dylib"
-          ls -l "${ARTIFACTS_DIR}"
+          DYLIB="${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib"
+          ZIPFILE="${ARTIFACTS_DIR}/ReaMOD Reaper Extension for Mac.zip"
+          rm -f "$ZIPFILE"
+          (cd "${BUILD_DIR}" && zip -r "$ZIPFILE" "reaper_ReaMOD_Plugin.dylib")
+          ls -lh "${ARTIFACTS_DIR}"
 
       - name: Upload artifacts (Actions run)
         uses: actions/upload-artifact@v4
         with:
           name: ReaMOD-macos-universal
-          path: ${{ env.ARTIFACTS_DIR }}/reaper_ReaMOD_Plugin.dylib
+          path: ${{ env.ARTIFACTS_DIR }}/ReaMOD Reaper Extension for Mac.zip
 
-      # Create a GitHub Release with the .dylib attached
-      - name: Create GitHub Release (attach .dylib)
+      - name: Create GitHub Release (attach .zip)
         if: github.ref == 'refs/heads/Main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: softprops/action-gh-release@v2
         with:
@@ -98,7 +99,7 @@ jobs:
             • Commit: ${{ github.sha }}
 
             Includes:
-            - reaper_ReaMOD_Plugin.dylib (universal: arm64 + x86_64)
-          files: ${{ env.ARTIFACTS_DIR }}/reaper_ReaMOD_Plugin.dylib
+            - ReaMOD Reaper Extension for Mac.zip (contains: reaper_ReaMOD_Plugin.dylib, universal arm64 + x86_64)
+          files: ${{ env.ARTIFACTS_DIR }}/ReaMOD Reaper Extension for Mac.zip
           fail_on_unmatched_files: true
           replace_assets: true
