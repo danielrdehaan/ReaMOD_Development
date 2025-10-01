@@ -7,7 +7,6 @@ on:
     branches: [ "Main" ]
   workflow_dispatch: {}
 
-# Needed so the workflow can commit files back into the repo
 permissions:
   contents: write
 
@@ -28,8 +27,10 @@ jobs:
           clean: true
           # fetch-depth: 0  # uncomment if you ever need full history
 
-      - name: Compute UTC timestamp
-        run: echo "STAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_ENV"
+      - name: Compute timestamps (human + tag-safe)
+        run: |
+          echo "STAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_ENV"
+          echo "STAMP_TAG=$(date -u '+%Y%m%d-%H%M%S-UTC')" >> "$GITHUB_ENV"
 
       - name: Clean build + artifacts + releases
         run: |
@@ -71,7 +72,6 @@ jobs:
 
       - name: Empty releases dir (robust)
         run: |
-          # Fully recreate to ensure it's empty (including hidden files)
           rm -rf "${RELEASES_DIR}"
           mkdir -p "${RELEASES_DIR}"
 
@@ -82,7 +82,7 @@ jobs:
           echo "Contents of releases/:"
           ls -lah "${RELEASES_DIR}"
 
-      - name: Upload artifacts
+      - name: Upload artifacts (Actions run)
         uses: actions/upload-artifact@v4
         with:
           name: ReaMOD-macos-universal
@@ -91,12 +91,33 @@ jobs:
             releases/reaper_ReaMOD_Plugin.dylib
 
       - name: Commit releases/ to the repo
-        if: github.event_name == 'push' && github.ref == 'refs/heads/Main'
+        if: github.ref == 'refs/heads/Main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          # This picks up deletions as well by using -A on the releases/ pathspec
           add_options: -A
           file_pattern: releases/
           commit_message: >
             CI: macOS universal build - ${{ env.STAMP }}
             (run ${{ github.run_number }} @ ${{ github.sha }})
+
+      # --- NEW: Create a GitHub Release with the .dylib attached ---
+      - name: Create GitHub Release (attach .dylib)
+        if: github.ref == 'refs/heads/Main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.STAMP_TAG }}-r${{ github.run_number }}
+          name: "ReaMOD macOS Universal — ${{ env.STAMP }}"
+          draft: false
+          prerelease: false
+          body: |
+            Automated build from CI.
+
+            • Timestamp: ${{ env.STAMP }}
+            • Run: #${{ github.run_number }}
+            • Commit: ${{ github.sha }}
+
+            Includes:
+            - reaper_ReaMOD_Plugin.dylib (universal: arm64 + x86_64)
+          files: |
+            artifacts/reaper_ReaMOD_Plugin.dylib
+            releases/reaper_ReaMOD_Plugin.dylib
