@@ -1,3 +1,6 @@
+# Dev Log
+- 2025-10-01: Finializing Mac OS Universal Github build workflow. Still having issues getting the workflow artifact to upload to the `releases` directory. Once that is all working correctly I'll move on to the Windows build workflow. Hopefully now that I have relative paths for FMOD api working for Mac the Windows build will be fairly simple.
+
 # ReaMOD Plugin for REAPER
 
 ReaMOD is a plugin for [REAPER](https://www.reaper.fm/), a digital audio workstation, that integrates FMOD Studio projects into REAPER. It allows users to trigger FMOD events and snapshots directly within REAPER, providing a seamless workflow for game audio development and other interactive audio applications.
@@ -26,7 +29,7 @@ The ReaMOD Plugin is a REAPER extension (.dylib on macOS, .dll on Windows) that 
     Windows → REAPER/UserPlugins/reaper_ReaMODPlugin.dll
 
 3. Add the FMOD API libraries
-- Download the FMOD API files for your operating system from www.fmod.com/downloads
+- Download the FMOD API files for your operating system from https://www.fmod.com/download
 - Create a ReaMOD folder alongside UserPlugins, and inside it, replicate the following structure:
 
     ```
