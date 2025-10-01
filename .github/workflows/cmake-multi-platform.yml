@@ -9,12 +9,13 @@ on:
 
 jobs:
   macos-universal:
-    runs-on: macos-latest  # universal build works on both Intel/Apple runners
+    runs-on: macos-latest
 
     env:
       BUILD_TYPE: Release
       BUILD_DIR: ${{ github.workspace }}/build
       ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
+      PKG_ROOT: ${{ github.workspace }}/ReaMOD-macos-package
 
     steps:
       - name: Checkout
@@ -22,16 +23,18 @@ jobs:
         with:
           clean: true
 
-      - name: Clean any pre-existing build dir
-        run: rm -rf "${BUILD_DIR}" "${ARTIFACTS_DIR}"
+      - name: Clean build + artifacts
+        run: |
+          rm -rf "${BUILD_DIR}" "${ARTIFACTS_DIR}" "${PKG_ROOT}"
+          mkdir -p "${ARTIFACTS_DIR}"
 
       - name: Configure (CMake)
-        run: |
-          cmake -S . -B "${BUILD_DIR}" \
-            -G "Unix Makefiles" \
-            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
+        run: >
+          cmake -S . -B "${BUILD_DIR}"
+          -G "Unix Makefiles"
+          -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
 
       - name: Build
         run: cmake --build "${BUILD_DIR}" --config "${BUILD_TYPE}" --parallel
@@ -44,60 +47,46 @@ jobs:
           fi
           echo "lipo -info $DYLIB"
           lipo -info "$DYLIB"
-          # Fail if both slices aren't present
-          lipo -info "$DYLIB" | grep -q "arm64" || { echo "Missing arm64 slice"; exit 3; }
+          lipo -info "$DYLIB" | grep -q "arm64"   || { echo "Missing arm64 slice"; exit 3; }
           lipo -info "$DYLIB" | grep -q "x86_64" || { echo "Missing x86_64 slice"; exit 3; }
 
       - name: Verify RPATHs (relative only)
         run: |
           DYLIB="${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib"
-          echo "otool -l $DYLIB | grep -A3 RPATH"
-          otool -l "$DYLIB" | grep -A3 RPATH || true
-
-          # Gather just the path lines:
           RPATHS="$(otool -l "$DYLIB" | awk '/LC_RPATH/{flag=1;next}/Load command/{flag=0}flag' | awk '/path /{print $2}')"
-          echo "Recorded RPATHs:"
-          echo "$RPATHS"
-
-          # Expected three relative entries
+          echo "Recorded RPATHs:"; echo "$RPATHS"
           echo "$RPATHS" | grep -qx "@loader_path" || { echo "Missing @loader_path"; exit 4; }
           echo "$RPATHS" | grep -qx "@loader_path/../ReaMOD/fmod/core/lib" || { echo "Missing core RPATH"; exit 4; }
           echo "$RPATHS" | grep -qx "@loader_path/../ReaMOD/fmod/studio/lib" || { echo "Missing studio RPATH"; exit 4; }
-
-          # Fail if any absolute paths slipped in
           if echo "$RPATHS" | grep -q '^/'; then
-            echo "ERROR: Found absolute RPATH(s):"
-            echo "$RPATHS" | grep '^/'
-            exit 5
+            echo "ERROR: Found absolute RPATH(s):"; echo "$RPATHS" | grep '^/'; exit 5
           fi
 
       - name: Prepare artifacts
         run: |
-          mkdir -p "${ARTIFACTS_DIR}"
-          # Raw dylib
+          # raw dylib
           cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${ARTIFACTS_DIR}/reaper_ReaMOD_Plugin.dylib"
 
-          # Optional: pack into a suggested runtime layout (no FMOD—cannot redistribute)
-          PKG_DIR="${{ github.workspace }}/ReaMOD-macos-package"
-          mkdir -p "${PKG_DIR}/UserPlugins" "${PKG_DIR}/ReaMOD/fmod/core/lib" "${PKG_DIR}/ReaMOD/fmod/studio/lib"
-          cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${PKG_DIR}/UserPlugins/"
-          # README note to users about where FMOD dylibs must go
-          cat > "${PKG_DIR}/README.txt" <<'TXT'
-ReaMOD macOS package (no FMOD binaries included)
+          # make a suggested layout zip (no FMOD included)
+          mkdir -p "${PKG_ROOT}/UserPlugins" "${PKG_ROOT}/ReaMOD/fmod/core/lib" "${PKG_ROOT}/ReaMOD/fmod/studio/lib"
+          cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${PKG_ROOT}/UserPlugins/"
 
-Place this folder content inside your REAPER resource path, e.g.:
+          README_FILE="${PKG_ROOT}/README.txt"
+          printf '%s\n' 'ReaMOD macOS package (no FMOD binaries included)' > "$README_FILE"
+          printf '%s\n' '' >> "$README_FILE"
+          printf '%s\n' 'Place this folder content inside your REAPER resource path, e.g.:' >> "$README_FILE"
+          printf '%s\n' '' >> "$README_FILE"
+          printf '%s\n' '  UserPlugins/reaper_ReaMOD_Plugin.dylib' >> "$README_FILE"
+          printf '%s\n' '  ReaMOD/fmod/core/lib/libfmod.dylib' >> "$README_FILE"
+          printf '%s\n' '  ReaMOD/fmod/studio/lib/libfmodstudio.dylib' >> "$README_FILE"
+          printf '%s\n' '' >> "$README_FILE"
+          printf '%s\n' 'FMOD dylibs are not bundled. Copy the correct FMOD binaries into:' >> "$README_FILE"
+          printf '%s\n' '  ReaMOD/fmod/core/lib/libfmod.dylib' >> "$README_FILE"
+          printf '%s\n' '  ReaMOD/fmod/studio/lib/libfmodstudio.dylib' >> "$README_FILE"
 
-  UserPlugins/reaper_ReaMOD_Plugin.dylib
-  ReaMOD/fmod/core/lib/libfmod.dylib
-  ReaMOD/fmod/studio/lib/libfmodstudio.dylib
+          (cd "${PKG_ROOT}/.." && zip -r "${ARTIFACTS_DIR}/ReaMOD-macos-universal.zip" "$(basename "${PKG_ROOT}")")
 
-FMOD dylibs are not bundled. Copy the correct FMOD binaries into:
-  ReaMOD/fmod/core/lib/libfmod.dylib
-  ReaMOD/fmod/studio/lib/libfmodstudio.dylib
-TXT
-          (cd "${PKG_DIR}/.." && zip -r "${ARTIFACTS_DIR}/ReaMOD-macos-universal.zip" "ReaMOD-macos-package")
-
-      - name: Upload artifacts (dylib + zip)
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ReaMOD-macos-universal
