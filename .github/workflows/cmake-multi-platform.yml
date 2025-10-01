@@ -49,7 +49,6 @@ jobs:
           if [ ! -f "$DYLIB" ]; then
             echo "ERROR: plugin dylib not found at $DYLIB"; exit 2
           fi
-          echo "lipo -info $DYLIB"
           lipo -info "$DYLIB"
           lipo -info "$DYLIB" | grep -q "arm64"   || { echo "Missing arm64 slice"; exit 3; }
           lipo -info "$DYLIB" | grep -q "x86_64" || { echo "Missing x86_64 slice"; exit 3; }
@@ -68,6 +67,8 @@ jobs:
 
       - name: Place artifacts
         run: |
+          # Ensure releases/ is empty before adding new files
+          rm -rf "${RELEASES_DIR:?}"/*
           # Copy to artifacts/ for Actions artifact upload
           cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${ARTIFACTS_DIR}/reaper_ReaMOD_Plugin.dylib"
           # Also copy to top-level releases/ folder in the repo workspace
@@ -83,10 +84,9 @@ jobs:
             artifacts/reaper_ReaMOD_Plugin.dylib
             releases/reaper_ReaMOD_Plugin.dylib
 
-      # Commit the file in releases/ back to the repo (only on direct pushes to Main; avoid PRs)
       - name: Commit releases/ to the repo
         if: github.event_name == 'push' && github.ref == 'refs/heads/Main'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "CI: add macOS universal artifact to releases/ [skip ci]"
+          commit_message: "Built/ ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))"
           file_pattern: releases/reaper_ReaMOD_Plugin.dylib
