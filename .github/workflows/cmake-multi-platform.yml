@@ -15,7 +15,7 @@ jobs:
       BUILD_TYPE: Release
       BUILD_DIR: ${{ github.workspace }}/build
       ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
-      PKG_ROOT: ${{ github.workspace }}/ReaMOD-macos-package
+      RELEASES_DIR: ${{ github.workspace }}/releases
 
     steps:
       - name: Checkout
@@ -23,10 +23,10 @@ jobs:
         with:
           clean: true
 
-      - name: Clean build + artifacts
+      - name: Clean build + artifacts + releases
         run: |
-          rm -rf "${BUILD_DIR}" "${ARTIFACTS_DIR}" "${PKG_ROOT}"
-          mkdir -p "${ARTIFACTS_DIR}"
+          rm -rf "${BUILD_DIR}" "${ARTIFACTS_DIR}" "${RELEASES_DIR}"
+          mkdir -p "${ARTIFACTS_DIR}" "${RELEASES_DIR}"
 
       - name: Configure (CMake)
         run: >
@@ -62,10 +62,14 @@ jobs:
             echo "ERROR: Found absolute RPATH(s):"; echo "$RPATHS" | grep '^/'; exit 5
           fi
 
-      - name: Prepare artifacts
+      - name: Place artifacts
         run: |
-          # raw dylib
+          # Copy to artifacts/ for Actions artifact upload
           cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${ARTIFACTS_DIR}/reaper_ReaMOD_Plugin.dylib"
+          # Also copy to top-level releases/ folder in the repo workspace
+          cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${RELEASES_DIR}/reaper_ReaMOD_Plugin.dylib"
+          echo "Contents of releases/:"
+          ls -lah "${RELEASES_DIR}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -73,3 +77,4 @@ jobs:
           name: ReaMOD-macos-universal
           path: |
             artifacts/reaper_ReaMOD_Plugin.dylib
+            releases/reaper_ReaMOD_Plugin.dylib
