@@ -67,11 +67,10 @@ jobs:
 
       - name: Place artifacts
         run: |
-          # Ensure releases/ is empty before adding new files
+          # Empty releases/ dir first
           rm -rf "${RELEASES_DIR:?}"/*
-          # Copy to artifacts/ for Actions artifact upload
+          # Copy new dylib into artifacts + releases
           cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${ARTIFACTS_DIR}/reaper_ReaMOD_Plugin.dylib"
-          # Also copy to top-level releases/ folder in the repo workspace
           cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${RELEASES_DIR}/reaper_ReaMOD_Plugin.dylib"
           echo "Contents of releases/:"
           ls -lah "${RELEASES_DIR}"
@@ -88,5 +87,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/Main'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Built/ ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))"
+          commit_message: >
+            CI: macOS universal build - $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            (run ${{ github.run_number }} @ ${{ github.sha }})
           file_pattern: releases/reaper_ReaMOD_Plugin.dylib
