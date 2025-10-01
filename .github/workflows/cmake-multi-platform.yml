@@ -7,6 +7,10 @@ on:
     branches: [ "Main" ]
   workflow_dispatch: {}
 
+# Needed so the workflow can commit files back into the repo
+permissions:
+  contents: write
+
 jobs:
   macos-universal:
     runs-on: macos-latest
@@ -15,18 +19,22 @@ jobs:
       BUILD_TYPE: Release
       BUILD_DIR: ${{ github.workspace }}/build
       ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
-      PKG_ROOT: ${{ github.workspace }}/ReaMOD-macos-package
+      RELEASES_DIR: ${{ github.workspace }}/releases
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           clean: true
+          # fetch-depth: 0  # uncomment if you ever need full history
 
-      - name: Clean build + artifacts
+      - name: Compute UTC timestamp
+        run: echo "STAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_ENV"
+
+      - name: Clean build + artifacts + releases
         run: |
-          rm -rf "${BUILD_DIR}" "${ARTIFACTS_DIR}" "${PKG_ROOT}"
-          mkdir -p "${ARTIFACTS_DIR}"
+          rm -rf "${BUILD_DIR}" "${ARTIFACTS_DIR}" "${RELEASES_DIR}"
+          mkdir -p "${ARTIFACTS_DIR}" "${RELEASES_DIR}"
 
       - name: Configure (CMake)
         run: >
@@ -45,7 +53,6 @@ jobs:
           if [ ! -f "$DYLIB" ]; then
             echo "ERROR: plugin dylib not found at $DYLIB"; exit 2
           fi
-          echo "lipo -info $DYLIB"
           lipo -info "$DYLIB"
           lipo -info "$DYLIB" | grep -q "arm64"   || { echo "Missing arm64 slice"; exit 3; }
           lipo -info "$DYLIB" | grep -q "x86_64" || { echo "Missing x86_64 slice"; exit 3; }
@@ -62,10 +69,18 @@ jobs:
             echo "ERROR: Found absolute RPATH(s):"; echo "$RPATHS" | grep '^/'; exit 5
           fi
 
-      - name: Prepare artifacts
+      - name: Empty releases dir (robust)
         run: |
-          # raw dylib
+          # Fully recreate to ensure it's empty (including hidden files)
+          rm -rf "${RELEASES_DIR}"
+          mkdir -p "${RELEASES_DIR}"
+
+      - name: Place artifacts
+        run: |
           cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${ARTIFACTS_DIR}/reaper_ReaMOD_Plugin.dylib"
+          cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${RELEASES_DIR}/reaper_ReaMOD_Plugin.dylib"
+          echo "Contents of releases/:"
+          ls -lah "${RELEASES_DIR}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -73,3 +88,15 @@ jobs:
           name: ReaMOD-macos-universal
           path: |
             artifacts/reaper_ReaMOD_Plugin.dylib
+            releases/reaper_ReaMOD_Plugin.dylib
+
+      - name: Commit releases/ to the repo
+        if: github.event_name == 'push' && github.ref == 'refs/heads/Main'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          # This picks up deletions as well by using -A on the releases/ pathspec
+          add_options: -A
+          file_pattern: releases/
+          commit_message: >
+            CI: macOS universal build - ${{ env.STAMP }}
+            (run ${{ github.run_number }} @ ${{ github.sha }})
