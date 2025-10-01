@@ -17,8 +17,7 @@ jobs:
     env:
       BUILD_TYPE: Release
       BUILD_DIR: ${{ github.workspace }}/build
-      ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
-      RELEASES_DIR: ${{ github.workspace }}/releases
+      ARTIFACTS_DIR: ${{ github.workspace }}/artifact
 
     steps:
       - name: Checkout
@@ -34,8 +33,8 @@ jobs:
 
       - name: Clean build + artifacts + releases
         run: |
-          rm -rf "${BUILD_DIR}" "${ARTIFACTS_DIR}" "${RELEASES_DIR}"
-          mkdir -p "${ARTIFACTS_DIR}" "${RELEASES_DIR}"
+          rm -rf "${BUILD_DIR}" "${ARTIFACTS_DIR}"
+          mkdir -p "${ARTIFACTS_DIR}"
 
       - name: Configure (CMake)
         run: >
@@ -70,17 +69,9 @@ jobs:
             echo "ERROR: Found absolute RPATH(s):"; echo "$RPATHS" | grep '^/'; exit 5
           fi
 
-      - name: Empty releases dir (robust)
-        run: |
-          rm -rf "${RELEASES_DIR}"
-          mkdir -p "${RELEASES_DIR}"
-
       - name: Place artifacts
         run: |
           cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${ARTIFACTS_DIR}/reaper_ReaMOD_Plugin.dylib"
-          cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${RELEASES_DIR}/reaper_ReaMOD_Plugin.dylib"
-          echo "Contents of releases/:"
-          ls -lah "${RELEASES_DIR}"
 
       - name: Upload artifacts (Actions run)
         uses: actions/upload-artifact@v4
@@ -88,17 +79,6 @@ jobs:
           name: ReaMOD-macos-universal
           path: |
             artifacts/reaper_ReaMOD_Plugin.dylib
-            releases/reaper_ReaMOD_Plugin.dylib
-
-      - name: Commit releases/ to the repo
-        if: github.ref == 'refs/heads/Main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          add_options: -A
-          file_pattern: releases/
-          commit_message: >
-            CI: macOS universal build - ${{ env.STAMP }}
-            (run ${{ github.run_number }} @ ${{ github.sha }})
 
       # --- NEW: Create a GitHub Release with the .dylib attached ---
       - name: Create GitHub Release (attach .dylib)
@@ -120,4 +100,3 @@ jobs:
             - reaper_ReaMOD_Plugin.dylib (universal: arm64 + x86_64)
           files: |
             artifacts/reaper_ReaMOD_Plugin.dylib
-            releases/reaper_ReaMOD_Plugin.dylib
