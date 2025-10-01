@@ -1,0 +1,3 @@
+/Applications/Reaper Test/ReaMOD/build/CMakeFiles/reaper_ReaMODPlugin.dir
+/Applications/Reaper Test/ReaMOD/build/CMakeFiles/edit_cache.dir
+/Applications/Reaper Test/ReaMOD/build/CMakeFiles/rebuild_cache.dir
