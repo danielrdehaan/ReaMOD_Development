@@ -83,11 +83,15 @@ jobs:
             artifacts/reaper_ReaMOD_Plugin.dylib
             releases/reaper_ReaMOD_Plugin.dylib
 
+      - name: Compute UTC timestamp
+        id: ts
+        run: echo "utc=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
+
       - name: Commit releases/ to the repo
         if: github.event_name == 'push' && github.ref == 'refs/heads/Main'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: >
-            CI: macOS universal build - $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            CI: macOS universal build - ${{ steps.ts.outputs.utc }}
             (run ${{ github.run_number }} @ ${{ github.sha }})
           file_pattern: releases/reaper_ReaMOD_Plugin.dylib
