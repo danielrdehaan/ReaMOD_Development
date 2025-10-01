@@ -7,7 +7,6 @@ on:
     branches: [ "Main" ]
   workflow_dispatch: {}
 
-# Needed so the workflow can create releases and upload assets
 permissions:
   contents: write
 
@@ -18,7 +17,7 @@ jobs:
     env:
       BUILD_TYPE: Release
       BUILD_DIR: ${{ github.workspace }}/build
-      ARTIFACTS_DIR: artifacts
+      ARTIFACTS_DIR: ${{ github.workspace }}/artifacts  # <-- absolute path
 
     steps:
       - name: Checkout
@@ -74,7 +73,8 @@ jobs:
           DYLIB="${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib"
           ZIPFILE="${ARTIFACTS_DIR}/ReaMOD Reaper Extension for Mac.zip"
           rm -f "$ZIPFILE"
-          (cd "${BUILD_DIR}" && zip -r "$ZIPFILE" "reaper_ReaMOD_Plugin.dylib")
+          # -j = junk paths (stores only the file, not the build/ directory path)
+          zip -j "$ZIPFILE" "$DYLIB"
           ls -lh "${ARTIFACTS_DIR}"
 
       - name: Upload artifacts (Actions run)
