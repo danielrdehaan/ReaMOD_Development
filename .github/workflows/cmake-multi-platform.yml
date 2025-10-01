@@ -7,6 +7,7 @@ on:
     branches: [ "Main" ]
   workflow_dispatch: {}
 
+# Needed so the workflow can create releases and upload assets
 permissions:
   contents: write
 
@@ -17,7 +18,7 @@ jobs:
     env:
       BUILD_TYPE: Release
       BUILD_DIR: ${{ github.workspace }}/build
-      ARTIFACTS_DIR: ${{ github.workspace }}/artifact
+      ARTIFACTS_DIR: artifacts  # <- use 'artifacts/' consistently
 
     steps:
       - name: Checkout
@@ -31,7 +32,7 @@ jobs:
           echo "STAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_ENV"
           echo "STAMP_TAG=$(date -u '+%Y%m%d-%H%M%S-UTC')" >> "$GITHUB_ENV"
 
-      - name: Clean build + artifacts + releases
+      - name: Clean build + artifacts
         run: |
           rm -rf "${BUILD_DIR}" "${ARTIFACTS_DIR}"
           mkdir -p "${ARTIFACTS_DIR}"
@@ -72,15 +73,15 @@ jobs:
       - name: Place artifacts
         run: |
           cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${ARTIFACTS_DIR}/reaper_ReaMOD_Plugin.dylib"
+          ls -l "${ARTIFACTS_DIR}"
 
       - name: Upload artifacts (Actions run)
         uses: actions/upload-artifact@v4
         with:
           name: ReaMOD-macos-universal
-          path: |
-            artifacts/reaper_ReaMOD_Plugin.dylib
+          path: ${{ env.ARTIFACTS_DIR }}/reaper_ReaMOD_Plugin.dylib
 
-      # --- NEW: Create a GitHub Release with the .dylib attached ---
+      # Create a GitHub Release with the .dylib attached
       - name: Create GitHub Release (attach .dylib)
         if: github.ref == 'refs/heads/Main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: softprops/action-gh-release@v2
@@ -98,5 +99,6 @@ jobs:
 
             Includes:
             - reaper_ReaMOD_Plugin.dylib (universal: arm64 + x86_64)
-          files: |
-            artifacts/reaper_ReaMOD_Plugin.dylib
+          files: ${{ env.ARTIFACTS_DIR }}/reaper_ReaMOD_Plugin.dylib
+          fail_on_unmatched_files: true
+          replace_assets: true
