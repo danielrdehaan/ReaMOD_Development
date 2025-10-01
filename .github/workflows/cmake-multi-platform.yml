@@ -71,7 +71,7 @@ jobs:
       - name: Package into Zip
         run: |
           DYLIB="${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib"
-          ZIPFILE="${ARTIFACTS_DIR}/ReaMOD Reaper Extension for Mac.zip"
+          ZIPFILE="${ARTIFACTS_DIR}/ReaMOD(Mac).zip"
           rm -f "$ZIPFILE"
           zip -j "$ZIPFILE" "$DYLIB"
           ls -lh "${ARTIFACTS_DIR}"
@@ -80,7 +80,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ReaMOD-macos-universal
-          path: ${{ env.ARTIFACTS_DIR }}/ReaMOD Reaper Extension for Mac.zip
+          path: ${{ env.ARTIFACTS_DIR }}/ReaMOD(Mac).zip
 
       - name: Create GitHub Release (attach .zip)
         if: github.ref == 'refs/heads/Main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
