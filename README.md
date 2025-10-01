@@ -22,7 +22,9 @@ The ReaMOD Plugin is a REAPER extension (.dylib on macOS, .dll on Windows) that 
 1. Locate your REAPER resource folder
 - Inside REAPER go to: `Options → Show REAPER resource path in explorer/finder` This opens the root directory where REAPER expects extensions.
 
-2. Copy the plugin
+2. Download the latest release for your operating system and copy the plugin into the `User Plugins` folder found in your Reaper Resources folder.
+
+- Download the latest release: https://github.com/danielrdehaan/ReaMOD/releases
 
 - Place the built plugin file into the UserPlugins subfolder:
     macOS → REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib
