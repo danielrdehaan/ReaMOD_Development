@@ -67,29 +67,9 @@ jobs:
           # raw dylib
           cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${ARTIFACTS_DIR}/reaper_ReaMOD_Plugin.dylib"
 
-          # make a suggested layout zip (no FMOD included)
-          mkdir -p "${PKG_ROOT}/UserPlugins" "${PKG_ROOT}/ReaMOD/fmod/core/lib" "${PKG_ROOT}/ReaMOD/fmod/studio/lib"
-          cp "${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib" "${PKG_ROOT}/UserPlugins/"
-
-          README_FILE="${PKG_ROOT}/README.txt"
-          printf '%s\n' 'ReaMOD macOS package (no FMOD binaries included)' > "$README_FILE"
-          printf '%s\n' '' >> "$README_FILE"
-          printf '%s\n' 'Place this folder content inside your REAPER resource path, e.g.:' >> "$README_FILE"
-          printf '%s\n' '' >> "$README_FILE"
-          printf '%s\n' '  UserPlugins/reaper_ReaMOD_Plugin.dylib' >> "$README_FILE"
-          printf '%s\n' '  ReaMOD/fmod/core/lib/libfmod.dylib' >> "$README_FILE"
-          printf '%s\n' '  ReaMOD/fmod/studio/lib/libfmodstudio.dylib' >> "$README_FILE"
-          printf '%s\n' '' >> "$README_FILE"
-          printf '%s\n' 'FMOD dylibs are not bundled. Copy the correct FMOD binaries into:' >> "$README_FILE"
-          printf '%s\n' '  ReaMOD/fmod/core/lib/libfmod.dylib' >> "$README_FILE"
-          printf '%s\n' '  ReaMOD/fmod/studio/lib/libfmodstudio.dylib' >> "$README_FILE"
-
-          (cd "${PKG_ROOT}/.." && zip -r "${ARTIFACTS_DIR}/ReaMOD-macos-universal.zip" "$(basename "${PKG_ROOT}")")
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ReaMOD-macos-universal
           path: |
             artifacts/reaper_ReaMOD_Plugin.dylib
-            artifacts/ReaMOD-macos-universal.zip
