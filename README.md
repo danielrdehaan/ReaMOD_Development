@@ -71,17 +71,17 @@ ReaMOD is a REAPER extension that integrates FMOD functionality. Due to FMOD lic
 
 4) Verify
 
-   macOS:
-     # Show rpaths recorded in the plugin
-     `otool -l "REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib" | awk '/LC_RPATH/{flag=1;next}/Load`command/{flag=0}flag' | awk '/path /{print $2}'
+   *macOS:*
+    Show rpaths recorded in the plugin
+     `otool -l "REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib" | awk '/LC_RPATH/{flag=1;next}/Loadcommand/{flag=0}flag' | awk '/path /{print $2}'`
 
-     # (Optional) Show linked install names
+    (Optional) Show linked install names
      `otool -L "REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib"`
 
-   Windows:
-     # Show dependent DLL names (path resolution happens at load time)
+   *Windows:*
+    Show dependent DLL names (path resolution happens at load time)
      `dumpbin /DEPENDENTS "REAPER\UserPlugins\reaper_ReaMOD_Plugin.dll"`
-     # Or use the "Dependencies" GUI tool to check resolution.
+    Or use the "Dependencies" GUI tool to check resolution.
 
 5) Restart REAPER
 
