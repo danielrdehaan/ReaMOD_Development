@@ -47,7 +47,7 @@ static int actionIDSearchForFmodEvent = 0;
 static int actionIDTriggerSelectedEvent = 0;
 static int actionIDToggleDebugOnOff = 0;
 
-bool debugMessages = true;
+bool debugMessages = false;
 
 
 // ImGui context
