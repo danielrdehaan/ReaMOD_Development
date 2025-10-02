@@ -14,6 +14,12 @@
 #include <thread>
 #include <fstream> // Include for file I/O operations
 #include <ctime>
+#include <cstdlib>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <shellapi.h>
+#endif
 #include "fmod_studio.hpp"
 #include "fmod.hpp"
 #include "fmod_errors.h"
@@ -244,6 +250,19 @@ void DebugMsg(const char* fmt, ...) {
 
         va_end(args);
     }  
+}
+
+bool OpenURLInDefaultBrowser(const std::string& url) {
+#if defined(_WIN32)
+    HINSTANCE result = ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    return reinterpret_cast<INT_PTR>(result) > 32;
+#elif defined(__APPLE__)
+    std::string command = "open \"" + url + "\"";
+    return std::system(command.c_str()) == 0;
+#else
+    std::string command = "xdg-open \"" + url + "\"";
+    return std::system(command.c_str()) == 0;
+#endif
 }
 
 // A function for showing messages in Reaper's console.
@@ -2776,6 +2795,9 @@ std::string FindCommonPrefix(const std::vector<std::string>& strings) {
 int greyDark = 0x333333FF;
 int blue = 0x395271FF;
 int orange = 0xFFD700FF;
+int supportButtonBackground = 0x282828FF;
+int supportButtonHovered = 0x949494FF;
+int supportButtonActive = 0x48B2A0FF;
 
 void RenderEventSearchWindow() {
 
@@ -3454,6 +3476,38 @@ void RenderGUI() {
         ImGui::Text(reaMOD_Main_ImGui_Context, "ReaMOD v0.1");
         ImGui::Text(reaMOD_Main_ImGui_Context, "Created by Daniel Dehaan");
         ImGui::Text(reaMOD_Main_ImGui_Context, "www.simplesoundtools.com");
+
+        ImGui::Separator(reaMOD_Main_ImGui_Context);
+        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Support & Links");
+
+        ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_Button, supportButtonBackground);
+        ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ButtonHovered, supportButtonHovered);
+        ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ButtonActive, supportButtonActive);
+        ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_Text, blue);
+
+        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Support Developer")) {
+            if (!OpenURLInDefaultBrowser("https://www.buymeacoffee.com/danielrdehaan")) {
+                DebugMsg("Failed to open support URL.\n");
+            }
+        }
+
+        ImGui::Spacing(reaMOD_Main_ImGui_Context);
+
+        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Discord Server")) {
+            if (!OpenURLInDefaultBrowser("https://discord.gg/C9FYD8Qf4g")) {
+                DebugMsg("Failed to open Discord URL.\n");
+            }
+        }
+
+        ImGui::Spacing(reaMOD_Main_ImGui_Context);
+
+        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Developer Website")) {
+            if (!OpenURLInDefaultBrowser("https://www.simplesoundtools.com")) {
+                DebugMsg("Failed to open website URL.\n");
+            }
+        }
+
+        ImGui::PopStyleColor(reaMOD_Main_ImGui_Context, 4);
 
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
