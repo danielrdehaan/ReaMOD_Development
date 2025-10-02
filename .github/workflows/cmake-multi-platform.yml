@@ -1,4 +1,4 @@
-name: Build ReaMOD (macOS Universal)
+name: Build ReaMOD (macOS + Windows)
 
 on:
   push:
@@ -10,14 +10,14 @@ on:
 permissions:
   contents: write
 
+env:
+  BUILD_TYPE: Release
+  BUILD_DIR: ${{ github.workspace }}/build
+  ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
+
 jobs:
   macos-universal:
     runs-on: macos-latest
-
-    env:
-      BUILD_TYPE: Release
-      BUILD_DIR: ${{ github.workspace }}/build
-      ARTIFACTS_DIR: ${{ github.workspace }}/artifacts  # absolute path
 
     steps:
       - name: Checkout
@@ -68,7 +68,7 @@ jobs:
             echo "ERROR: Found absolute RPATH(s):"; echo "$RPATHS" | grep '^/'; exit 5
           fi
 
-      - name: Package into Zip
+      - name: Package into Zip (macOS)
         run: |
           DYLIB="${BUILD_DIR}/reaper_ReaMOD_Plugin.dylib"
           ZIPFILE="${ARTIFACTS_DIR}/ReaMOD_Mac.zip"
@@ -76,18 +76,109 @@ jobs:
           zip -j "$ZIPFILE" "$DYLIB"
           ls -lh "${ARTIFACTS_DIR}"
 
-      - name: Upload artifacts (Actions run)
+      - name: Upload artifact (macOS)
         uses: actions/upload-artifact@v4
         with:
           name: ReaMOD-macos-universal
           path: ${{ env.ARTIFACTS_DIR }}/ReaMOD_Mac.zip
 
-      - name: Create GitHub Release (attach .zip)
-        if: github.ref == 'refs/heads/Main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+  windows-x64:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Compute timestamps (human + tag-safe)
+        shell: bash
+        run: |
+          echo "STAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_ENV"
+          echo "STAMP_TAG=$(date -u '+%Y%m%d-%H%M%S-UTC')" >> "$GITHUB_ENV"
+
+      - name: Clean build + artifacts
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:BUILD_DIR") { Remove-Item -Recurse -Force "$env:BUILD_DIR" }
+          if (Test-Path "$env:ARTIFACTS_DIR") { Remove-Item -Recurse -Force "$env:ARTIFACTS_DIR" }
+          New-Item -ItemType Directory -Force -Path "$env:ARTIFACTS_DIR" | Out-Null
+
+      - name: Configure (CMake, MSVC x64)
+        shell: pwsh
+        run: >
+          cmake -S . -B "$env:BUILD_DIR"
+          -G "Visual Studio 17 2022"
+          -A x64
+          -DCMAKE_BUILD_TYPE="${env:BUILD_TYPE}"
+
+      - name: Build (Release)
+        shell: pwsh
+        run: cmake --build "$env:BUILD_DIR" --config "$env:BUILD_TYPE" --parallel
+
+      - name: Verify binary (x64)
+        shell: pwsh
+        run: |
+          $DLL = Join-Path "$env:BUILD_DIR" "reaper_ReaMOD_Plugin.dll"
+          if (-not (Test-Path $DLL)) { Write-Error "DLL not found at $DLL"; exit 2 }
+          & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC" `
+            | Out-Null 2>$null
+          # Fallback: use dumpbin from vswhere if available
+          $dumpbin = "${env:VCToolsInstallDir}bin\Hostx64\x64\dumpbin.exe"
+          if (Test-Path $dumpbin) {
+            & $dumpbin /headers $DLL | Select-String "machine \(x64\)" | Out-Null
+            if ($LASTEXITCODE -ne 0) { Write-Error "Not an x64 binary?"; exit 3 }
+          } else {
+            Write-Host "Skipping dumpbin check (not found); ensured file exists."
+          }
+
+      - name: Package into Zip (Windows)
+        shell: pwsh
+        run: |
+          $DLL = Join-Path "$env:BUILD_DIR" "reaper_ReaMOD_Plugin.dll"
+          $ZIP = Join-Path "$env:ARTIFACTS_DIR" "ReaMOD_Windows.zip"
+          if (Test-Path $ZIP) { Remove-Item -Force $ZIP }
+          Compress-Archive -Path $DLL -DestinationPath $ZIP
+          Get-ChildItem "$env:ARTIFACTS_DIR" | Format-Table -AutoSize
+
+      - name: Upload artifact (Windows)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReaMOD-windows-x64
+          path: ${{ env.ARTIFACTS_DIR }}/ReaMOD_Windows.zip
+
+  release:
+    name: Create GitHub Release (mac + win)
+    runs-on: ubuntu-latest
+    needs: [macos-universal, windows-x64]
+    if: github.ref == 'refs/heads/Main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+
+    steps:
+      - name: Compute timestamps (human + tag-safe)
+        run: |
+          echo "STAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_ENV"
+          echo "STAMP_TAG=$(date -u '+%Y%m%d-%H%M%S-UTC')" >> "$GITHUB_ENV"
+
+      - name: Download mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ReaMOD-macos-universal
+          path: ./dl
+
+      - name: Download windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ReaMOD-windows-x64
+          path: ./dl
+
+      - name: List downloaded files
+        run: ls -alh ./dl
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.STAMP_TAG }}-r${{ github.run_number }}
-          name: "ReaMOD macOS Universal — ${{ env.STAMP }}"
+          name: "ReaMOD macOS + Windows — ${{ env.STAMP }}"
           draft: false
           prerelease: false
           body: |
@@ -98,7 +189,10 @@ jobs:
             • Commit: ${{ github.sha }}
 
             Includes:
-            - ReaMOD Reaper_Mac.zip (contains: reaper_ReaMOD_Plugin.dylib, universal arm64 + x86_64)
-          files: ${{ env.ARTIFACTS_DIR }}/ReaMOD_Mac.zip
+            - ReaMOD_Mac.zip (universal arm64 + x86_64 .dylib)
+            - ReaMOD_Windows.zip (x64 .dll)
+          files: |
+            dl/ReaMOD_Mac.zip
+            dl/ReaMOD_Windows.zip
           fail_on_unmatched_files: true
-          overwrite_files: true   # <-- correct key
+          overwrite_files: true
