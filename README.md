@@ -158,20 +158,19 @@ Notes
 - In the `Selected Event` section, use the sliders to adjust the event's parameters.
 - If the event is currently playing, changes to the sliders will affect the event in real-time.
 
-### Inserting Markers and Items
+### Inserting FMOD Events
 
-- Use the provided custom actions to insert markers or items associated with the selected FMOD event:
+- Use the provided custom actions to insert media items to trigger specific FMOD event:
 
-  - **Add Marker with Last FMOD Event**: Inserts a marker at the edit cursor with the selected event.
-  - **Add Item with selected event at edit cursor**: Inserts an item at the edit cursor on the selected track with the selected event.
-  - **Add Item with selected event within current time selection**: Inserts an item spanning the time selection with the selected event.
+  - **Add Item with selected event at edit cursor**: Inserts an empty media item at the edit cursor on the selected track with the selected FMOD event and the current value of any associated FMOD parameters in the item's notes.
+  - **Add Item with selected event within current time selection**: Inserts an empty media item spanning the time selection with the selected event and the current value of any associated FMOD parameters in the item's notes.
 
 - These actions can be assigned to keyboard shortcuts or added to toolbars.
 
 ### Playback Integration
 
-- When you play back your REAPER project, the plugin will monitor playback and trigger FMOD events based on markers or items.
-- Events will start and stop in sync with REAPER's timeline.
+- When you play back your REAPER project, the plugin will automatically check all tracks for FMOD-related media items. It looks for tracks whose names contain ‘FMOD’ or ‘fmod,’ as well as any tracks inside a parent folder whose name contains ‘FMOD’ or ‘fmod.’
+- Adjust the `Event detection lookahead time (ms)` in ReaMOD's setting to accomadate any latency issues. Note that timing is a little "loose" in ReaMOD due to several factors that may not be possible to solve.
 
 ### Saving and Loading Plugin State
 
