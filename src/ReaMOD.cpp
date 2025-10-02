@@ -3,6 +3,7 @@
 #include <memory>
 #include <cstring>
 #include <vector>
+#include <exception>
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
@@ -61,6 +62,9 @@ bool debugMessages = false;
 // ImGui context
 ImGui_Context* reaMOD_Main_ImGui_Context = nullptr;
 ImGui_Context* reaMOD_EventSearch_ImGui_Context = nullptr;
+ImGui_Font* reaMODRegularFont = nullptr;
+ImGui_Font* reaMODMediumFont = nullptr;
+ImGui_Font* reaMODBoldFont = nullptr;
 char selected_file_path[FILE_PATH_BUFFER_SIZE] = "";  // Full path of selected .fspro file
 char selected_file_name[FILE_PATH_BUFFER_SIZE] = "No project selected.";  // Initial text in the input box
 std::string currentReaMODFileName = " ";
@@ -2799,7 +2803,132 @@ int supportButtonBackground = 0x282828FF;
 int supportButtonHovered = 0x949494FF;
 int supportButtonActive = 0x48B2A0FF;
 
+std::string LocateReaMODFontsDirectory() {
+    static std::string cachedPath;
+    static bool loggedMissingDirectory = false;
+
+    if (!cachedPath.empty()) {
+        return cachedPath;
+    }
+
+    std::vector<fs::path> candidates = {
+        fs::path("fonts") / "Roboto",
+        fs::path("Fonts") / "Roboto",
+        fs::path("fonts") / "roboto",
+        fs::path("Fonts") / "roboto"
+    };
+
+    if (GetResourcePath) {
+        fs::path resourcePath(GetResourcePath());
+        candidates.emplace_back(resourcePath / "Effects" / "ReaMOD" / "fonts" / "Roboto");
+        candidates.emplace_back(resourcePath / "Scripts" / "ReaMOD" / "fonts" / "Roboto");
+        candidates.emplace_back(resourcePath / "Data" / "ReaMOD" / "fonts" / "Roboto");
+    }
+
+    for (const auto& candidate : candidates) {
+        std::error_code ec;
+        if (!candidate.empty() && fs::exists(candidate, ec) && fs::is_directory(candidate, ec)) {
+            cachedPath = candidate.string();
+            DebugMsg("Using ReaMOD font directory: %s\n", cachedPath.c_str());
+            break;
+        }
+    }
+
+    if (cachedPath.empty() && !loggedMissingDirectory) {
+        DebugMsg("ReaMOD fonts directory not found. Expected at ReaMOD/fonts/Roboto within the REAPER resource path.\n");
+        loggedMissingDirectory = true;
+    }
+
+    return cachedPath;
+}
+
+ImGui_Font* LoadReaMODFont(const fs::path& fontsDir, const std::string& fileName, int size) {
+    fs::path fontPath = fontsDir / fileName;
+    std::error_code ec;
+    if (!fs::exists(fontPath, ec) || !fs::is_regular_file(fontPath, ec)) {
+        return nullptr;
+    }
+
+    try {
+        ImGui_Font* font = ImGui::CreateFont(fontPath.string().c_str(), size, ImGui::FontFlags_None);
+        if (font) {
+            DebugMsg("Loaded ReaMOD font: %s (size %d)\n", fontPath.string().c_str(), size);
+        }
+        return font;
+    } catch (const std::exception& e) {
+        DebugMsg("Failed to load ReaMOD font %s: %s\n", fontPath.string().c_str(), e.what());
+        return nullptr;
+    }
+}
+
+void EnsureReaMODFontsLoaded() {
+    std::string fontsDirectory = LocateReaMODFontsDirectory();
+    if (fontsDirectory.empty()) {
+        return;
+    }
+
+    fs::path fontsDir(fontsDirectory);
+
+    static bool reportedRegularMissing = false;
+    static bool reportedMediumMissing = false;
+    static bool reportedBoldMissing = false;
+
+    if (!reaMODRegularFont) {
+        reaMODRegularFont = LoadReaMODFont(fontsDir, "Roboto-Regular.ttf", 16);
+        if (!reaMODRegularFont && !reportedRegularMissing) {
+            DebugMsg("Roboto-Regular.ttf could not be loaded; using ImGui's default font.\n");
+            reportedRegularMissing = true;
+        }
+    }
+
+    if (!reaMODMediumFont) {
+        reaMODMediumFont = LoadReaMODFont(fontsDir, "Roboto-Medium.ttf", 16);
+        if (!reaMODMediumFont && !reportedMediumMissing) {
+            DebugMsg("Roboto-Medium.ttf could not be loaded; buttons will use the regular font.\n");
+            reportedMediumMissing = true;
+        }
+    }
+
+    if (!reaMODBoldFont) {
+        reaMODBoldFont = LoadReaMODFont(fontsDir, "Roboto-Bold.ttf", 18);
+        if (!reaMODBoldFont && !reportedBoldMissing) {
+            DebugMsg("Roboto-Bold.ttf could not be loaded; headings will use the regular font.\n");
+            reportedBoldMissing = true;
+        }
+    }
+
+    if (!reaMODMediumFont && reaMODRegularFont) {
+        reaMODMediumFont = reaMODRegularFont;
+    }
+
+    if (!reaMODBoldFont && reaMODRegularFont) {
+        reaMODBoldFont = reaMODRegularFont;
+    }
+}
+
+void ReaMODSeparatorText(ImGui_Context* ctx, const char* label) {
+    EnsureReaMODFontsLoaded();
+    if (reaMODBoldFont) {
+        ImGui::PushFont(ctx, reaMODBoldFont);
+    }
+    ImGui::SeparatorText(ctx, label);
+    if (reaMODBoldFont) {
+        ImGui::PopFont(ctx);
+    }
+}
+
+void ReaMODText(ImGui_Context* ctx, const char* text, ImGui_Font* font) {
+    if (font) {
+        ImGui::PushFont(ctx, font);
+    }
+    ImGui::Text(ctx, text);
+    if (font) {
+        ImGui::PopFont(ctx);
+    }
+}
+
 void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
+    EnsureReaMODFontsLoaded();
     ImGui::PushStyleColor(ctx, ImGui::Col_WindowBg, greyDark);
     ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
     ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, supportButtonHovered);
@@ -2813,16 +2942,30 @@ void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
     ImGui::PushStyleColor(ctx, ImGui::Col_Header, supportButtonBackground);
     ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, supportButtonHovered);
     ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, supportButtonActive);
+    if (reaMODRegularFont) {
+        ImGui::PushFont(ctx, reaMODRegularFont);
+    }
 }
 
 void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
+    if (reaMODRegularFont) {
+        ImGui::PopFont(ctx);
+    }
     ImGui::PopStyleColor(ctx, 13);
 }
 
 bool StyledButton(ImGui_Context* ctx, const char* label) {
+    bool fontActive = false;
+    if (reaMODMediumFont) {
+        ImGui::PushFont(ctx, reaMODMediumFont);
+        fontActive = true;
+    }
     ImGui::PushStyleColor(ctx, ImGui::Col_Text, blue);
     bool pressed = ImGui::Button(ctx, label);
     ImGui::PopStyleColor(ctx);
+    if (fontActive) {
+        ImGui::PopFont(ctx);
+    }
     return pressed;
 }
 
@@ -2836,7 +2979,9 @@ void RenderEventSearchWindow() {
     if (!searchFmodEventWindowOpen) {
         return;
     }
-    
+
+    EnsureReaMODFontsLoaded();
+
     // Set the initial window size
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 400, 300, ImGui::Cond_FirstUseEver);
 
@@ -2846,7 +2991,13 @@ void RenderEventSearchWindow() {
     if (ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost)) {
 
         // Display a label for the input field
+        if (reaMODMediumFont) {
+            ImGui::PushFont(reaMOD_Main_ImGui_Context, reaMODMediumFont);
+        }
         ImGui::Text(reaMOD_Main_ImGui_Context, "Event Search:");
+        if (reaMODMediumFont) {
+            ImGui::PopFont(reaMOD_Main_ImGui_Context);
+        }
 
         // Static buffer to hold user input
         static char eventSearchBuffer[256] = "";    
@@ -3068,6 +3219,7 @@ void RenderEventSearchWindow() {
 
 
 void RenderGUI() {
+    EnsureReaMODFontsLoaded();
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
     PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
@@ -3076,13 +3228,13 @@ void RenderGUI() {
     if (ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing)) {
 
         // Display the formatted ReaMOD session text
-        ImGui::Text(reaMOD_Main_ImGui_Context, "ReaMOD Session: ");
+        ReaMODText(reaMOD_Main_ImGui_Context, "ReaMOD Session:", reaMODBoldFont);
         ImGui::SameLine(reaMOD_Main_ImGui_Context);
-        ImGui::Text(reaMOD_Main_ImGui_Context, currentDisplayedFileName.c_str());
+        ReaMODText(reaMOD_Main_ImGui_Context, currentDisplayedFileName.c_str(), reaMODMediumFont);
 
         // Display the formatted last save timestamp if available
         if (!formattedLastSaveTimestamp.empty()) {
-            ImGui::Text(reaMOD_Main_ImGui_Context, formattedLastSaveTimestamp.c_str());
+            ReaMODText(reaMOD_Main_ImGui_Context, formattedLastSaveTimestamp.c_str(), reaMODMediumFont);
         }
 
         // Add Save and Load State buttons
@@ -3096,7 +3248,7 @@ void RenderGUI() {
         ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
         // ImGui::Separator(reaMOD_Main_ImGui_Context);
-        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "FMOD Project:");
+        ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "FMOD Project:");
 
         // Move the "Select" button to the left of the selected .fspro file
         if (StyledButton(reaMOD_Main_ImGui_Context, "Select")) {
@@ -3104,15 +3256,15 @@ void RenderGUI() {
         }
 
         ImGui::SameLine(reaMOD_Main_ImGui_Context);  // Put the file name on the same line as the button
-        ImGui::Text(reaMOD_Main_ImGui_Context, selected_file_name);
+        ReaMODText(reaMOD_Main_ImGui_Context, selected_file_name, reaMODMediumFont);
         ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
-        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "FMOD Bank Files:");
+        ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "FMOD Bank Files:");
 
-        ImGui::Text(reaMOD_Main_ImGui_Context, "Search directories:");
+        ReaMODText(reaMOD_Main_ImGui_Context, "Search directories:", reaMODMediumFont);
         bool directoryListChanged = false;
         if (customBankDirectories.empty()) {
-            ImGui::Text(reaMOD_Main_ImGui_Context, "No directories selected.");
+            ReaMODText(reaMOD_Main_ImGui_Context, "No directories selected.", reaMODMediumFont);
         } else {
             for (size_t i = 0; i < customBankDirectories.size(); ++i) {
                 std::string displayPath = customBankDirectories[i];
@@ -3125,9 +3277,10 @@ void RenderGUI() {
                 }
                 if (!directoryExists || dirError || !isDirectory) {
                     displayPath += " (missing)";
+                    ImGui::TextColored(reaMOD_Main_ImGui_Context, orange, displayPath.c_str());
+                } else {
+                    ReaMODText(reaMOD_Main_ImGui_Context, displayPath.c_str(), reaMODMediumFont);
                 }
-
-                ImGui::Text(reaMOD_Main_ImGui_Context, displayPath.c_str());
 
                 std::string removeLabel = "Remove##BankDir" + std::to_string(i);
                 std::string upLabel = "Up##BankDir" + std::to_string(i);
@@ -3267,7 +3420,7 @@ void RenderGUI() {
                 }
             }
         } else {
-            ImGui::Text(reaMOD_Main_ImGui_Context, "No .bank files found in the selected directories.");
+            ReaMODText(reaMOD_Main_ImGui_Context, "No .bank files found in the selected directories.", reaMODMediumFont);
         }
 
         ImGui::Text(reaMOD_Main_ImGui_Context, "");
@@ -3279,7 +3432,7 @@ void RenderGUI() {
         if (!groupedGlobalParameters.empty()) {
 
             // Global Parameters Section
-            ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Global Parameters:");
+            ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Global Parameters:");
             
             // Separate "No Prefix" group from others
             std::map<std::string, std::vector<GlobalParameter>> otherGroups;
@@ -3362,7 +3515,7 @@ void RenderGUI() {
         // Render Section for selected event and parameters if event is selected
         if (!selectedFMODEvent.empty()) {
             // ImGui::Separator(reaMOD_Main_ImGui_Context);
-            ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Selected Event:");
+            ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Selected Event:");
         
             // Render the play button
             std::string play_button_label = "Play##SelectedEvent";
@@ -3456,7 +3609,7 @@ void RenderGUI() {
         
         if (selectedItem) {
             // New section to display and edit the notes of the selected media item
-            ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Selected Media Item Notes:");
+            ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Selected Media Item Notes:");
             // If the selected item has changed, load the notes
             if (selectedItem != lastSelectedItem) {
                 GetSetMediaItemInfo_String(selectedItem, "P_NOTES", itemNotes, false);
@@ -3486,7 +3639,7 @@ void RenderGUI() {
 
 
         // ImGui::Separator(reaMOD_Main_ImGui_Context);
-        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Settings:");
+        ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Settings:");
 
         // Add the InputInt control for Look Ahead Time and keep the text on the same line
         ImGui::SetNextItemWidth(reaMOD_Main_ImGui_Context, 90);
@@ -3509,7 +3662,7 @@ void RenderGUI() {
 
         // Support & Links section
         ImGui::Separator(reaMOD_Main_ImGui_Context);
-        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Support & Links");
+        ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Support & Links");
 
         if (StyledButton(reaMOD_Main_ImGui_Context, "Support Developer")) {
             if (!OpenURLInDefaultBrowser("https://www.buymeacoffee.com/danielrdehaan")) {
