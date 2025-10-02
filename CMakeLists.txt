@@ -38,7 +38,7 @@ set(SOURCE_FILES
 # ---------- Target ----------
 add_library(reaper_ReaMOD_Plugin SHARED ${SOURCE_FILES})
 
-# Common nice flags/defs
+# Common flags/defs
 if(MSVC)
   target_compile_definitions(reaper_ReaMOD_Plugin PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
   target_compile_options(reaper_ReaMOD_Plugin PRIVATE /W3)
@@ -48,7 +48,7 @@ endif()
 
 # ---------- Platform-specific linking ----------
 if(APPLE)
-  # Keep your existing macOS behavior (link .dylibs directly)
+  # macOS: link the .dylibs (keeps your original behavior)
   target_link_libraries(reaper_ReaMOD_Plugin
     "${FMOD_API_DIR}/core/lib/libfmod.dylib"
     "${FMOD_API_DIR}/studio/lib/libfmodstudio.dylib"
@@ -67,7 +67,8 @@ if(APPLE)
   )
 
 elseif(WIN32)
-  # Prefer x64 import libs; try plain lib/ first, then lib/x64/
+  # Windows: link against FMOD import libraries (not DLLs)
+  # Try plain lib/ first, then lib/x64/ (adjust if your SDK uses different layout)
   set(FMOD_CORE_LIB_CANDIDATES
     "${FMOD_API_DIR}/core/lib/fmod_vc.lib"
     "${FMOD_API_DIR}/core/lib/x64/fmod_vc.lib"
@@ -99,7 +100,7 @@ elseif(WIN32)
     "${FMOD_STUDIO_LIB}"
   )
 
-  # Export symbols if your code doesn't already do __declspec(dllexport)
+  # Export symbols if you don't already __declspec(dllexport) them
   set_target_properties(reaper_ReaMOD_Plugin PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
     PREFIX ""
