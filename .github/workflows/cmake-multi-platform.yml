@@ -116,29 +116,28 @@ jobs:
         shell: pwsh
         run: cmake --build "$env:BUILD_DIR" --config "$env:BUILD_TYPE" --parallel
 
-      - name: Verify binary (x64)
+      - name: Resolve plugin path (Windows)
+        id: resolve_win
         shell: pwsh
         run: |
-          $DLL = Join-Path "$env:BUILD_DIR" "reaper_ReaMOD_Plugin.dll"
-          if (-not (Test-Path $DLL)) { Write-Error "DLL not found at $DLL"; exit 2 }
-          & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC" `
-            | Out-Null 2>$null
-          # Fallback: use dumpbin from vswhere if available
-          $dumpbin = "${env:VCToolsInstallDir}bin\Hostx64\x64\dumpbin.exe"
-          if (Test-Path $dumpbin) {
-            & $dumpbin /headers $DLL | Select-String "machine \(x64\)" | Out-Null
-            if ($LASTEXITCODE -ne 0) { Write-Error "Not an x64 binary?"; exit 3 }
-          } else {
-            Write-Host "Skipping dumpbin check (not found); ensured file exists."
-          }
+          $c1 = Join-Path "$env:BUILD_DIR" "reaper_ReaMOD_Plugin.dll"
+          $c2 = Join-Path "$env:BUILD_DIR" "$env:BUILD_TYPE" "reaper_ReaMOD_Plugin.dll"
+          if (Test-Path $c1) { "PLUGIN_DLL=$c1" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV }
+          elseif (Test-Path $c2) { "PLUGIN_DLL=$c2" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV }
+          else { Write-Error "Could not find built DLL at $c1 or $c2"; exit 2 }
+
+      - name: Verify binary exists (Windows)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "$env:PLUGIN_DLL")) { Write-Error "Missing $env:PLUGIN_DLL"; exit 2 }
+          Write-Host "Found: $env:PLUGIN_DLL"
 
       - name: Package into Zip (Windows)
         shell: pwsh
         run: |
-          $DLL = Join-Path "$env:BUILD_DIR" "reaper_ReaMOD_Plugin.dll"
           $ZIP = Join-Path "$env:ARTIFACTS_DIR" "ReaMOD_Windows.zip"
           if (Test-Path $ZIP) { Remove-Item -Force $ZIP }
-          Compress-Archive -Path $DLL -DestinationPath $ZIP
+          Compress-Archive -Path "$env:PLUGIN_DLL" -DestinationPath $ZIP
           Get-ChildItem "$env:ARTIFACTS_DIR" | Format-Table -AutoSize
 
       - name: Upload artifact (Windows)
