@@ -17,64 +17,84 @@ ReaMOD is a plugin for [REAPER](https://www.reaper.fm/), a digital audio worksta
 
 ## Installation Instructions
 
-The ReaMOD Plugin is a REAPER extension (.dylib on macOS, .dll on Windows) that integrates FMOD functionality directly into REAPER. Because of FMOD licensing restrictions, users must provide their own FMOD API libraries — these are not bundled with the plugin.
+ReaMOD is a REAPER extension that integrates FMOD functionality. Due to FMOD licensing, you must supply your own FMOD API libraries.
 
-1. Locate your REAPER resource folder
-- Inside REAPER go to: `Options → Show REAPER resource path in explorer/finder` This opens the root directory where REAPER expects extensions.
+1) Locate your REAPER resource folder
+   In REAPER: Options → “Show REAPER resource path in explorer/finder”.
+   This opens the root directory where REAPER expects extensions.
 
-2. Download the latest release for your operating system and copy the plugin into the `User Plugins` folder found in your Reaper Resources folder.
+2) Install the ReaMOD plugin
+   - Download the latest release: https://github.com/danielrdehaan/ReaMOD/releases
+   - Copy the plugin into the UserPlugins subfolder:
 
-- Download the latest release: https://github.com/danielrdehaan/ReaMOD/releases
+     macOS   → REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib
+     Windows → REAPER/UserPlugins/reaper_ReaMOD_Plugin.dll   ← (underscore)
 
-- Place the built plugin file into the UserPlugins subfolder:
-    macOS → REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib
-    Windows → REAPER/UserPlugins/reaper_ReaMODPlugin.dll
+3) Provide the FMOD runtime libraries
 
-3. Add the FMOD API libraries
-- Download the FMOD API files for your operating system from https://www.fmod.com/download
-- Create a ReaMOD folder alongside UserPlugins, and inside it, replicate the following structure:
+   macOS
+   -----
+   - From the FMOD API download, copy **these two files** into the paths below:
+       `REAPER/ReaMOD/fmod/core/lib/libfmod.dylib`
+       `REAPER/ReaMOD/fmod/studio/lib/libfmodstudio.dylib`
+   - The plugin uses relative rpaths:
+       `@loader_path`
+       `@loader_path/../ReaMOD/fmod/core/lib`
+       `@loader_path/../ReaMOD/fmod/studio/lib`
 
+   Windows
+   -------
+   - From the FMOD Windows Desktop SDK (x64), end users need **only**:
+       fmod.dll
+       fmodstudio.dll
+     (Do NOT copy the *.lib files; those are only for building.)
+   - Place the DLLs in ONE of these locations so Windows can find them:
+       • Same folder as REAPER.exe (recommended)
+         e.g., C:\Program Files\REAPER (x64)\
+       • Or any folder that is on the user/system PATH
+         (You can add your chosen ReaMOD\...\lib folder to PATH if preferred.)
+
+   Example macOS-oriented layout (Windows users typically put DLLs next to REAPER.exe, not here):
+   ```
+     REAPER/
+     ├─ UserPlugins/
+     │  └─ reaper_ReaMOD_Plugin.(dylib|dll)
+     └─ ReaMOD/
+        └─ fmod/
+           ├─ core/
+           │  └─ lib/
+           │     └─ libfmod.dylib              (macOS)
+           └─ studio/
+              └─ lib/
+                 └─ libfmodstudio.dylib        (macOS)
     ```
-    REAPER/
-    ├── UserPlugins/
-    │   └── reaper_ReaMOD_Plugin.dylib   # or .dll on Windows
-    └── ReaMOD/
-        └── fmod/
-            ├── core/
-            │   └── lib/
-            │       ├── libfmod.dylib       (macOS)
-            │       ├── fmod.dll            (Windows)
-            │       └── fmod_vc.lib         (Windows import lib)
-            └── studio/
-                └── lib/
-                    ├── libfmodstudio.dylib (macOS)
-                    ├── fmodstudio.dll      (Windows)
-                    └── fmodstudio_vc.lib   (Windows import lib)
-    ```
+
+4) Verify
+
+   macOS:
+     # Show rpaths recorded in the plugin
+     `otool -l "REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib" | awk '/LC_RPATH/{flag=1;next}/Load`command/{flag=0}flag' | awk '/path /{print $2}'
+
+     # (Optional) Show linked install names
+     `otool -L "REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib"`
+
+   Windows:
+     # Show dependent DLL names (path resolution happens at load time)
+     `dumpbin /DEPENDENTS "REAPER\UserPlugins\reaper_ReaMOD_Plugin.dll"`
+     # Or use the "Dependencies" GUI tool to check resolution.
+
+5) Restart REAPER
+
+   After copying everything into place, restart REAPER. The ReaMOD menu/actions should appear.
+
+Notes
+-----
+• macOS Gatekeeper: if macOS blocks the dylib, open System Settings → Privacy & Security and “Allow Anyway”, then restart REAPER. If needed:
+    xattr -dr com.apple.quarantine "REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib"
+• Architecture: use 64-bit REAPER with 64-bit FMOD (Windows x64; macOS universal is supported).
+• Debug FMOD libs (libfmodL.*, fmodL.*) are for development; end users should use the non-L variants.
 
 
-- On macOS: copy libfmod.dylib and libfmodstudio.dylib from the FMOD API download into core/lib and studio/lib.
-
-- On Windows: copy fmod.dll, fmod_vc.lib, fmodstudio.dll, and fmodstudio_vc.lib into the corresponding folders for your architecture (x64, x86, or arm64). Use the same fmod/core/lib and fmod/studio/lib layout.
-
-4. Verify
-
-- On macOS, you can confirm the plugin is resolving libraries with:
-
-    `otool -L REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib`
-
-    All FMOD libs should show up as @rpath/... pointing into the ../ReaMOD/fmod/... folders.
-
-- On Windows, use:
-
-    `dumpbin /DEPENDENTS reaper_ReaMODPlugin.dll`
-    or a tool like Dependencies to ensure FMOD DLLs are found.
-
-5. Restart REAPER
-
-- After copying everything into place, restart REAPER. The extension should now load and expose FMOD integration features.
-
-Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in System Preferences > Security & Privacy after launching REAPER to approve the .dylib file to run. After approving, restart REAPER after approving. Windows users may need to do something similar.
 
 ## Usage
 
