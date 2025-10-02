@@ -16,16 +16,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ---------- Paths (relative to project root) ----------
 set(REAPER_SDK_DIR        "${CMAKE_SOURCE_DIR}/reaper-sdk")
 set(REAPER_REAIMGUI_DIR   "${CMAKE_SOURCE_DIR}/ReaImGui")
-set(FMOD_API_DIR          "${CMAKE_SOURCE_DIR}/fmod")
+set(FMOD_API_DIR          "${CMAKE_SOURCE_DIR}/fmod")              # root fmod folder (contains mac/ and windows/)
 set(TINYFILEDIALOGS_DIR   "${CMAKE_SOURCE_DIR}/tinyfiledialogs")
+
+# ---------- Platform-specific FMOD subdir ----------
+if(APPLE)
+  set(FMOD_PLATFORM_DIR "${FMOD_API_DIR}/mac")
+elseif(WIN32)
+  set(FMOD_PLATFORM_DIR "${FMOD_API_DIR}/windows")
+endif()
 
 # ---------- Includes ----------
 include_directories(
   ${REAPER_SDK_DIR}
   ${CMAKE_SOURCE_DIR}/reaper-sdk/WDL
   ${REAPER_REAIMGUI_DIR}
-  ${FMOD_API_DIR}/core/inc
-  ${FMOD_API_DIR}/studio/inc
+  ${FMOD_PLATFORM_DIR}/core/inc
+  ${FMOD_PLATFORM_DIR}/studio/inc
   ${TINYFILEDIALOGS_DIR}
 )
 
@@ -48,13 +55,14 @@ endif()
 
 # ---------- Platform-specific linking ----------
 if(APPLE)
-  # macOS: link the .dylibs (keeps your original behavior)
+  # Link the macOS dylibs from fmod/mac/...
   target_link_libraries(reaper_ReaMOD_Plugin
-    "${FMOD_API_DIR}/core/lib/libfmod.dylib"
-    "${FMOD_API_DIR}/studio/lib/libfmodstudio.dylib"
+    "${FMOD_PLATFORM_DIR}/core/lib/libfmod.dylib"
+    "${FMOD_PLATFORM_DIR}/studio/lib/libfmodstudio.dylib"
   )
 
-  # Relative-only rpaths
+  # Relative-only rpaths for end-user install layout (unchanged)
+  # Expecting the user to place runtime libs at .../ReaMOD/fmod/core/lib and .../studio/lib
   set(CMAKE_MACOSX_RPATH ON)
   set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
   set_target_properties(reaper_ReaMOD_Plugin PROPERTIES
@@ -67,38 +75,15 @@ if(APPLE)
   )
 
 elseif(WIN32)
-  # Windows: link against FMOD import libraries (not DLLs)
-  # Try plain lib/ first, then lib/x64/ (adjust if your SDK uses different layout)
-  set(FMOD_CORE_LIB_CANDIDATES
-    "${FMOD_API_DIR}/core/lib/fmod_vc.lib"
-    "${FMOD_API_DIR}/core/lib/x64/fmod_vc.lib"
-  )
-  set(FMOD_STUDIO_LIB_CANDIDATES
-    "${FMOD_API_DIR}/studio/lib/fmodstudio_vc.lib"
-    "${FMOD_API_DIR}/studio/lib/x64/fmodstudio_vc.lib"
-  )
+  # Link against x64 import libs from fmod/windows/...
+  set(FMOD_CORE_LIB   "${FMOD_PLATFORM_DIR}/core/lib/x64/fmod_vc.lib")
+  set(FMOD_STUDIO_LIB "${FMOD_PLATFORM_DIR}/studio/lib/x64/fmodstudio_vc.lib")
 
-  set(FMOD_CORE_LIB "")
-  foreach(p ${FMOD_CORE_LIB_CANDIDATES})
-    if(EXISTS "${p}")
-      set(FMOD_CORE_LIB "${p}")
-      break()
-    endif()
-  endforeach()
-
-  set(FMOD_STUDIO_LIB "")
-  foreach(p ${FMOD_STUDIO_LIB_CANDIDATES})
-    if(EXISTS "${p}")
-      set(FMOD_STUDIO_LIB "${p}")
-      break()
-    endif()
-  endforeach()
-
-  if(NOT FMOD_CORE_LIB OR NOT FMOD_STUDIO_LIB)
+  if(NOT EXISTS "${FMOD_CORE_LIB}" OR NOT EXISTS "${FMOD_STUDIO_LIB}")
     message(FATAL_ERROR
-      "FMOD import libraries not found.\n"
-      "Expected one of:\n  ${FMOD_CORE_LIB_CANDIDATES}\n  ${FMOD_STUDIO_LIB_CANDIDATES}\n"
-      "Download FMOD for Windows and place fmod_vc.lib and fmodstudio_vc.lib accordingly.")
+      "Missing FMOD import libs for x64.\n"
+      "Expected:\n  ${FMOD_CORE_LIB}\n  ${FMOD_STUDIO_LIB}\n"
+      "Please copy them from the FMOD Windows Desktop SDK (x64).")
   endif()
 
   target_link_libraries(reaper_ReaMOD_Plugin
