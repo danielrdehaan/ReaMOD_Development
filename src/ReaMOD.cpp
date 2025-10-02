@@ -2799,6 +2799,37 @@ int supportButtonBackground = 0x282828FF;
 int supportButtonHovered = 0x949494FF;
 int supportButtonActive = 0x48B2A0FF;
 
+void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
+    ImGui::PushStyleColor(ctx, ImGui::Col_WindowBg, greyDark);
+    ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, supportButtonHovered);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, supportButtonActive);
+    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBg, supportButtonBackground);
+    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgHovered, supportButtonHovered);
+    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgActive, supportButtonActive);
+    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrab, supportButtonActive);
+    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrabActive, supportButtonHovered);
+    ImGui::PushStyleColor(ctx, ImGui::Col_CheckMark, blue);
+    ImGui::PushStyleColor(ctx, ImGui::Col_Header, supportButtonBackground);
+    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, supportButtonHovered);
+    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, supportButtonActive);
+}
+
+void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
+    ImGui::PopStyleColor(ctx, 13);
+}
+
+bool StyledButton(ImGui_Context* ctx, const char* label) {
+    ImGui::PushStyleColor(ctx, ImGui::Col_Text, blue);
+    bool pressed = ImGui::Button(ctx, label);
+    ImGui::PopStyleColor(ctx);
+    return pressed;
+}
+
+bool StyledButton(ImGui_Context* ctx, const std::string& label) {
+    return StyledButton(ctx, label.c_str());
+}
+
 void RenderEventSearchWindow() {
 
     // Check if the search window should be open
@@ -2808,6 +2839,8 @@ void RenderEventSearchWindow() {
     
     // Set the initial window size
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 400, 300, ImGui::Cond_FirstUseEver);
+
+    PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     // Begin the window using the searchFmodEventWindowOpen flag
     if (ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost)) {
@@ -3029,13 +3062,15 @@ void RenderEventSearchWindow() {
         // End the window
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
+
+    PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 }
 
 
 void RenderGUI() {
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_WindowBg, greyDark);
+    PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     bool open = true;  // Open flag for the window
     if (ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing)) {
@@ -3051,11 +3086,11 @@ void RenderGUI() {
         }
 
         // Add Save and Load State buttons
-        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Save")) {
+        if (StyledButton(reaMOD_Main_ImGui_Context, "Save")) {
             SaveStateDialog();
         }
         ImGui::SameLine(reaMOD_Main_ImGui_Context);
-        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Load")) {
+        if (StyledButton(reaMOD_Main_ImGui_Context, "Load")) {
             LoadStateDialog();
         }
         ImGui::Text(reaMOD_Main_ImGui_Context, "");
@@ -3064,7 +3099,7 @@ void RenderGUI() {
         ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "FMOD Project:");
 
         // Move the "Select" button to the left of the selected .fspro file
-        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Select")) {
+        if (StyledButton(reaMOD_Main_ImGui_Context, "Select")) {
             OpenFileDialog();
         }
 
@@ -3099,7 +3134,7 @@ void RenderGUI() {
                 std::string downLabel = "Down##BankDir" + std::to_string(i);
 
                 ImGui::SameLine(reaMOD_Main_ImGui_Context);
-                if (ImGui::Button(reaMOD_Main_ImGui_Context, removeLabel.c_str())) {
+                if (StyledButton(reaMOD_Main_ImGui_Context, removeLabel)) {
                     customBankDirectories.erase(customBankDirectories.begin() + i);
                     directoryListChanged = true;
                     break;
@@ -3107,7 +3142,7 @@ void RenderGUI() {
 
                 if (i > 0) {
                     ImGui::SameLine(reaMOD_Main_ImGui_Context);
-                    if (ImGui::Button(reaMOD_Main_ImGui_Context, upLabel.c_str())) {
+                    if (StyledButton(reaMOD_Main_ImGui_Context, upLabel)) {
                         std::swap(customBankDirectories[i], customBankDirectories[i - 1]);
                         directoryListChanged = true;
                         break;
@@ -3116,7 +3151,7 @@ void RenderGUI() {
 
                 if (i + 1 < customBankDirectories.size()) {
                     ImGui::SameLine(reaMOD_Main_ImGui_Context);
-                    if (ImGui::Button(reaMOD_Main_ImGui_Context, downLabel.c_str())) {
+                    if (StyledButton(reaMOD_Main_ImGui_Context, downLabel)) {
                         std::swap(customBankDirectories[i], customBankDirectories[i + 1]);
                         directoryListChanged = true;
                         break;
@@ -3129,7 +3164,7 @@ void RenderGUI() {
             RefreshBankFiles();
         }
 
-        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Add directory...")) {
+        if (StyledButton(reaMOD_Main_ImGui_Context, "Add directory...")) {
             const char* defaultPath = nullptr;
             if (!customBankDirectories.empty()) {
                 defaultPath = customBankDirectories.back().c_str();
@@ -3147,7 +3182,7 @@ void RenderGUI() {
             }
         }
         ImGui::SameLine(reaMOD_Main_ImGui_Context);
-        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Rescan")) {
+        if (StyledButton(reaMOD_Main_ImGui_Context, "Rescan")) {
             RefreshBankFiles();
         }
 
@@ -3158,7 +3193,7 @@ void RenderGUI() {
                 std::string bank_file_name = RemoveBankExtension(fs::path(bank_files[i]).filename().string());
                 std::string button_label = bank_load_states[i] ? "Unload##" + std::to_string(i) : "Load##" + std::to_string(i);
 
-                if (ImGui::Button(reaMOD_Main_ImGui_Context, button_label.c_str())) {
+                if (StyledButton(reaMOD_Main_ImGui_Context, button_label)) {
                     if (bank_load_states[i]) {
                         auto loadedIt = loaded_banks.find(bank_files[i]);
                         if (loadedIt != loaded_banks.end() && loadedIt->second) {
@@ -3438,7 +3473,7 @@ void RenderGUI() {
             }
         
             // Provide a button to save the notes back to the media item
-            if (ImGui::Button(reaMOD_Main_ImGui_Context, "Save Notes")) {
+            if (StyledButton(reaMOD_Main_ImGui_Context, "Save Notes")) {
                 GetSetMediaItemInfo_String(selectedItem, "P_NOTES", itemNotes, true);  // Save the updated notes
                 DebugMsg("Updated notes for selected media item: %s\n", itemNotes);
             }
@@ -3476,12 +3511,7 @@ void RenderGUI() {
         ImGui::Separator(reaMOD_Main_ImGui_Context);
         ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Support & Links");
 
-        ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_Button, supportButtonBackground);
-        ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ButtonHovered, supportButtonHovered);
-        ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ButtonActive, supportButtonActive);
-        ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_Text, blue);
-
-        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Support Developer")) {
+        if (StyledButton(reaMOD_Main_ImGui_Context, "Support Developer")) {
             if (!OpenURLInDefaultBrowser("https://www.buymeacoffee.com/danielrdehaan")) {
                 DebugMsg("Failed to open support URL.\n");
             }
@@ -3489,7 +3519,7 @@ void RenderGUI() {
 
         ImGui::Spacing(reaMOD_Main_ImGui_Context);
 
-        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Discord Server")) {
+        if (StyledButton(reaMOD_Main_ImGui_Context, "Discord Server")) {
             if (!OpenURLInDefaultBrowser("https://discord.gg/C9FYD8Qf4g")) {
                 DebugMsg("Failed to open Discord URL.\n");
             }
@@ -3497,19 +3527,17 @@ void RenderGUI() {
 
         ImGui::Spacing(reaMOD_Main_ImGui_Context);
 
-        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Developer Website")) {
+        if (StyledButton(reaMOD_Main_ImGui_Context, "Developer Website")) {
             if (!OpenURLInDefaultBrowser("https://www.simplesoundtools.com")) {
                 DebugMsg("Failed to open website URL.\n");
             }
         }
 
-        ImGui::PopStyleColor(reaMOD_Main_ImGui_Context, 4);
-
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
 
     // Pop the style colors
-    ImGui::PopStyleColor(reaMOD_Main_ImGui_Context);
+    PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     RenderEventSearchWindow();
 
