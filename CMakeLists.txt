@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 project(ReaMOD)
 
-# ---------- Architecture / Platforms ----------
-# macOS universal unless overridden on CLI
+# ---------- Platforms / Architectures ----------
 if(APPLE)
   if(NOT DEFINED CMAKE_OSX_ARCHITECTURES)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architectures" FORCE)
@@ -39,24 +38,25 @@ set(SOURCE_FILES
 # ---------- Target ----------
 add_library(reaper_ReaMOD_Plugin SHARED ${SOURCE_FILES})
 
-# Helpful defines across platforms
-target_compile_definitions(reaper_ReaMOD_Plugin
-  PRIVATE
-    $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS;NOMINMAX>
-)
+# Common nice flags/defs
+if(MSVC)
+  target_compile_definitions(reaper_ReaMOD_Plugin PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+  target_compile_options(reaper_ReaMOD_Plugin PRIVATE /W3)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+  target_compile_options(reaper_ReaMOD_Plugin PRIVATE -Wall -Wextra -Wpedantic)
+endif()
 
-# ---------- Linking (platform-specific) ----------
+# ---------- Platform-specific linking ----------
 if(APPLE)
-  # Link FMOD by full path to .dylib (keeps mac behavior)
+  # Keep your existing macOS behavior (link .dylibs directly)
   target_link_libraries(reaper_ReaMOD_Plugin
     "${FMOD_API_DIR}/core/lib/libfmod.dylib"
     "${FMOD_API_DIR}/studio/lib/libfmodstudio.dylib"
   )
 
-  # RPATH (relative-only; portable)
+  # Relative-only rpaths
   set(CMAKE_MACOSX_RPATH ON)
   set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
-
   set_target_properties(reaper_ReaMOD_Plugin PROPERTIES
     BUILD_WITH_INSTALL_RPATH TRUE
     INSTALL_RPATH "@loader_path;@loader_path/../ReaMOD/fmod/core/lib;@loader_path/../ReaMOD/fmod/studio/lib"
@@ -67,19 +67,39 @@ if(APPLE)
   )
 
 elseif(WIN32)
-  # On Windows, link against FMOD import libraries (not DLLs).
-  # Typical FMOD folder layout has *_vc.lib for MSVC.
-  # Adjust names if your FMOD SDK uses different import-lib names.
-  set(FMOD_CORE_LIB   "${FMOD_API_DIR}/core/lib/fmod_vc.lib")
-  set(FMOD_STUDIO_LIB "${FMOD_API_DIR}/studio/lib/fmodstudio_vc.lib")
+  # Prefer x64 import libs; try plain lib/ first, then lib/x64/
+  set(FMOD_CORE_LIB_CANDIDATES
+    "${FMOD_API_DIR}/core/lib/fmod_vc.lib"
+    "${FMOD_API_DIR}/core/lib/x64/fmod_vc.lib"
+  )
+  set(FMOD_STUDIO_LIB_CANDIDATES
+    "${FMOD_API_DIR}/studio/lib/fmodstudio_vc.lib"
+    "${FMOD_API_DIR}/studio/lib/x64/fmodstudio_vc.lib"
+  )
+
+  set(FMOD_CORE_LIB "")
+  foreach(p ${FMOD_CORE_LIB_CANDIDATES})
+    if(EXISTS "${p}") set(FMOD_CORE_LIB "${p}") break() endif()
+  endforeach()
+
+  set(FMOD_STUDIO_LIB "")
+  foreach(p ${FMOD_STUDIO_LIB_CANDIDATES})
+    if(EXISTS "${p}") set(FMOD_STUDIO_LIB "${p}") break() endif()
+  endforeach()
+
+  if(NOT FMOD_CORE_LIB OR NOT FMOD_STUDIO_LIB)
+    message(FATAL_ERROR
+      "FMOD import libraries not found.\n"
+      "Expected one of:\n  ${FMOD_CORE_LIB_CANDIDATES}\n  ${FMOD_STUDIO_LIB_CANDIDATES}\n"
+      "Download FMOD for Windows and place fmod_vc.lib and fmodstudio_vc.lib accordingly.")
+  endif()
 
   target_link_libraries(reaper_ReaMOD_Plugin
     "${FMOD_CORE_LIB}"
     "${FMOD_STUDIO_LIB}"
   )
 
-  # Export all symbols as a fallback if your code doesn't explicitly dllexport.
-  # (Remove this if you already export the REAPER entry points explicitly.)
+  # Export symbols if your code doesn't already do __declspec(dllexport)
   set_target_properties(reaper_ReaMOD_Plugin PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
     PREFIX ""
@@ -87,7 +107,7 @@ elseif(WIN32)
     OUTPUT_NAME "reaper_ReaMOD_Plugin"
   )
 
-  # Use the dynamic runtime by default (/MD); adjust if you prefer static (/MT).
+  # Ensure /MD (dynamic runtime) in Release configs
   if(MSVC)
     foreach(flag_var
       CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_RELWITHDEBINFO
@@ -98,11 +118,4 @@ elseif(WIN32)
       endif()
     endforeach()
   endif()
-endif()
-
-# ---------- Warnings (optional) ----------
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
-  target_compile_options(reaper_ReaMOD_Plugin PRIVATE -Wall -Wextra -Wpedantic)
-elseif(MSVC)
-  target_compile_options(reaper_ReaMOD_Plugin PRIVATE /W3)
 endif()
