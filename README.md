@@ -112,6 +112,9 @@ Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in Sy
 
    After copying everything into place, restart REAPER. The ReaMOD menu/actions should appear.
 
+6) Installing fonts
+    - If you'd like to use the custom fonts for the ReaMOD GUI download the [resources.zip](https://github.com/danielrdehaan/ReaMOD/blob/Main/resources.zip) file and place it inside the ReaMOD folder 
+
 Notes
 -----
 - macOS Gatekeeper: if macOS blocks the dylib, open System Settings → Privacy & Security and “Allow Anyway”, then restart REAPER. If needed:
