@@ -15,9 +15,35 @@ ReaMOD is a plugin for [REAPER](https://www.reaper.fm/), a digital audio worksta
 - **Session Management**: Save and load plugin states (`.ReaMOD` files) for consistent sessions across projects.
 - **Custom Actions**: Provides custom actions that can be assigned to keyboard shortcuts or toolbar buttons for quick access.
 
+## Requirements:
+
+This REAPER script requires:
+- REAPER 7.20+ (could work with older versions but has not been tested)
+- ReaPack
+- SWS/S&M REAPER extension
+- ReaImGU
+
+## FMOD
+
+At this time, ReaMOD is intended to be used with FMOD version 2.03.09.
+
 ## Installation Instructions
 
 ReaMOD is a REAPER extension that integrates FMOD functionality. Due to FMOD licensing, you must supply your own FMOD API libraries.
+
+### Install Dependencies
+
+Before instllating ReaMOD be sure that you have already installed both the SWS/S&M and ReaImGui extension. They can be installed via the ReaPack Pack Manager for Reaper.
+
+1. Download and follow the installation instruction for ReaPack: https://reapack.com/
+
+Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in System Preferences > Security & Privacy after launching REAPER once for ReaPack to load when installed for the first time. Restart REAPER after approving.
+
+2. Once ReaPack is installed, open it from the menu bar Extensions > ReaPack > Browse Packages... and install the following extensions:
+    - SWS/S&M extensions
+    - ReaImGui: ReaScript binding for Dear ImGui
+
+### Installing ReaMOD
 
 1) Locate your REAPER resource folder
    In REAPER: Options → “Show REAPER resource path in explorer/finder”.
@@ -156,13 +182,21 @@ Notes
 The plugin provides several custom actions for enhanced workflow:
 
 - **ReaMOD: Open/Close Window**
-- **ReaMOD: Add Marker with Last FMOD Event**
+    Open or close the ReaMOD window.
 - **ReaMOD: Add Item with selected event at edit cursor**
+    Adds the currently selected FMOD event in the ReaMOD window with the current parameter values (as item notes) to the selected track at the edit cursor position for the number of frames set in ReaMOD settings.
 - **ReaMOD: Add Item with selected event within current time selection**
+    Adds the currently selected FMOD event in the ReaMOD window with the current parameter values (as item notes) to the selected track at the edit cursor position within the current time selection.
 - **ReaMOD: Update number of frames for item insertion from current time selection**
+    Updates the "Number of frames for inserted item" value in ReaMOD's settings based upon the currrent time selection made in Reaper.
 - **ReaMOD: Stop/Release All FMOD Event Instances**
+    Stops and releases all active FMOD event instances.
 - **ReaMOD: Insert default parameter update item for selected event item on selected track at edit cursor**
+    Inserts an empty media item with the currently selected media item's GUID identifier in its item notes and the defualt item name `param:Name=Value` for use so the user can replace `Name` and `Value` with the desired parameter and value they want to changed for the targeted media item and it corisponding FMOD event.
 - **ReaMOD: Insert parameter automation items for selected event item over time selection**
+    Current solution for changing FMOD parameters over time. Requires a time selection and a media item to be selected before running the action. After running the action the user is prompted to enter the `parameter name` of the desired FMOD parameter, a `starting value`, and an `ending value`. The action then inserts one media item per frame and interpolates over every frame within the time selection between the starting and ending values provided.
+- **ReaMOD: Insert position interpolation items for selected media item over time selection**
+    Current solution for controlling FMOD events 3D location. Requires a time selection and a media item to be selected before running the action. The selected media item should be the one used to triggered the 3D FMOD event that the users wants to control. After running the action the user is prompted to enter the starting and ending location (`x`, `y`, and `z`). The action then inserts one media item per frame and interpolates over every frame within the time selection between the starting and ending locations provided.
 
 Assign these actions to keyboard shortcuts or add them to toolbars for quick access.
 
@@ -178,12 +212,6 @@ Assign these actions to keyboard shortcuts or add them to toolbars for quick acc
 - **Track Naming**: The plugin monitors tracks named "FMOD" (case-insensitive) for triggering events based on items.
 - **Parameter Automation**: You can automate FMOD event parameters using items and take names starting with `param:`.
 
-## Dependencies
-
-- **FMOD Studio API**: The FMOD Studio API libraries are required to build and run the plugin.
-- **ReaImGui**: Required for the GUI elements. Available at [ReaImGui GitHub](https://github.com/cfillion/reaimgui).
-- **TinyFileDialogs**: Used for file dialog operations. Available at [Tiny File Dialogs](https://sourceforge.net/projects/tinyfiledialogs/).
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit pull requests or open issues on the GitHub repository.
@@ -194,7 +222,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- **Daniel Dehaan**: Original author of the plugin.
 - **Cockos Incorporated**: For REAPER and the REAPER SDK.
 - **FMOD**: For the FMOD Studio API.
 - **cfillion**: For ReaImGui.

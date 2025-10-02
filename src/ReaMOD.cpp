@@ -3755,14 +3755,14 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         PlayStopCurrentSelectedEvent();
         return true;
     }
-    if (command == actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem) {
-        InsertEventParameterJSFXForSelectedMediaItem();
-        return true;
-    }
-    if (command == actionIDToggleDebugOnOff) {
-        toggleDebugMessagesOnOff();
-        return true;
-    }
+    // if (command == actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem) {
+    //     InsertEventParameterJSFXForSelectedMediaItem();
+    //     return true;
+    // }
+    // if (command == actionIDToggleDebugOnOff) {
+    //     toggleDebugMessagesOnOff();
+    //     return true;
+    // }
 
 
     return false;
@@ -3816,11 +3816,11 @@ void RegisterActions() {
     static custom_action_register_t actionTriggerSelectedEvent = { 0, "ReaMOD_TriggerSelectedEvent", "ReaMOD: Play/Stop Current Selected Event" };
     actionIDTriggerSelectedEvent = plugin_register("custom_action", &actionTriggerSelectedEvent);
 
-    static custom_action_register_t actionInsertParamEnvelopesForSelectedEventOnSelectedItem = { 0, "ReaMOD_InsertParamEnvelopesForSelectedEventOnSelectedItem", "ReaMOD: Insert parameter envelopes for selected FMOD event on selected media item" };
-    actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem = plugin_register("custom_action", &actionInsertParamEnvelopesForSelectedEventOnSelectedItem);
+    // static custom_action_register_t actionInsertParamEnvelopesForSelectedEventOnSelectedItem = { 0, "ReaMOD_InsertParamEnvelopesForSelectedEventOnSelectedItem", "ReaMOD: Insert parameter envelopes for selected FMOD event on selected media item" };
+    // actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem = plugin_register("custom_action", &actionInsertParamEnvelopesForSelectedEventOnSelectedItem);
 
-    static custom_action_register_t actionToggleDebugOnOff = { 0, "ReaMOD_ToggleDebugMessagesOnOff", "ReaMOD: Toggle posting debug messages on/off." };
-    actionIDToggleDebugOnOff = plugin_register("custom_action", &actionToggleDebugOnOff);
+    // static custom_action_register_t actionToggleDebugOnOff = { 0, "ReaMOD_ToggleDebugMessagesOnOff", "ReaMOD: Toggle posting debug messages on/off." };
+    // actionIDToggleDebugOnOff = plugin_register("custom_action", &actionToggleDebugOnOff);
 
 }
 
