@@ -2875,7 +2875,7 @@ void EnsureReaMODFontsLoaded() {
     static bool reportedBoldMissing = false;
 
     if (!reaMODRegularFont) {
-        reaMODRegularFont = LoadReaMODFont(fontsDir, "Roboto-Regular.ttf", 10);
+        reaMODRegularFont = LoadReaMODFont(fontsDir, "Roboto-Light.ttf", 10);
         if (!reaMODRegularFont && !reportedRegularMissing) {
             DebugMsg("Roboto-Regular.ttf could not be loaded; using ImGui's default font.\n");
             reportedRegularMissing = true;
@@ -2891,7 +2891,7 @@ void EnsureReaMODFontsLoaded() {
     }
 
     if (!reaMODBoldFont) {
-        reaMODBoldFont = LoadReaMODFont(fontsDir, "Roboto-Bold.ttf", 17);
+        reaMODBoldFont = LoadReaMODFont(fontsDir, "Roboto-Black.ttf", 17);
         if (!reaMODBoldFont && !reportedBoldMissing) {
             DebugMsg("Roboto-Bold.ttf could not be loaded; headings will use the regular font.\n");
             reportedBoldMissing = true;
