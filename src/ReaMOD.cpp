@@ -3294,8 +3294,8 @@ void UpdateEventPlayStates() {
 
 void MonitorPlayback() {
     if (!IsFMODInitialized()) {
-        DebugMsg("FMOD system is not initialized. Skipping playback monitoring.\n");
-        DebugMesg("Attempting to re-initialize FMOD...");
+        DebugMsg("FMOD system is not initialized.\n");
+        DebugMsg("Attempting to re-initialize FMOD...\n");
         InitializeFMOD();
         return;
     }
