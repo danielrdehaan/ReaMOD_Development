@@ -4,6 +4,8 @@
 #include <cstring>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
+#include <algorithm>
 #include <map>        // Use for storing hierarchical paths
 #include <set>        // Use for sorted folder paths
 #include <filesystem> // C++17 file system operations
@@ -66,6 +68,7 @@ bool searchFmodEventWindowOpen = false;
 std::vector<std::string> masterStringEvents;  // Store event paths from Master.strings.bank
 std::vector<std::string> bank_files; // Store the list of found .bank files and their toggle states
 std::vector<bool> bank_load_states;
+std::vector<std::string> customBankDirectories; // User-defined directories to search for bank files
 std::unordered_map<std::string, FMOD::Studio::Bank*> loaded_banks;  // Map of loaded banks
 std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map of events in each bank
 // std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
@@ -105,6 +108,9 @@ MediaItem* lastSelectedItem = nullptr;
 
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
+
+void RefreshBankFiles();
+void SynchronizeLoadedBanks();
 
 // Define the ParameterInfo struct
 struct ParameterInfo {
@@ -444,6 +450,56 @@ void LoadBank(const std::string& bank_path, bool load_sample_data = true) {
     }
 }
 
+void SynchronizeLoadedBanks() {
+    if (!fmod_system) {
+        return;
+    }
+
+    bool systemNeedsUpdate = false;
+    std::unordered_set<std::string> trackedBanks(bank_files.begin(), bank_files.end());
+
+    for (size_t i = 0; i < bank_files.size(); ++i) {
+        const std::string& bankPath = bank_files[i];
+        bool shouldBeLoaded = bank_load_states[i];
+        auto loadedIt = loaded_banks.find(bankPath);
+
+        if (shouldBeLoaded) {
+            if (loadedIt == loaded_banks.end()) {
+                LoadBank(bankPath);
+                systemNeedsUpdate = true;
+            }
+        } else if (loadedIt != loaded_banks.end()) {
+            FMOD::Studio::Bank* bank = loadedIt->second;
+            if (bank) {
+                bank->unload();
+                systemNeedsUpdate = true;
+            }
+            bank_events.erase(bankPath);
+            loaded_banks.erase(loadedIt);
+        }
+    }
+
+    for (auto it = loaded_banks.begin(); it != loaded_banks.end();) {
+        const std::string& bankPath = it->first;
+        if (trackedBanks.find(bankPath) == trackedBanks.end() &&
+            bankPath.find("Master.strings.bank") == std::string::npos) {
+            FMOD::Studio::Bank* bank = it->second;
+            if (bank) {
+                bank->unload();
+                systemNeedsUpdate = true;
+            }
+            bank_events.erase(bankPath);
+            it = loaded_banks.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (systemNeedsUpdate) {
+        fmod_system->update();
+    }
+}
+
 void UnloadAllBanks() {
     // Iterate over all loaded banks and unload them
     for (auto& bankPair : loaded_banks) {
@@ -466,91 +522,193 @@ void UnloadAllBanks() {
     groupedGlobalParameters.clear();
 }
 
-// Function to find all .bank files in the "Build/Desktop/" directory relative to the selected .fspro file
-void FindBankFiles(const std::string& fspro_dir) {
-    std::string bank_directory = fspro_dir + "/Build/Desktop/";
+void RefreshBankFiles() {
+    if (!fmod_system) {
+        bank_files.clear();
+        bank_load_states.clear();
+        masterStringEvents.clear();
+        return;
+    }
 
-    // Unload all previously loaded banks
-    UnloadAllBanks();
+    if (customBankDirectories.empty()) {
+        UnloadAllBanks();
+        return;
+    }
 
-    // Temporary vector for holding other bank files
-    std::vector<std::string> other_bank_files;
-    std::string master_bank_file;
+    std::unordered_map<std::string, bool> previousLoadStates;
+    for (size_t i = 0; i < bank_files.size(); ++i) {
+        previousLoadStates[bank_files[i]] = bank_load_states[i];
+    }
 
-    // Check if the bank directory exists
-    if (fs::exists(bank_directory) && fs::is_directory(bank_directory)) {
-        // First pass: Load Master.strings.bank
-        for (const auto& entry : fs::directory_iterator(bank_directory)) {
-            std::string bank_file = entry.path().string();
-            std::string bank_file_name = entry.path().filename().string();
+    std::unordered_set<std::string> seenBanks;
+    std::unordered_set<std::string> seenMasterStrings;
+    std::vector<std::string> masterStringsPaths;
+    std::vector<std::string> masterBanks;
+    std::vector<std::string> otherBanks;
 
-            if (bank_file_name == "Master.strings.bank") {
-                LoadBank(bank_file, false);  // No need to load sample data for strings bank
-                DebugMsg("Loading Master.strings.bank file.\n");
-                // Populate masterStringEvents with event paths
-                FMOD::Studio::Bank* masterStringsBank = loaded_banks[bank_file];
-                if (masterStringsBank) {
-                    int stringCount = 0;
-                    masterStringsBank->getStringCount(&stringCount);
+    for (const std::string& directory : customBankDirectories) {
+        if (directory.empty()) {
+            continue;
+        }
 
+        fs::path dirPath = fs::path(directory);
+        std::error_code dirError;
+        if (!fs::exists(dirPath, dirError) || !fs::is_directory(dirPath, dirError)) {
+            continue;
+        }
+
+        std::vector<fs::directory_entry> entries;
+        dirError.clear();
+        fs::directory_iterator dirIt(dirPath, dirError);
+        for (; !dirError && dirIt != fs::directory_iterator(); dirIt.increment(dirError)) {
+            entries.push_back(*dirIt);
+        }
+
+        if (dirError) {
+            continue;
+        }
+
+        for (const auto& entry : entries) {
+            std::error_code entryError;
+            if (!entry.is_regular_file(entryError) || entryError) {
+                continue;
+            }
+
+            if (entry.path().filename() == "Master.strings.bank") {
+                std::string normalizedPath = entry.path().lexically_normal().string();
+                if (seenMasterStrings.insert(normalizedPath).second) {
+                    masterStringsPaths.push_back(normalizedPath);
+                }
+            }
+        }
+
+        for (const auto& entry : entries) {
+            std::error_code entryError;
+            if (!entry.is_regular_file(entryError) || entryError) {
+                continue;
+            }
+
+            if (entry.path().filename() == "Master.bank") {
+                std::string normalizedPath = entry.path().lexically_normal().string();
+                if (seenBanks.insert(normalizedPath).second) {
+                    masterBanks.push_back(normalizedPath);
+                }
+            }
+        }
+
+        std::vector<std::string> localOtherBanks;
+        for (const auto& entry : entries) {
+            std::error_code entryError;
+            if (!entry.is_regular_file(entryError) || entryError) {
+                continue;
+            }
+
+            if (entry.path().extension() == ".bank") {
+                std::string fileName = entry.path().filename().string();
+                if (fileName == "Master.bank" || fileName == "Master.strings.bank") {
+                    continue;
+                }
+
+                std::string normalizedPath = entry.path().lexically_normal().string();
+                if (seenBanks.insert(normalizedPath).second) {
+                    localOtherBanks.push_back(normalizedPath);
+                }
+            }
+        }
+
+        std::sort(localOtherBanks.begin(), localOtherBanks.end());
+        otherBanks.insert(otherBanks.end(), localOtherBanks.begin(), localOtherBanks.end());
+    }
+
+    std::unordered_set<std::string> banksToKeep(masterBanks.begin(), masterBanks.end());
+    banksToKeep.insert(otherBanks.begin(), otherBanks.end());
+    std::unordered_set<std::string> masterStringsToKeep(masterStringsPaths.begin(), masterStringsPaths.end());
+
+    bool unloadedAny = false;
+    for (auto it = loaded_banks.begin(); it != loaded_banks.end();) {
+        const std::string& path = it->first;
+        if (banksToKeep.find(path) == banksToKeep.end() &&
+            masterStringsToKeep.find(path) == masterStringsToKeep.end()) {
+            FMOD::Studio::Bank* bank = it->second;
+            if (bank) {
+                bank->unload();
+                unloadedAny = true;
+            }
+            bank_events.erase(path);
+            it = loaded_banks.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (unloadedAny && fmod_system) {
+        fmod_system->update();
+    }
+
+    masterStringEvents.clear();
+    for (const std::string& masterStringsPath : masterStringsPaths) {
+        if (loaded_banks.find(masterStringsPath) == loaded_banks.end()) {
+            LoadBank(masterStringsPath, false);
+        }
+
+        auto bankIt = loaded_banks.find(masterStringsPath);
+        if (bankIt != loaded_banks.end()) {
+            FMOD::Studio::Bank* masterStringsBank = bankIt->second;
+            if (masterStringsBank) {
+                int stringCount = 0;
+                if (masterStringsBank->getStringCount(&stringCount) == FMOD_OK) {
                     for (int i = 0; i < stringCount; ++i) {
-                        char path[512];  // Buffer for event path
+                        char path[512];
                         FMOD_GUID guid;
-
-                        FMOD_RESULT result = masterStringsBank->getStringInfo(i, &guid, path, sizeof(path), nullptr);
-                        if (result == FMOD_OK) {
-                            masterStringEvents.push_back(path);  // Add event path
+                        if (masterStringsBank->getStringInfo(i, &guid, path, sizeof(path), nullptr) == FMOD_OK) {
+                            masterStringEvents.push_back(path);
                         }
                     }
                 }
             }
         }
-
-        // Second pass: Find Master.bank and store it separately
-        for (const auto& entry : fs::directory_iterator(bank_directory)) {
-            std::string bank_file = entry.path().string();
-            std::string bank_file_name = entry.path().filename().string();
-
-            if (bank_file_name == "Master.bank") {
-                master_bank_file = bank_file;  // Store Master.bank path
-                LoadBank(master_bank_file, true);  // Always load sample data for Master bank
-                DebugMsg("Found Master.bank file.\n");
-            }
-        }
-
-        // Third pass: Add remaining bank files to the list
-        for (const auto& entry : fs::directory_iterator(bank_directory)) {
-            std::string bank_file = entry.path().string();
-            std::string bank_file_name = entry.path().filename().string();
-
-            // Skip Master.strings.bank and Master.bank as they are already processed
-            if (bank_file_name == "Master.strings.bank" || bank_file_name == "Master.bank") {
-                continue;
-            }
-
-            // Add other .bank files to the temporary list
-            if (entry.path().extension() == ".bank") {
-                other_bank_files.push_back(bank_file);
-                DebugMsg("Adding %s to temporary bank list.\n", bank_file.c_str());
-            }
-        }
-
-        // Sort the other bank files alphabetically
-        std::sort(other_bank_files.begin(), other_bank_files.end());
-
-        // Add Master.bank to the beginning of the list if it exists
-        if (!master_bank_file.empty()) {
-            bank_files.push_back(master_bank_file);
-            bank_load_states.push_back(true);  // Mark as loaded by default
-            DebugMsg("Adding Master.bank to the bank list.\n");
-        }
-
-        // Add the sorted other bank files to the main list
-        for (const auto& bank_file : other_bank_files) {
-            bank_files.push_back(bank_file);
-            bank_load_states.push_back(false);  // Mark as not loaded by default
-        }
     }
+
+    std::sort(masterStringEvents.begin(), masterStringEvents.end());
+    masterStringEvents.erase(std::unique(masterStringEvents.begin(), masterStringEvents.end()), masterStringEvents.end());
+
+    bank_files.clear();
+    bank_load_states.clear();
+
+    for (const std::string& bankPath : masterBanks) {
+        bool shouldLoad = true;
+        auto previousIt = previousLoadStates.find(bankPath);
+        if (previousIt != previousLoadStates.end()) {
+            shouldLoad = previousIt->second;
+        }
+
+        bank_files.push_back(bankPath);
+        bank_load_states.push_back(shouldLoad);
+    }
+
+    for (const std::string& bankPath : otherBanks) {
+        bool shouldLoad = false;
+        auto previousIt = previousLoadStates.find(bankPath);
+        if (previousIt != previousLoadStates.end()) {
+            shouldLoad = previousIt->second;
+        }
+
+        bank_files.push_back(bankPath);
+        bank_load_states.push_back(shouldLoad);
+    }
+
+    SynchronizeLoadedBanks();
+}
+
+// Function to find all .bank files in the "Build/Desktop/" directory relative to the selected .fspro file
+void FindBankFiles(const std::string& fspro_dir) {
+    customBankDirectories.clear();
+    if (!fspro_dir.empty()) {
+        fs::path bankDirectory = fs::path(fspro_dir) / "Build" / "Desktop";
+        customBankDirectories.push_back(bankDirectory.lexically_normal().string());
+    }
+
+    RefreshBankFiles();
 }
 
 // Function to open the file dialog and extract file name
@@ -577,6 +735,7 @@ void OpenFileDialog() {
         // Extract the file name and copy it into selected_file_name
         std::string file_name = file_path.substr(pos + 1);
         std::strncpy(selected_file_name, file_name.c_str(), FILE_PATH_BUFFER_SIZE - 1);
+        selected_file_name[FILE_PATH_BUFFER_SIZE - 1] = '\0';
 
         // Extract the directory of the .fspro file
         std::string fspro_directory = file_path.substr(0, pos);
@@ -2258,6 +2417,12 @@ void SaveStateToFile(const std::string& filePath = "") {
     // Sort other bank files
     std::sort(other_banks.begin(), other_banks.end());
 
+    outFile << "<bank_directories>\n";
+    for (const auto& directory : customBankDirectories) {
+        outFile << "bank_directory=" << directory << "\n";
+    }
+    outFile << "</bank_directories>\n";
+
     outFile << "<bank_files>\n";
 
     // Write Master.bank first if it exists
@@ -2313,7 +2478,6 @@ void LoadStateFromFile(const std::string& filePath) {
         return;
     }
 
-    // Unload all currently loaded banks to prevent conflicts
     UnloadAllBanks();
 
     std::ifstream inFile(filePath);
@@ -2322,212 +2486,191 @@ void LoadStateFromFile(const std::string& filePath) {
         return;
     }
 
-    // Clear the current state to avoid duplication
     bank_files.clear();
     bank_load_states.clear();
     bank_events.clear();
     loaded_banks.clear();
+    masterStringEvents.clear();
     std::strncpy(selected_file_name, "No project selected.", FILE_PATH_BUFFER_SIZE - 1);
 
     std::string line;
     std::string fsproDirectory;
-    bool masterStringsBankLoaded = false;
-    std::vector<std::string> other_bank_files;
-    std::vector<bool> other_bank_load_states;
-    std::string master_bank_file;
-    bool master_bank_loaded = false;
+    std::unordered_map<std::string, bool> savedBankStates;
+    std::vector<std::string> parsedDirectories;
 
     while (std::getline(inFile, line)) {
-        // Trim leading and trailing whitespace from line
         line = TrimString(line);
-
         if (line.empty()) {
-            continue; // Skip empty lines
+            continue;
         }
 
-        if (line == "<bank_files>") {
-            // Parse bank files section
+        if (line == "<bank_directories>") {
             while (std::getline(inFile, line)) {
                 line = TrimString(line);
                 if (line.empty()) {
-                    continue; // Skip empty lines
+                    continue;
+                }
+                if (line == "</bank_directories>") {
+                    break;
+                }
+
+                size_t equalsPos = line.find('=');
+                if (equalsPos == std::string::npos) {
+                    DebugMsg("Error: Invalid line in bank_directories section: %s\n", line.c_str());
+                    continue;
+                }
+
+                std::string key = line.substr(0, equalsPos);
+                std::string value = line.substr(equalsPos + 1);
+
+                if (key == "bank_directory") {
+                    std::string normalizedDir = fs::path(value).lexically_normal().string();
+                    if (std::find(parsedDirectories.begin(), parsedDirectories.end(), normalizedDir) == parsedDirectories.end()) {
+                        parsedDirectories.push_back(normalizedDir);
+                    }
+                } else {
+                    DebugMsg("Error: Unexpected key in bank_directories section: %s\n", key.c_str());
+                }
+            }
+            continue;
+        }
+
+        if (line == "<bank_files>") {
+            while (std::getline(inFile, line)) {
+                line = TrimString(line);
+                if (line.empty()) {
+                    continue;
                 }
                 if (line == "</bank_files>") {
-                    break; // End of bank_files section
+                    break;
                 }
 
                 size_t equalsPos = line.find('=');
                 if (equalsPos == std::string::npos) {
                     DebugMsg("Error: Invalid line in bank_files section: %s\n", line.c_str());
-                    continue; // Skip invalid lines
+                    continue;
                 }
 
                 std::string key = line.substr(0, equalsPos);
                 std::string value = line.substr(equalsPos + 1);
 
                 if (key == "bank_file") {
-                    std::string bank_file = value;
+                    std::string bankPath = fs::path(value).lexically_normal().string();
 
-                    // Read the next non-empty line for load_state
-                    while (std::getline(inFile, line) && TrimString(line).empty()) {
-                        // Skip empty lines
+                    std::string stateLine;
+                    while (std::getline(inFile, stateLine) && TrimString(stateLine).empty()) {
                     }
 
                     if (inFile.eof()) {
-                        DebugMsg("Error: Unexpected end of file after bank_file in .ReaMOD file.\n");
-                        break; // Handle error as needed
+                        DebugMsg("Error: Unexpected end of file after bank_file entry.\n");
+                        break;
                     }
 
-                    line = TrimString(line);
-
-                    size_t equalsPos = line.find('=');
-                    if (equalsPos == std::string::npos) {
-                        DebugMsg("Error: Invalid line in bank_files section: %s\n", line.c_str());
-                        continue; // Skip invalid lines
+                    stateLine = TrimString(stateLine);
+                    size_t stateEquals = stateLine.find('=');
+                    if (stateEquals == std::string::npos) {
+                        DebugMsg("Error: Invalid load_state entry: %s\n", stateLine.c_str());
+                        continue;
                     }
 
-                    std::string key = line.substr(0, equalsPos);
-                    std::string value = line.substr(equalsPos + 1);
+                    std::string stateKey = stateLine.substr(0, stateEquals);
+                    std::string stateValue = stateLine.substr(stateEquals + 1);
 
-                    if (key == "load_state") {
-                        bool load_state = false;
+                    if (stateKey == "load_state") {
                         try {
-                            load_state = (std::stoi(value) != 0);
+                            bool loadState = (std::stoi(stateValue) != 0);
+                            savedBankStates[bankPath] = loadState;
+                            DebugMsg("Loaded bank_file: %s, load_state: %d\n", bankPath.c_str(), loadState);
                         } catch (const std::exception& e) {
                             DebugMsg("Error parsing load_state value: %s\n", e.what());
-                            continue; // Skip invalid entries
                         }
-
-                        if (bank_file.find("Master.bank") != std::string::npos) {
-                            master_bank_file = bank_file;
-                            master_bank_loaded = load_state;
-                        } else {
-                            other_bank_files.push_back(bank_file);
-                            other_bank_load_states.push_back(load_state);
-                        }
-
-                        DebugMsg("Loaded bank_file: %s, load_state: %d\n", bank_file.c_str(), load_state);
                     } else {
-                        DebugMsg("Error: Expected load_state after bank_file in .ReaMOD file.\n");
-                        continue; // Skip invalid entries
+                        DebugMsg("Error: Expected load_state after bank_file entry.\n");
                     }
                 } else {
                     DebugMsg("Error: Unexpected key in bank_files section: %s\n", key.c_str());
-                    continue; // Skip invalid entries
                 }
             }
-        } else {
-            // General key=value parsing
-            size_t equalsPos = line.find('=');
-            if (equalsPos == std::string::npos) {
-                DebugMsg("Error: Invalid line in .ReaMOD file: %s\n", line.c_str());
-                continue; // Skip invalid lines
-            }
+            continue;
+        }
 
-            std::string key = line.substr(0, equalsPos);
-            std::string value = line.substr(equalsPos + 1);
+        size_t equalsPos = line.find('=');
+        if (equalsPos == std::string::npos) {
+            DebugMsg("Error: Invalid line in .ReaMOD file: %s\n", line.c_str());
+            continue;
+        }
 
-            // Now process key and value
-            try {
-                if (key == "fspro_file") {
-                    // Process fspro_file
-                    std::strncpy(selected_file_path, value.c_str(), FILE_PATH_BUFFER_SIZE - 1);
-                    selected_file_path[FILE_PATH_BUFFER_SIZE - 1] = '\0';
-                    DebugMsg("Loaded fspro_file: %s\n", selected_file_path);
+        std::string key = line.substr(0, equalsPos);
+        std::string value = line.substr(equalsPos + 1);
 
-                    std::string file_path(selected_file_path);
-                    size_t last_slash_pos = file_path.find_last_of("/\\");
+        try {
+            if (key == "fspro_file") {
+                std::strncpy(selected_file_path, value.c_str(), FILE_PATH_BUFFER_SIZE - 1);
+                selected_file_path[FILE_PATH_BUFFER_SIZE - 1] = '\0';
+                DebugMsg("Loaded fspro_file: %s\n", selected_file_path);
+
+                std::string file_path(selected_file_path);
+                size_t last_slash_pos = file_path.find_last_of("/\\");
+                if (last_slash_pos != std::string::npos) {
                     std::string file_name = file_path.substr(last_slash_pos + 1);
                     std::strncpy(selected_file_name, file_name.c_str(), FILE_PATH_BUFFER_SIZE - 1);
+                    selected_file_name[FILE_PATH_BUFFER_SIZE - 1] = '\0';
                     fsproDirectory = file_path.substr(0, last_slash_pos);
-
-                    std::string masterStringsBankPath = fsproDirectory + "/Build/Desktop/Master.strings.bank";
-                    if (fs::exists(masterStringsBankPath)) {
-                        LoadBank(masterStringsBankPath, false);
-                        masterStringsBankLoaded = true;
-                        DebugMsg("Master.strings.bank loaded from: %s\n", masterStringsBankPath.c_str());
-                    } else {
-                        DebugMsg("Master.strings.bank not found in: %s\n", masterStringsBankPath.c_str());
-                    }
-                } else if (key == "lookahead_time_ms") {
-                    lookAheadTimeMs = std::stoi(value);
-                    DebugMsg("Loaded lookahead_time_ms: %d\n", lookAheadTimeMs);
-                } else if (key == "move_cursor_after_insert") {
-                    moveCursorAfterInsert = (std::stoi(value) != 0);
-                    DebugMsg("Loaded move_cursor_after_insert: %d\n", moveCursorAfterInsert);
-                } else if (key == "num_frames_for_item") {
-                    numFramesForItem = std::stoi(value);
-                    DebugMsg("Loaded num_frames_for_item: %d\n", numFramesForItem);
-                } else if (key == "item_sync_selection") {
-                    syncSelectedEventWithItemSelection = (std::stoi(value) != 0);
-                    DebugMsg("Loaded item_sync_selection: %d\n", syncSelectedEventWithItemSelection);
-                } else if (key == "update_item_insertion_length_from_last_time_selection") {
-                    updateItemInsertionLength = (std::stoi(value) != 0);
-                    DebugMsg("Loaded update_item_insertion_length: %d\n", updateItemInsertionLength);
                 } else {
-                    DebugMsg("Error: Unknown key in .ReaMOD file: %s\n", key.c_str());
-                    continue; // Skip unknown keys
+                    std::strncpy(selected_file_name, file_path.c_str(), FILE_PATH_BUFFER_SIZE - 1);
+                    selected_file_name[FILE_PATH_BUFFER_SIZE - 1] = '\0';
+                    fsproDirectory.clear();
                 }
-            } catch (const std::exception& e) {
-                DebugMsg("Error parsing value for key %s: %s\n", key.c_str(), e.what());
-                continue; // Skip invalid entries
+                fmodProjectDirectory = fsproDirectory;
+            } else if (key == "lookahead_time_ms") {
+                lookAheadTimeMs = std::stoi(value);
+                DebugMsg("Loaded lookahead_time_ms: %d\n", lookAheadTimeMs);
+            } else if (key == "move_cursor_after_insert") {
+                moveCursorAfterInsert = (std::stoi(value) != 0);
+                DebugMsg("Loaded move_cursor_after_insert: %d\n", moveCursorAfterInsert);
+            } else if (key == "num_frames_for_item") {
+                numFramesForItem = std::stoi(value);
+                DebugMsg("Loaded num_frames_for_item: %d\n", numFramesForItem);
+            } else if (key == "item_sync_selection") {
+                syncSelectedEventWithItemSelection = (std::stoi(value) != 0);
+                DebugMsg("Loaded item_sync_selection: %d\n", syncSelectedEventWithItemSelection);
+            } else if (key == "update_item_insertion_length_from_last_time_selection") {
+                updateItemInsertionLength = (std::stoi(value) != 0);
+                DebugMsg("Loaded update_item_insertion_length: %d\n", updateItemInsertionLength);
+            } else {
+                DebugMsg("Error: Unknown key in .ReaMOD file: %s\n", key.c_str());
             }
+        } catch (const std::exception& e) {
+            DebugMsg("Error parsing value for key %s: %s\n", key.c_str(), e.what());
         }
     }
 
     inFile.close();
 
-    // Ensure that other_bank_files and other_bank_load_states have the same size
-    if (other_bank_files.size() != other_bank_load_states.size()) {
-        DebugMsg("Error: Mismatch in bank files and load states count.\n");
-        return; // Handle error as needed
+    if (parsedDirectories.empty() && !fsproDirectory.empty()) {
+        fs::path defaultDir = fs::path(fsproDirectory) / "Build" / "Desktop";
+        parsedDirectories.push_back(defaultDir.lexically_normal().string());
     }
 
-    // Sort and manage the bank files
-    std::vector<std::pair<std::string, bool>> sorted_banks;
-    for (size_t i = 0; i < other_bank_files.size(); ++i) {
-        sorted_banks.emplace_back(other_bank_files[i], other_bank_load_states[i]);
-    }
-    std::sort(sorted_banks.begin(), sorted_banks.end());
+    customBankDirectories = parsedDirectories;
 
-    if (!master_bank_file.empty()) {
-        bank_files.push_back(master_bank_file);
-        bank_load_states.push_back(master_bank_loaded);
-        DebugMsg("Adding Master.bank to the bank list.\n");
-    }
+    RefreshBankFiles();
 
-    for (const auto& bank_pair : sorted_banks) {
-        bank_files.push_back(bank_pair.first);
-        bank_load_states.push_back(bank_pair.second);
-    }
-
-    // Verify that bank_files and bank_load_states have the same size
-    if (bank_files.size() != bank_load_states.size()) {
-        DebugMsg("Error: bank_files and bank_load_states have mismatched sizes: %zu vs %zu\n",
-                 bank_files.size(), bank_load_states.size());
-        return; // Handle error as needed
-    }
-
-    // Debug messages to verify bank files and load states
-    DebugMsg("Total bank_files parsed: %zu\n", bank_files.size());
-    DebugMsg("Total bank_load_states parsed: %zu\n", bank_load_states.size());
-    for (size_t i = 0; i < bank_files.size(); ++i) {
-        DebugMsg("Bank file: %s, Load state: %d\n", bank_files[i].c_str(), bank_load_states[i]);
-    }
-
-    // Load the banks according to their load states
-    for (size_t i = 0; i < bank_files.size(); ++i) {
-        if (bank_load_states[i] && bank_files[i].find("Master.strings.bank") == std::string::npos) {
-            LoadBank(bank_files[i]);
+    if (!savedBankStates.empty()) {
+        for (size_t i = 0; i < bank_files.size(); ++i) {
+            auto it = savedBankStates.find(bank_files[i]);
+            if (it != savedBankStates.end()) {
+                bank_load_states[i] = it->second;
+            }
         }
     }
 
+    SynchronizeLoadedBanks();
+
     DebugMsg("State loaded from file: %s\n", filePath.c_str());
 
-    // Update the displayed file name
     currentDisplayedFileName = getReaMODFileName(filePath);
 
-    // Get the last modification time and format it
     std::error_code ec;
     auto ftime = fs::last_write_time(filePath, ec);
     if (!ec) {
@@ -2542,7 +2685,6 @@ void LoadStateFromFile(const std::string& filePath) {
         formattedLastSaveTimestamp.clear();
     }
 
-    // Retrieve global parameters after loading banks
     RetrieveGlobalParameters();
 }
 
@@ -2908,84 +3050,151 @@ void RenderGUI() {
         ImGui::Text(reaMOD_Main_ImGui_Context, selected_file_name);
         ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
-        // List the .bank files found in the "Build/Desktop/" directory
-        if (!bank_files.empty()) {
-            // ImGui::Separator(reaMOD_Main_ImGui_Context);  // Add a separator line
-            ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "FMOD Bank Files:");
+        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "FMOD Bank Files:");
 
+        ImGui::Text(reaMOD_Main_ImGui_Context, "Search directories:");
+        bool directoryListChanged = false;
+        if (customBankDirectories.empty()) {
+            ImGui::Text(reaMOD_Main_ImGui_Context, "No directories selected.");
+        } else {
+            for (size_t i = 0; i < customBankDirectories.size(); ++i) {
+                std::string displayPath = customBankDirectories[i];
+                std::error_code dirError;
+                bool directoryExists = fs::exists(displayPath, dirError);
+                bool isDirectory = false;
+                if (!dirError && directoryExists) {
+                    dirError.clear();
+                    isDirectory = fs::is_directory(displayPath, dirError);
+                }
+                if (!directoryExists || dirError || !isDirectory) {
+                    displayPath += " (missing)";
+                }
+
+                ImGui::Text(reaMOD_Main_ImGui_Context, displayPath.c_str());
+
+                std::string removeLabel = "Remove##BankDir" + std::to_string(i);
+                std::string upLabel = "Up##BankDir" + std::to_string(i);
+                std::string downLabel = "Down##BankDir" + std::to_string(i);
+
+                ImGui::SameLine(reaMOD_Main_ImGui_Context);
+                if (ImGui::Button(reaMOD_Main_ImGui_Context, removeLabel.c_str())) {
+                    customBankDirectories.erase(customBankDirectories.begin() + i);
+                    directoryListChanged = true;
+                    break;
+                }
+
+                if (i > 0) {
+                    ImGui::SameLine(reaMOD_Main_ImGui_Context);
+                    if (ImGui::Button(reaMOD_Main_ImGui_Context, upLabel.c_str())) {
+                        std::swap(customBankDirectories[i], customBankDirectories[i - 1]);
+                        directoryListChanged = true;
+                        break;
+                    }
+                }
+
+                if (i + 1 < customBankDirectories.size()) {
+                    ImGui::SameLine(reaMOD_Main_ImGui_Context);
+                    if (ImGui::Button(reaMOD_Main_ImGui_Context, downLabel.c_str())) {
+                        std::swap(customBankDirectories[i], customBankDirectories[i + 1]);
+                        directoryListChanged = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (directoryListChanged) {
+            RefreshBankFiles();
+        }
+
+        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Add directory...")) {
+            const char* defaultPath = nullptr;
+            if (!customBankDirectories.empty()) {
+                defaultPath = customBankDirectories.back().c_str();
+            } else if (!fmodProjectDirectory.empty()) {
+                defaultPath = fmodProjectDirectory.c_str();
+            }
+
+            const char* selectedPath = tinyfd_selectFolderDialog("Select FMOD bank directory", defaultPath);
+            if (selectedPath) {
+                std::string normalizedPath = fs::path(selectedPath).lexically_normal().string();
+                if (std::find(customBankDirectories.begin(), customBankDirectories.end(), normalizedPath) == customBankDirectories.end()) {
+                    customBankDirectories.push_back(normalizedPath);
+                    RefreshBankFiles();
+                }
+            }
+        }
+        ImGui::SameLine(reaMOD_Main_ImGui_Context);
+        if (ImGui::Button(reaMOD_Main_ImGui_Context, "Rescan")) {
+            RefreshBankFiles();
+        }
+
+        ImGui::Text(reaMOD_Main_ImGui_Context, "");
+
+        if (!bank_files.empty()) {
             for (size_t i = 0; i < bank_files.size(); ++i) {
                 std::string bank_file_name = RemoveBankExtension(fs::path(bank_files[i]).filename().string());
                 std::string button_label = bank_load_states[i] ? "Unload##" + std::to_string(i) : "Load##" + std::to_string(i);
 
-                // Render the toggle button for loading/unloading the bank on the left
                 if (ImGui::Button(reaMOD_Main_ImGui_Context, button_label.c_str())) {
                     if (bank_load_states[i]) {
-                        // If unloading, unload the bank and clear the events
-                        loaded_banks[bank_files[i]]->unload();
-                        loaded_banks.erase(bank_files[i]);
+                        auto loadedIt = loaded_banks.find(bank_files[i]);
+                        if (loadedIt != loaded_banks.end() && loadedIt->second) {
+                            loadedIt->second->unload();
+                            loaded_banks.erase(loadedIt);
+                        }
                         bank_events.erase(bank_files[i]);
+                        fmod_system->update();
                     } else {
-                        // If loading, load the bank and retrieve its events
                         LoadBank(bank_files[i]);
                     }
-                    bank_load_states[i] = !bank_load_states[i];  // Toggle the load state
+                    bank_load_states[i] = !bank_load_states[i];
                 }
 
-                ImGui::SameLine(reaMOD_Main_ImGui_Context);  // Place the text on the same line as the button
+                ImGui::SameLine(reaMOD_Main_ImGui_Context);
 
-                // Display the bank file name as a collapsible tree node
                 if (ImGui::TreeNode(reaMOD_Main_ImGui_Context, bank_file_name.c_str())) {
-                    // If the bank is loaded, display its events grouped by "Events" and "Snapshots"
                     if (bank_load_states[i]) {
                         if (bank_events.find(bank_files[i]) != bank_events.end()) {
                             const std::vector<std::string>& events = bank_events[bank_files[i]];
                             auto grouped_folders = GroupEventsAndSnapshotsByPath(events);
 
-                            // Iterate over "Events" and "Snapshots"
                             for (const auto& folder_type : grouped_folders) {
-                                if (ImGui::TreeNode(reaMOD_Main_ImGui_Context, folder_type.first.c_str())) {  // "Events" or "Snapshots"
-                                    // First, display top-level events/snapshots (with an empty folder name)
+                                if (ImGui::TreeNode(reaMOD_Main_ImGui_Context, folder_type.first.c_str())) {
                                     auto top_level_folder = folder_type.second.find("");
                                     if (top_level_folder != folder_type.second.end()) {
                                         for (const auto& event_pair : top_level_folder->second) {
-                                            // Render the play button next to the selectable event
                                             std::string event_label = "Play##" + event_pair.first;
                                             RenderPlayButton(reaMOD_Main_ImGui_Context, event_label, event_pair.second);
 
-                                            ImGui::SameLine(reaMOD_Main_ImGui_Context);  // Keep play button on the same line
+                                            ImGui::SameLine(reaMOD_Main_ImGui_Context);
 
-                                            // Highlight the selected event
                                             bool isSelected = (selectedFMODEvent == event_pair.second);
 
-                                            // Pass the address of isSelected to ImGui::Selectable
                                             if (ImGui::Selectable(reaMOD_Main_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
-                                                selectedFMODEvent = event_pair.second;  // Update selected event
-                                                UpdateSelectedEventParameters(selectedFMODEvent);        // Call this function here
+                                                selectedFMODEvent = event_pair.second;
+                                                UpdateSelectedEventParameters(selectedFMODEvent);
                                                 DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
                                             }
                                         }
                                     }
 
-                                    // Then display events/snapshots grouped by their folders
                                     for (const auto& folder : folder_type.second) {
                                         if (folder.first.empty()) {
-                                            continue; // Skip top-level, already handled
+                                            continue;
                                         }
                                         if (ImGui::TreeNode(reaMOD_Main_ImGui_Context, folder.first.c_str())) {
                                             for (const auto& event_pair : folder.second) {
-                                                // Render the play button next to the selectable event
                                                 std::string event_label = "Play##" + event_pair.second;
                                                 RenderPlayButton(reaMOD_Main_ImGui_Context, event_label, event_pair.second);
 
-                                                ImGui::SameLine(reaMOD_Main_ImGui_Context);  // Keep play button on the same line
+                                                ImGui::SameLine(reaMOD_Main_ImGui_Context);
 
-                                                // Highlight the selected event
                                                 bool isSelected = (selectedFMODEvent == event_pair.second);
 
-                                                // Pass the address of isSelected to ImGui::Selectable
                                                 if (ImGui::Selectable(reaMOD_Main_ImGui_Context, event_pair.first.c_str(), &isSelected)) {
-                                                    selectedFMODEvent = event_pair.second;  // Update selected event
-                                                    UpdateSelectedEventParameters(selectedFMODEvent);        // Call this function here
+                                                    selectedFMODEvent = event_pair.second;
+                                                    UpdateSelectedEventParameters(selectedFMODEvent);
                                                     DebugMsg("FMOD event selected: %s\n", selectedFMODEvent.c_str());
                                                 }
                                             }
@@ -2997,10 +3206,13 @@ void RenderGUI() {
                             }
                         }
                     }
-                    ImGui::TreePop(reaMOD_Main_ImGui_Context);  // End the bank file tree node
+                    ImGui::TreePop(reaMOD_Main_ImGui_Context);
                 }
             }
+        } else {
+            ImGui::Text(reaMOD_Main_ImGui_Context, "No .bank files found in the selected directories.");
         }
+
         ImGui::Text(reaMOD_Main_ImGui_Context, "");
     
 
