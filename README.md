@@ -89,10 +89,10 @@ ReaMOD is a REAPER extension that integrates FMOD functionality. Due to FMOD lic
 
 Notes
 -----
-• macOS Gatekeeper: if macOS blocks the dylib, open System Settings → Privacy & Security and “Allow Anyway”, then restart REAPER. If needed:
-    xattr -dr com.apple.quarantine "REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib"
-• Architecture: use 64-bit REAPER with 64-bit FMOD (Windows x64; macOS universal is supported).
-• Debug FMOD libs (libfmodL.*, fmodL.*) are for development; end users should use the non-L variants.
+- macOS Gatekeeper: if macOS blocks the dylib, open System Settings → Privacy & Security and “Allow Anyway”, then restart REAPER. If needed:
+    `xattr -dr com.apple.quarantine "REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib"`
+- Architecture: use 64-bit REAPER with 64-bit FMOD (Windows x64; macOS universal is supported).
+- Debug FMOD libs (libfmodL.*, fmodL.*) are for development; end users should use the non-L variants.
 
 
 
