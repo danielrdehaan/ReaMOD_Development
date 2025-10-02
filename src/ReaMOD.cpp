@@ -2820,6 +2820,12 @@ std::string LocateReaMODFontsDirectory() {
 
     if (GetResourcePath) {
         fs::path resourcePath(GetResourcePath());
+
+        // Primary installation layout: <resource path>/ReaMOD/resources/fonts/Roboto
+        candidates.emplace_back(resourcePath / "ReaMOD" / "resources" / "fonts" / "Roboto");
+        candidates.emplace_back(resourcePath / "ReaMOD" / "resources" / "fonts" / "roboto");
+
+        // Legacy/script driven layouts
         candidates.emplace_back(resourcePath / "Effects" / "ReaMOD" / "fonts" / "Roboto");
         candidates.emplace_back(resourcePath / "Scripts" / "ReaMOD" / "fonts" / "Roboto");
         candidates.emplace_back(resourcePath / "Data" / "ReaMOD" / "fonts" / "Roboto");
@@ -2835,7 +2841,7 @@ std::string LocateReaMODFontsDirectory() {
     }
 
     if (cachedPath.empty() && !loggedMissingDirectory) {
-        DebugMsg("ReaMOD fonts directory not found. Expected at ReaMOD/fonts/Roboto within the REAPER resource path.\n");
+        DebugMsg("ReaMOD fonts directory not found. Expected at ReaMOD/resources/fonts/Roboto within the REAPER resource path.\n");
         loggedMissingDirectory = true;
     }
 
