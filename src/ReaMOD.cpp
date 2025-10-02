@@ -3236,12 +3236,12 @@ void RenderGUI() {
         ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Update item length from last time-selection insert.", &updateItemInsertionLength);
 
         // Add the checkbox for toggling debug messages in Reaper
-        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Enable Debugs Messages", &debugMessages);
+        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Enable debug messages to be posted to Reaper console", &debugMessages);
 
         ImGui::Separator(reaMOD_Main_ImGui_Context);
         ImGui::Text(reaMOD_Main_ImGui_Context, "ReaMOD v0.1");
         ImGui::Text(reaMOD_Main_ImGui_Context, "Created by Daniel Dehaan");
-        ImGui::Text(reaMOD_Main_ImGui_Context, "www.danielrdehaan.com");
+        ImGui::Text(reaMOD_Main_ImGui_Context, "www.simplesoundtools.com");
 
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
@@ -3295,6 +3295,8 @@ void UpdateEventPlayStates() {
 void MonitorPlayback() {
     if (!IsFMODInitialized()) {
         DebugMsg("FMOD system is not initialized. Skipping playback monitoring.\n");
+        DebugMesg("Attempting to re-initialize FMOD...")
+        InitializeFMOD()
         return;
     }
 
