@@ -18,7 +18,6 @@ env:
 jobs:
   macos-universal:
     runs-on: macos-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -84,7 +83,6 @@ jobs:
 
   windows-x64:
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -103,6 +101,29 @@ jobs:
           if (Test-Path "$env:BUILD_DIR") { Remove-Item -Recurse -Force "$env:BUILD_DIR" }
           if (Test-Path "$env:ARTIFACTS_DIR") { Remove-Item -Recurse -Force "$env:ARTIFACTS_DIR" }
           New-Item -ItemType Directory -Force -Path "$env:ARTIFACTS_DIR" | Out-Null
+
+      # Validate FMOD import libs (x64) at new paths
+      - name: Validate FMOD import libs are x64 (fail early if not)
+        shell: pwsh
+        run: |
+          $core   = Join-Path $PWD.Path "fmod/windows/core/lib/x64/fmod_vc.lib"
+          $studio = Join-Path $PWD.Path "fmod/windows/studio/lib/x64/fmodstudio_vc.lib"
+          if (-not (Test-Path $core) -or -not (Test-Path $studio)) {
+            Write-Error "Missing FMOD import libs at expected x64 paths:`n  $core`n  $studio"
+            exit 2
+          }
+          $dumpbin = "${env:VCToolsInstallDir}bin\Hostx64\x64\dumpbin.exe"
+          if (-not (Test-Path $dumpbin)) {
+            Write-Host "dumpbin.exe not found, skipping machine check (paths exist)."
+            exit 0
+          }
+          $coreOut = & $dumpbin /headers $core 2>$null
+          $studioOut = & $dumpbin /headers $studio 2>$null
+          if (($coreOut -notmatch "machine \(x64\)") -or ($studioOut -notmatch "machine \(x64\)")) {
+            Write-Error "FMOD import libs are not x64. Ensure you are using the Windows Desktop x64 SDK libs."
+            exit 3
+          }
+          Write-Host "FMOD import libs present and x64 ✅"
 
       - name: Configure (CMake, MSVC x64)
         shell: pwsh
@@ -151,7 +172,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [macos-universal, windows-x64]
     if: github.ref == 'refs/heads/Main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-
     steps:
       - name: Compute timestamps (human + tag-safe)
         run: |
