@@ -58,6 +58,8 @@ Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in Sy
 
 3) Provide the FMOD runtime libraries
 
+    - Download the `FMOD Engine 2.03.09` API files for your operating system from www.fmod.com/downloads
+
    macOS
    -----
    - From the FMOD API download, copy **these two files** into the paths below:
