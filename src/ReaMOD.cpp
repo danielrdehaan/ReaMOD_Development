@@ -3276,22 +3276,26 @@ void RenderGUI() {
                     dirError.clear();
                     isDirectory = fs::is_directory(displayPath, dirError);
                 }
-                if (!directoryExists || dirError || !isDirectory) {
+                bool isValidDirectory = directoryExists && !dirError && isDirectory;
+                if (!isValidDirectory) {
                     displayPath += " (missing)";
-                    ImGui::TextColored(reaMOD_Main_ImGui_Context, orange, displayPath.c_str());
-                } else {
-                    ReaMODText(reaMOD_Main_ImGui_Context, displayPath.c_str(), reaMODMediumFont);
                 }
 
                 std::string removeLabel = "Remove##BankDir" + std::to_string(i);
                 std::string upLabel = "Up##BankDir" + std::to_string(i);
                 std::string downLabel = "Down##BankDir" + std::to_string(i);
 
-                ImGui::SameLine(reaMOD_Main_ImGui_Context);
                 if (StyledButton(reaMOD_Main_ImGui_Context, removeLabel)) {
                     customBankDirectories.erase(customBankDirectories.begin() + i);
                     directoryListChanged = true;
                     break;
+                }
+
+                ImGui::SameLine(reaMOD_Main_ImGui_Context);
+                if (!isValidDirectory) {
+                    ImGui::TextColored(reaMOD_Main_ImGui_Context, orange, displayPath.c_str());
+                } else {
+                    ReaMODText(reaMOD_Main_ImGui_Context, displayPath.c_str(), reaMODMediumFont);
                 }
 
                 if (i > 0) {
