@@ -54,16 +54,16 @@ RM = /usr/local/Cellar/cmake/3.30.3/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = "/Applications/Reaper Test/ReaMOD"
+CMAKE_SOURCE_DIR = /Users/danielrdehaan/Documents/GitHub/ReaMOD
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = "/Applications/Reaper Test/ReaMOD/build"
+CMAKE_BINARY_DIR = /Users/danielrdehaan/Documents/GitHub/ReaMOD/build
 
 #=============================================================================
 # Directory level rules for the build root directory
 
 # The main recursive "all" target.
-all: CMakeFiles/reaper_ReaMODPlugin.dir/all
+all: CMakeFiles/reaper_ReaMOD_Plugin.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
@@ -71,34 +71,34 @@ preinstall:
 .PHONY : preinstall
 
 # The main recursive "clean" target.
-clean: CMakeFiles/reaper_ReaMODPlugin.dir/clean
+clean: CMakeFiles/reaper_ReaMOD_Plugin.dir/clean
 .PHONY : clean
 
 #=============================================================================
-# Target rules for target CMakeFiles/reaper_ReaMODPlugin.dir
+# Target rules for target CMakeFiles/reaper_ReaMOD_Plugin.dir
 
 # All Build rule for target.
-CMakeFiles/reaper_ReaMODPlugin.dir/all:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="/Applications/Reaper Test/ReaMOD/build/CMakeFiles" --progress-num=1,2,3 "Built target reaper_ReaMODPlugin"
-.PHONY : CMakeFiles/reaper_ReaMODPlugin.dir/all
+CMakeFiles/reaper_ReaMOD_Plugin.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMOD_Plugin.dir/build.make CMakeFiles/reaper_ReaMOD_Plugin.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMOD_Plugin.dir/build.make CMakeFiles/reaper_ReaMOD_Plugin.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles --progress-num=1,2,3 "Built target reaper_ReaMOD_Plugin"
+.PHONY : CMakeFiles/reaper_ReaMOD_Plugin.dir/all
 
 # Build rule for subdir invocation for target.
-CMakeFiles/reaper_ReaMODPlugin.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start "/Applications/Reaper Test/ReaMOD/build/CMakeFiles" 3
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/reaper_ReaMODPlugin.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start "/Applications/Reaper Test/ReaMOD/build/CMakeFiles" 0
-.PHONY : CMakeFiles/reaper_ReaMODPlugin.dir/rule
+CMakeFiles/reaper_ReaMOD_Plugin.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles 3
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/reaper_ReaMOD_Plugin.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles 0
+.PHONY : CMakeFiles/reaper_ReaMOD_Plugin.dir/rule
 
 # Convenience name for target.
-reaper_ReaMODPlugin: CMakeFiles/reaper_ReaMODPlugin.dir/rule
-.PHONY : reaper_ReaMODPlugin
+reaper_ReaMOD_Plugin: CMakeFiles/reaper_ReaMOD_Plugin.dir/rule
+.PHONY : reaper_ReaMOD_Plugin
 
 # clean rule for target.
-CMakeFiles/reaper_ReaMODPlugin.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/clean
-.PHONY : CMakeFiles/reaper_ReaMODPlugin.dir/clean
+CMakeFiles/reaper_ReaMOD_Plugin.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMOD_Plugin.dir/build.make CMakeFiles/reaper_ReaMOD_Plugin.dir/clean
+.PHONY : CMakeFiles/reaper_ReaMOD_Plugin.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

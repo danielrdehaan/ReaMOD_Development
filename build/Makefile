@@ -57,10 +57,10 @@ RM = /usr/local/Cellar/cmake/3.30.3/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = "/Applications/Reaper Test/ReaMOD"
+CMAKE_SOURCE_DIR = /Users/danielrdehaan/Documents/GitHub/ReaMOD
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = "/Applications/Reaper Test/ReaMOD/build"
+CMAKE_BINARY_DIR = /Users/danielrdehaan/Documents/GitHub/ReaMOD/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,9 +87,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start "/Applications/Reaper Test/ReaMOD/build/CMakeFiles" "/Applications/Reaper Test/ReaMOD/build//CMakeFiles/progress.marks"
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles /Users/danielrdehaan/Documents/GitHub/ReaMOD/build//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start "/Applications/Reaper Test/ReaMOD/build/CMakeFiles" 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/danielrdehaan/Documents/GitHub/ReaMOD/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -117,24 +117,24 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named reaper_ReaMODPlugin
+# Target rules for targets named reaper_ReaMOD_Plugin
 
 # Build rule for target.
-reaper_ReaMODPlugin: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 reaper_ReaMODPlugin
-.PHONY : reaper_ReaMODPlugin
+reaper_ReaMOD_Plugin: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 reaper_ReaMOD_Plugin
+.PHONY : reaper_ReaMOD_Plugin
 
 # fast build rule for target.
-reaper_ReaMODPlugin/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/build
-.PHONY : reaper_ReaMODPlugin/fast
+reaper_ReaMOD_Plugin/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMOD_Plugin.dir/build.make CMakeFiles/reaper_ReaMOD_Plugin.dir/build
+.PHONY : reaper_ReaMOD_Plugin/fast
 
 src/ReaMOD.o: src/ReaMOD.cpp.o
 .PHONY : src/ReaMOD.o
 
 # target to build an object file
 src/ReaMOD.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/src/ReaMOD.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMOD_Plugin.dir/build.make CMakeFiles/reaper_ReaMOD_Plugin.dir/src/ReaMOD.cpp.o
 .PHONY : src/ReaMOD.cpp.o
 
 src/ReaMOD.i: src/ReaMOD.cpp.i
@@ -142,7 +142,7 @@ src/ReaMOD.i: src/ReaMOD.cpp.i
 
 # target to preprocess a source file
 src/ReaMOD.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/src/ReaMOD.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMOD_Plugin.dir/build.make CMakeFiles/reaper_ReaMOD_Plugin.dir/src/ReaMOD.cpp.i
 .PHONY : src/ReaMOD.cpp.i
 
 src/ReaMOD.s: src/ReaMOD.cpp.s
@@ -150,7 +150,7 @@ src/ReaMOD.s: src/ReaMOD.cpp.s
 
 # target to generate assembly for a file
 src/ReaMOD.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/src/ReaMOD.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMOD_Plugin.dir/build.make CMakeFiles/reaper_ReaMOD_Plugin.dir/src/ReaMOD.cpp.s
 .PHONY : src/ReaMOD.cpp.s
 
 tinyfiledialogs/tinyfiledialogs.o: tinyfiledialogs/tinyfiledialogs.c.o
@@ -158,7 +158,7 @@ tinyfiledialogs/tinyfiledialogs.o: tinyfiledialogs/tinyfiledialogs.c.o
 
 # target to build an object file
 tinyfiledialogs/tinyfiledialogs.c.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/tinyfiledialogs/tinyfiledialogs.c.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMOD_Plugin.dir/build.make CMakeFiles/reaper_ReaMOD_Plugin.dir/tinyfiledialogs/tinyfiledialogs.c.o
 .PHONY : tinyfiledialogs/tinyfiledialogs.c.o
 
 tinyfiledialogs/tinyfiledialogs.i: tinyfiledialogs/tinyfiledialogs.c.i
@@ -166,7 +166,7 @@ tinyfiledialogs/tinyfiledialogs.i: tinyfiledialogs/tinyfiledialogs.c.i
 
 # target to preprocess a source file
 tinyfiledialogs/tinyfiledialogs.c.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/tinyfiledialogs/tinyfiledialogs.c.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMOD_Plugin.dir/build.make CMakeFiles/reaper_ReaMOD_Plugin.dir/tinyfiledialogs/tinyfiledialogs.c.i
 .PHONY : tinyfiledialogs/tinyfiledialogs.c.i
 
 tinyfiledialogs/tinyfiledialogs.s: tinyfiledialogs/tinyfiledialogs.c.s
@@ -174,7 +174,7 @@ tinyfiledialogs/tinyfiledialogs.s: tinyfiledialogs/tinyfiledialogs.c.s
 
 # target to generate assembly for a file
 tinyfiledialogs/tinyfiledialogs.c.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMODPlugin.dir/build.make CMakeFiles/reaper_ReaMODPlugin.dir/tinyfiledialogs/tinyfiledialogs.c.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/reaper_ReaMOD_Plugin.dir/build.make CMakeFiles/reaper_ReaMOD_Plugin.dir/tinyfiledialogs/tinyfiledialogs.c.s
 .PHONY : tinyfiledialogs/tinyfiledialogs.c.s
 
 # Help Target
@@ -185,7 +185,7 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
-	@echo "... reaper_ReaMODPlugin"
+	@echo "... reaper_ReaMOD_Plugin"
 	@echo "... src/ReaMOD.o"
 	@echo "... src/ReaMOD.i"
 	@echo "... src/ReaMOD.s"
