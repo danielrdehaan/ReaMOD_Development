@@ -2824,11 +2824,6 @@ std::string LocateReaMODFontsDirectory() {
         // Primary installation layout: <resource path>/ReaMOD/resources/fonts/Roboto
         candidates.emplace_back(resourcePath / "ReaMOD" / "resources" / "fonts" / "Roboto");
         candidates.emplace_back(resourcePath / "ReaMOD" / "resources" / "fonts" / "roboto");
-
-        // Legacy/script driven layouts
-        candidates.emplace_back(resourcePath / "Effects" / "ReaMOD" / "fonts" / "Roboto");
-        candidates.emplace_back(resourcePath / "Scripts" / "ReaMOD" / "fonts" / "Roboto");
-        candidates.emplace_back(resourcePath / "Data" / "ReaMOD" / "fonts" / "Roboto");
     }
 
     for (const auto& candidate : candidates) {
@@ -2880,7 +2875,7 @@ void EnsureReaMODFontsLoaded() {
     static bool reportedBoldMissing = false;
 
     if (!reaMODRegularFont) {
-        reaMODRegularFont = LoadReaMODFont(fontsDir, "Roboto-Regular.ttf", 16);
+        reaMODRegularFont = LoadReaMODFont(fontsDir, "Roboto-Regular.ttf", 10);
         if (!reaMODRegularFont && !reportedRegularMissing) {
             DebugMsg("Roboto-Regular.ttf could not be loaded; using ImGui's default font.\n");
             reportedRegularMissing = true;
@@ -2888,7 +2883,7 @@ void EnsureReaMODFontsLoaded() {
     }
 
     if (!reaMODMediumFont) {
-        reaMODMediumFont = LoadReaMODFont(fontsDir, "Roboto-Medium.ttf", 16);
+        reaMODMediumFont = LoadReaMODFont(fontsDir, "Roboto-Medium.ttf", 12);
         if (!reaMODMediumFont && !reportedMediumMissing) {
             DebugMsg("Roboto-Medium.ttf could not be loaded; buttons will use the regular font.\n");
             reportedMediumMissing = true;
@@ -2896,7 +2891,7 @@ void EnsureReaMODFontsLoaded() {
     }
 
     if (!reaMODBoldFont) {
-        reaMODBoldFont = LoadReaMODFont(fontsDir, "Roboto-Bold.ttf", 18);
+        reaMODBoldFont = LoadReaMODFont(fontsDir, "Roboto-Bold.ttf", 17);
         if (!reaMODBoldFont && !reportedBoldMissing) {
             DebugMsg("Roboto-Bold.ttf could not be loaded; headings will use the regular font.\n");
             reportedBoldMissing = true;
