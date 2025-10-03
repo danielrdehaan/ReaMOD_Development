@@ -215,6 +215,11 @@ Assign these actions to keyboard shortcuts or add them to toolbars for quick acc
 - **Move Edit Cursor After Insert**: Toggle whether the edit cursor moves to the end of the inserted item.
 - **Update Item Length from Time Selection**: When inserting items within the time selection, update the item length based on the time selection.
 
+## Recording/Exporting Audio with ReaMOD
+All the audio triggered by ReaMOD does not actually flow through Reaper so there are only two options for capturing the audio stream triggered ny ReaMOD:
+1. Use the "Live Update" feature of FMOD Studio to connect to ReaMOD and then record a new session in FMOD Studio's Profiler window.
+2. Use a screen recording software like OBS to record your system audio.  
+
 ## Notes
 
 - **Track Naming**: The plugin monitors tracks named "FMOD" (case-insensitive) for triggering events based on items.
