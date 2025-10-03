@@ -122,6 +122,7 @@ FMOD::Studio::System* fmod_system = nullptr;
 
 void RefreshBankFiles();
 void SynchronizeLoadedBanks();
+double GetEventLengthSeconds(const std::string& eventPath);
 
 // Define the ParameterInfo struct
 struct ParameterInfo {
