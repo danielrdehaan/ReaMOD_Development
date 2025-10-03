@@ -19,7 +19,7 @@ This REAPER script requires:
 - REAPER 7.20+ (could work with older versions but has not been tested)
 - ReaPack
 - SWS/S&M REAPER extension
-- ReaImGU
+- ReaImGUI
 
 ## FMOD
 
