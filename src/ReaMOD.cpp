@@ -2797,11 +2797,11 @@ std::string FindCommonPrefix(const std::vector<std::string>& strings) {
 }
 
 int greyDark = 0x333333FF;
-int blue = 0x395271FF;
+int blue = 0x6DD0F6FF;
 int orange = 0xFFD700FF;
 int supportButtonBackground = 0x282828FF;
 int supportButtonHovered = 0x949494FF;
-int supportButtonActive = 0x48B2A0FF;
+int supportButtonActive = 0x6DD0F6FF;
 
 std::string LocateReaMODFontsDirectory() {
     static std::string cachedPath;
