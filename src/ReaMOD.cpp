@@ -44,6 +44,7 @@ namespace fs = std::filesystem;  // Alias for easier use of filesystem operation
 static int actionIdOpenCloseReaMODWindow = 0;
 // static int actionIdAddMarkerWithSelectedEvent = 0;
 static int actionIdAddItemWithSelectedEventAtEditCursor = 0;
+static int actionIdAddItemWithSelectedEventAtEditCursorMatchLength = 0;
 static int actionIdAddItemWithSelectedEventWithinTimeSelection = 0;
 static int actionIDUpdateNumFramesForItemInsertionFromCurrentTimeSelection = 0;
 static int actionIDStopAndReleaseAllFmodEventInstances = 0;
@@ -884,6 +885,89 @@ void AddItemWithSelectedEventAtEditCursor() {
 }
 
 
+void AddItemWithSelectedEventAtEditCursorMatchLength() {
+    if (selectedFMODEvent.empty()) {
+        PostMsg("No FMOD event has been triggered yet.\n");
+        return;
+    }
+
+    double cursorPosition = GetCursorPosition();
+
+    MediaTrack* selectedTrack = GetTrack(nullptr, 0); // Assume track 0 if no track is selected
+    int numSelectedTracks = CountTracks(nullptr);
+
+    for (int i = 0; i < numSelectedTracks; ++i) {
+        MediaTrack* track = GetTrack(nullptr, i);
+        if (*(bool*)GetSetMediaTrackInfo(track, "I_SELECTED", nullptr)) {
+            selectedTrack = track;
+            break;
+        }
+    }
+
+    if (!selectedTrack) {
+        PostMsg("No track is selected.\n");
+        return;
+    }
+
+    double itemLength = -1.0;
+    bool usedEventLength = false;
+
+    double eventLengthSeconds = GetEventLengthSeconds(selectedFMODEvent);
+    if (eventLengthSeconds > 0.0) {
+        itemLength = eventLengthSeconds;
+        usedEventLength = true;
+    } else {
+        bool dropFrame = false;
+        double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame);
+        if (frameRate > 0.0) {
+            itemLength = numFramesForItem / frameRate;
+        }
+    }
+
+    if (itemLength <= 0.0) {
+        PostMsg("Unable to determine a valid item length.\n");
+        return;
+    }
+
+    bool loop = false;
+
+    MediaItem* newItem = CreateNewMIDIItemInProj(selectedTrack, cursorPosition, cursorPosition + itemLength, &loop);
+    if (!newItem) {
+        PostMsg("Failed to create a new MIDI item.\n");
+        return;
+    }
+
+    MediaItem_Take* newTake = GetActiveTake(newItem);
+    if (!newTake) {
+        PostMsg("Failed to create a new take for the item.\n");
+        return;
+    }
+
+    GetSetMediaItemTakeInfo_String(newTake, "P_NAME", const_cast<char*>(selectedFMODEvent.c_str()), true);
+
+    std::string itemNotes;
+    for (const auto& param : selectedEventParameters) {
+        itemNotes += "param:" + param.name + "=" + std::to_string(param.currentValue) + "\n";
+    }
+
+    GetSetMediaItemInfo_String(newItem, "P_NOTES", const_cast<char*>(itemNotes.c_str()), true);
+
+    UpdateArrange();
+
+    if (moveCursorAfterInsert) {
+        double newCursorPosition = cursorPosition + itemLength;
+        SetEditCurPos(newCursorPosition, true, false);
+    }
+
+    const char* lengthSource = usedEventLength ? "FMOD event length" : "frame-based fallback length";
+    DebugMsg("MIDI item added at position %.2f with take name: %s (%s, length %.2f seconds)\n",
+             cursorPosition,
+             selectedFMODEvent.c_str(),
+             lengthSource,
+             itemLength);
+}
+
+
 void AddItemWithSelectedEventWithinTimeSelection() {
     if (selectedFMODEvent.empty()) {
         PostMsg("No FMOD event has been triggered yet.\n");
@@ -1146,6 +1230,26 @@ void PlayStopCurrentSelectedEvent() {
         // Event is not playing; start it
         PlayButtonEvent(selectedFMODEvent);
     }
+}
+
+double GetEventLengthSeconds(const std::string& eventPath) {
+    if (!fmod_system || eventPath.empty()) {
+        return -1.0;
+    }
+
+    FMOD::Studio::EventDescription* eventDescription = nullptr;
+    FMOD_RESULT result = fmod_system->getEvent(eventPath.c_str(), &eventDescription);
+    if (result != FMOD_OK || !eventDescription) {
+        return -1.0;
+    }
+
+    int lengthMs = 0;
+    result = eventDescription->getLength(&lengthMs);
+    if (result != FMOD_OK || lengthMs <= 0) {
+        return -1.0;
+    }
+
+    return static_cast<double>(lengthMs) / 1000.0;
 }
 
 bool UpdateSelectedEventParameters(const std::string& eventPath) {
@@ -4214,6 +4318,10 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         AddItemWithSelectedEventAtEditCursor();
         return true;
     }
+    if (command == actionIdAddItemWithSelectedEventAtEditCursorMatchLength) {
+        AddItemWithSelectedEventAtEditCursorMatchLength();
+        return true;
+    }
     if (command == actionIdAddItemWithSelectedEventWithinTimeSelection) {
         AddItemWithSelectedEventWithinTimeSelection();
         return true;
@@ -4277,6 +4385,9 @@ void RegisterActions() {
     // Register the new custom action for adding a item with the selected event at edit cursor
     static custom_action_register_t actionAddItemWithLastFMODEvent = { 0, "ReaMOD_AddItemWithLastFMODEvent", "ReaMOD: Add Item with selected event at edit cursor" };
     actionIdAddItemWithSelectedEventAtEditCursor = plugin_register("custom_action", &actionAddItemWithLastFMODEvent);
+
+    static custom_action_register_t actionAddItemWithEventLength = { 0, "ReaMOD_AddItemWithEventLength", "ReaMOD: Add item with selected event length at edit cursor" };
+    actionIdAddItemWithSelectedEventAtEditCursorMatchLength = plugin_register("custom_action", &actionAddItemWithEventLength);
 
     // Register the new custom action for adding a item with the selected event within the current time selection
     static custom_action_register_t actionAddItemWithSelectedEventWithinTimeSelection = { 0, "ReaMOD_actionAddItemWithSelectedEventWithinTimeSelection", "ReaMOD: Add Item with selected event within current time selection" };
