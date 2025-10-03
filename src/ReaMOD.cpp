@@ -57,6 +57,7 @@ static int actionIDTriggerSelectedEvent = 0;
 static int actionIDToggleDebugOnOff = 0;
 
 bool debugMessages = false;
+bool showFullBankDirectoryPaths = true;
 
 
 // ImGui context
@@ -2419,9 +2420,10 @@ void SaveStateToFile(const std::string& filePath = "") {
     outFile << "fspro_file=" << selected_file_path << "\n";
     outFile << "lookahead_time_ms=" << lookAheadTimeMs << "\n";
     outFile << "move_cursor_after_insert=" << (moveCursorAfterInsert ? 1 : 0) << "\n";
-    outFile << "num_frames_for_item=" << numFramesForItem << "\n"; 
+    outFile << "num_frames_for_item=" << numFramesForItem << "\n";
     outFile << "item_sync_selection=" << syncSelectedEventWithItemSelection << "\n";
     outFile << "update_item_insertion_length_from_last_time_selection=" << updateItemInsertionLength << "\n";
+    outFile << "show_full_bank_directory_paths=" << (showFullBankDirectoryPaths ? 1 : 0) << "\n";
 
     // Separate Master.bank and other bank files
     std::string master_bank_file;
@@ -2660,6 +2662,9 @@ void LoadStateFromFile(const std::string& filePath) {
             } else if (key == "update_item_insertion_length_from_last_time_selection") {
                 updateItemInsertionLength = (std::stoi(value) != 0);
                 DebugMsg("Loaded update_item_insertion_length: %d\n", updateItemInsertionLength);
+            } else if (key == "show_full_bank_directory_paths") {
+                showFullBankDirectoryPaths = (std::stoi(value) != 0);
+                DebugMsg("Loaded show_full_bank_directory_paths: %d\n", showFullBankDirectoryPaths);
             } else {
                 DebugMsg("Error: Unknown key in .ReaMOD file: %s\n", key.c_str());
             }
@@ -2777,6 +2782,39 @@ std::string RemoveBankExtension(const std::string& filename) {
         return filename.substr(0, filename.size() - 5);
     }
     return filename;  // Return original if no ".bank" extension is found
+}
+
+std::string GetAbbreviatedDirectoryPath(const std::string& path) {
+    if (path.empty()) {
+        return path;
+    }
+
+    std::string normalized = fs::path(path).lexically_normal().string();
+
+    if (normalized.empty()) {
+        return normalized;
+    }
+
+    std::string trimmed = normalized;
+    while (!trimmed.empty() && (trimmed.back() == '/' || trimmed.back() == '\\')) {
+        trimmed.pop_back();
+    }
+
+    if (trimmed.empty()) {
+        return normalized;
+    }
+
+    size_t lastSeparator = trimmed.find_last_of("/\\");
+    if (lastSeparator == std::string::npos) {
+        return trimmed;
+    }
+
+    std::string lastComponent = trimmed.substr(lastSeparator + 1);
+    if (lastComponent.empty()) {
+        return normalized;
+    }
+
+    return std::string(".../") + lastComponent;
 }
 
 // Helper function to find the common prefix among a list of strings
@@ -3268,13 +3306,14 @@ void RenderGUI() {
             ReaMODText(reaMOD_Main_ImGui_Context, "No directories selected.", reaMODMediumFont);
         } else {
             for (size_t i = 0; i < customBankDirectories.size(); ++i) {
-                std::string displayPath = customBankDirectories[i];
+                const std::string& directoryPath = customBankDirectories[i];
+                std::string displayPath = showFullBankDirectoryPaths ? directoryPath : GetAbbreviatedDirectoryPath(directoryPath);
                 std::error_code dirError;
-                bool directoryExists = fs::exists(displayPath, dirError);
+                bool directoryExists = fs::exists(directoryPath, dirError);
                 bool isDirectory = false;
                 if (!dirError && directoryExists) {
                     dirError.clear();
-                    isDirectory = fs::is_directory(displayPath, dirError);
+                    isDirectory = fs::is_directory(directoryPath, dirError);
                 }
                 bool isValidDirectory = directoryExists && !dirError && isDirectory;
                 if (!isValidDirectory) {
@@ -3664,6 +3703,7 @@ void RenderGUI() {
 
         // Add the checkbox for toggling debug messages in Reaper
         ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Enable debug messages to be posted to Reaper console", &debugMessages);
+        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Show full bank directory paths", &showFullBankDirectoryPaths);
 
         // Support & Links section
         ImGui::Separator(reaMOD_Main_ImGui_Context);
