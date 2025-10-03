@@ -7,7 +7,8 @@ ReaMOD is a plugin for [REAPER](https://www.reaper.fm/), a digital audio worksta
 - **FMOD Project Integration**: Load and manage FMOD Studio projects and banks directly within REAPER.
 - **Event Browsing and Playback**: Browse through FMOD events and snapshots, play them back, and integrate them into your REAPER projects.
 - **Parameter Control**: Adjust FMOD event parameters using GUI sliders, and have these changes reflected in real-time.
-- **Marker and Item Insertion**: Insert markers and items associated with FMOD events into the REAPER timeline, allowing for precise synchronization.
+- **Item Insertion**: Insert items associated with FMOD events into the REAPER timeline, allowing for precise synchronization.
+- **FMOD-Aware Item Lengths**: Optionally size inserted media items from the FMOD event's reported timeline length for tighter timing against authored content.
 - **Playback Monitoring**: Monitor REAPER's playback and trigger FMOD events based on markers or items.
 - **Session Management**: Save and load plugin states (`.ReaMOD` files) for consistent sessions across projects.
 - **Custom Actions**: Provides custom actions that can be assigned to keyboard shortcuts or toolbar buttons for quick access.
@@ -188,6 +189,8 @@ The plugin provides several custom actions for enhanced workflow:
     Open or close the ReaMOD window.
 - **ReaMOD: Add Item with selected event at edit cursor**
     Adds the currently selected FMOD event in the ReaMOD window with the current parameter values (as item notes) to the selected track at the edit cursor position for the number of frames set in ReaMOD settings.
+- **ReaMOD: Add item with selected event length at edit cursor**
+    Adds the currently selected FMOD event at the edit cursor and automatically sizes the new item to match the FMOD event's reported length, falling back to the frame-count length when unavailable.
 - **ReaMOD: Add Item with selected event within current time selection**
     Adds the currently selected FMOD event in the ReaMOD window with the current parameter values (as item notes) to the selected track at the edit cursor position within the current time selection.
 - **ReaMOD: Update number of frames for item insertion from current time selection**
