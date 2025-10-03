@@ -3701,9 +3701,11 @@ void RenderGUI() {
         ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Move edit to end of inserted item.", &moveCursorAfterInsert);
         ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Update item length from last time-selection insert.", &updateItemInsertionLength);
 
+        // Add the checkbox for toggling display of full directory path.
+        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Show full bank directory paths", &showFullBankDirectoryPaths);
+        
         // Add the checkbox for toggling debug messages in Reaper
         ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Enable debug messages to be posted to Reaper console", &debugMessages);
-        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Show full bank directory paths", &showFullBankDirectoryPaths);
 
         // Support & Links section
         ImGui::Separator(reaMOD_Main_ImGui_Context);
