@@ -216,7 +216,7 @@ Assign these actions to keyboard shortcuts or add them to toolbars for quick acc
 - **Update Item Length from Time Selection**: When inserting items within the time selection, update the item length based on the time selection.
 
 ## Recording/Exporting Audio with ReaMOD
-All the audio triggered by ReaMOD does not actually flow through Reaper so there are only two options for capturing the audio stream triggered ny ReaMOD:
+All the audio triggered by ReaMOD does not actually flow through Reaper so there are only two options for capturing the audio stream triggered by ReaMOD:
 1. Use the "Live Update" feature of FMOD Studio to connect to ReaMOD and then record a new session in FMOD Studio's Profiler window.
 2. Use a screen recording software like OBS to record your system audio.  
 
