@@ -57,7 +57,7 @@ static int actionIDTriggerSelectedEvent = 0;
 static int actionIDToggleDebugOnOff = 0;
 
 bool debugMessages = false;
-bool showFullBankDirectoryPaths = true;
+bool showFullBankDirectoryPaths = false;
 
 
 // ImGui context
