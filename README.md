@@ -129,6 +129,8 @@ Notes
 
 ## Usage
 
+Note to Windows users: ASIO audio drivers have been reported to NOT work with ReaMOD since only one app can control the driver at a time and ReaMOD relies on audio to be able run in the background. 
+
 ### Opening the ReaMOD Window
 
 - After installing the plugin, you can open the ReaMOD window by running the custom action:
