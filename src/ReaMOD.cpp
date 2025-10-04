@@ -123,6 +123,7 @@ FMOD::Studio::System* fmod_system = nullptr;
 
 void RefreshBankFiles();
 void SynchronizeLoadedBanks();
+void CloseReaMODWindow();
 
 // Define the ParameterInfo struct
 struct ParameterInfo {
@@ -3110,7 +3111,7 @@ bool StyledButton(ImGui_Context* ctx, const std::string& label) {
 void RenderEventSearchWindow() {
 
     // Check if the search window should be open
-    if (!searchFmodEventWindowOpen) {
+    if (!searchFmodEventWindowOpen || !reaMOD_Main_ImGui_Context) {
         return;
     }
 
@@ -3352,7 +3353,36 @@ void RenderEventSearchWindow() {
 }
 
 
+void CloseReaMODWindow() {
+    searchFmodEventWindowOpen = false;
+
+    if (!reaMOD_Main_ImGui_Context && guiTaskId == -1 && itemSelectionTaskId == -1 && playbackTaskId == -1) {
+        return;
+    }
+
+    if (guiTaskId != -1) {
+        RemoveTask(guiTaskId);
+        guiTaskId = -1;
+    }
+    if (itemSelectionTaskId != -1) {
+        RemoveTask(itemSelectionTaskId);
+        itemSelectionTaskId = -1;
+    }
+    if (playbackTaskId != -1) {
+        RemoveTask(playbackTaskId);
+        playbackTaskId = -1;
+    }
+
+    reaMOD_Main_ImGui_Context = nullptr;
+    reaMOD_EventSearch_ImGui_Context = nullptr;
+    reaModWindowOpen = false;
+}
+
 void RenderGUI() {
+    if (!reaMOD_Main_ImGui_Context) {
+        return;
+    }
+
     EnsureReaMODFontsLoaded();
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
@@ -3837,7 +3867,7 @@ void RenderGUI() {
     RenderEventSearchWindow();
 
     if (!open) {
-        reaMOD_Main_ImGui_Context = nullptr;
+        CloseReaMODWindow();
     }
 }
 
@@ -4093,8 +4123,9 @@ void RemoveTask(int taskId) {
 
 // Timer function
 void OnTimer() {
-    for (auto& [taskId, task] : taskMap) {
-        task();
+    for (auto it = taskMap.begin(); it != taskMap.end();) {
+        auto current = it++;
+        current->second();
     }
 }
 
@@ -4136,28 +4167,15 @@ void toggleReaMODWindow() {
         guiTaskId = AddTask(RenderGUI);
         itemSelectionTaskId = AddTask(MonitorItemSelection);
 
+        reaModWindowOpen = true;
+
         // Auto-load the .ReaMOD file if available
         if (reaModWindowPreviouslyOpen != true) {
             AutoLoadReaMODFile();
             reaModWindowPreviouslyOpen = true;
         }
     } else {
-        // Clean up: remove tasks and close the window
-        if (guiTaskId != -1) {
-            RemoveTask(guiTaskId);
-            guiTaskId = -1;
-        }
-        if (itemSelectionTaskId != -1) {
-            RemoveTask(itemSelectionTaskId);
-            itemSelectionTaskId = -1;
-        }
-        if (playbackTaskId != -1){
-            RemoveTask(playbackTaskId);
-            playbackTaskId = -1;
-        }
-
-        // Nullify the ImGui context to signify the window is closed
-        reaMOD_Main_ImGui_Context = nullptr;
+        CloseReaMODWindow();
     }
 }
 
@@ -4438,7 +4456,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT( REAPER_PLUGIN_
 extern "C" REAPER_PLUGIN_DLL_EXPORT void REAPER_PLUGIN_EXIT() {
     // Unregister the project state extension
     // Unregister the timer when the plugin is unloaded
+    CloseReaMODWindow();
     StopAllEvents();
-    RemoveTask(playbackTaskId);
     plugin_register("-timer", reinterpret_cast<void*>(&OnTimer));
 }
