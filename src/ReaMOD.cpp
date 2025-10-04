@@ -3115,6 +3115,11 @@ void RenderEventSearchWindow() {
         return;
     }
 
+    if (!ImGui::ValidatePtr(reaMOD_Main_ImGui_Context, "ImGui_Context")) {
+        searchFmodEventWindowOpen = false;
+        return;
+    }
+
     EnsureReaMODFontsLoaded();
 
     // Set the initial window size
@@ -3380,6 +3385,11 @@ void CloseReaMODWindow() {
 
 void RenderGUI() {
     if (!reaMOD_Main_ImGui_Context) {
+        return;
+    }
+
+    if (!ImGui::ValidatePtr(reaMOD_Main_ImGui_Context, "ImGui_Context")) {
+        CloseReaMODWindow();
         return;
     }
 
@@ -3864,11 +3874,12 @@ void RenderGUI() {
     // Pop the style colors
     PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
-    RenderEventSearchWindow();
-
     if (!open) {
         CloseReaMODWindow();
+        return;
     }
+
+    RenderEventSearchWindow();
 }
 
 void UpdateEventPlayStates() {
@@ -4181,6 +4192,11 @@ void toggleReaMODWindow() {
 
 void openFmodEventSearchWindow()
 {
+    if (!reaMOD_Main_ImGui_Context || !ImGui::ValidatePtr(reaMOD_Main_ImGui_Context, "ImGui_Context")) {
+        searchFmodEventWindowOpen = false;
+        return;
+    }
+
     searchFmodEventWindowOpen = !searchFmodEventWindowOpen;
 }
 
