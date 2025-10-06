@@ -3365,7 +3365,34 @@ void RemoveTask(int taskId) {
 
 // Timer function
 void OnTimer() {
-    for (auto& [taskId, task] : taskMap) {
+    // Copy the IDs of the tasks that should be executed before running them.
+    // This prevents iterator invalidation when a task removes itself (or
+    // another task) while the timer is iterating over the task map. Without
+    // this safeguard, closing the ReaMOD window from within its RenderGUI task
+    // would erase the task from taskMap while the range-based for loop was
+    // still referencing the erased element, leading to a crash.
+    //
+    // Storing the IDs (instead of copying the task functors themselves) also
+    // lets us verify that a task still exists before executing it. Some tasks
+    // immediately remove themselves from taskMap when they run; skipping tasks
+    // that were removed mid-iteration keeps us from re-running cleanup logic
+    // after the associated resources have been torn down (for example when the
+    // ReaMOD window closes) which previously led to crashes when reopening the
+    // window.
+    std::vector<int> taskIds;
+    taskIds.reserve(taskMap.size());
+
+    for (const auto& [taskId, _] : taskMap) {
+        taskIds.push_back(taskId);
+    }
+
+    for (int taskId : taskIds) {
+        auto it = taskMap.find(taskId);
+        if (it == taskMap.end()) {
+            continue;
+        }
+
+        auto task = it->second;
         task();
     }
 }
