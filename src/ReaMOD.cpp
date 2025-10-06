@@ -3351,6 +3351,25 @@ void RenderEventSearchWindow() {
     PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 }
 
+// Add task and return its ID
+int AddTask(std::function<void()> task) {
+    int taskId = nextTaskId++;
+    taskMap[taskId] = task;
+    return taskId;
+}
+
+// Remove a task by ID
+void RemoveTask(int taskId) {
+    taskMap.erase(taskId);
+}
+
+// Timer function
+void OnTimer() {
+    for (auto& [taskId, task] : taskMap) {
+        task();
+    }
+}
+
 
 void RenderGUI() {
     EnsureReaMODFontsLoaded();
@@ -4100,24 +4119,6 @@ void MonitorItemSelection() {
     }
 }
 
-// Add task and return its ID
-int AddTask(std::function<void()> task) {
-    int taskId = nextTaskId++;
-    taskMap[taskId] = task;
-    return taskId;
-}
-
-// Remove a task by ID
-void RemoveTask(int taskId) {
-    taskMap.erase(taskId);
-}
-
-// Timer function
-void OnTimer() {
-    for (auto& [taskId, task] : taskMap) {
-        task();
-    }
-}
 
 void AutoLoadReaMODFile() {
     std::string reaperProjectName = GetCurrentReaperProjectName();
