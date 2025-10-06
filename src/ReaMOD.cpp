@@ -3869,28 +3869,7 @@ void RenderGUI() {
     RenderEventSearchWindow();
 
     if (!open) {
-
-        DebugMsg("Closing the ReaMOD window...\n");
-        // Clean up: remove tasks and close the window
-        if (guiTaskId != -1) {
-            RemoveTask(guiTaskId);
-            guiTaskId = -1;
-            DebugMsg("Removed `guiTaskId'.\n");
-        }
-        if (itemSelectionTaskId != -1) {
-            RemoveTask(itemSelectionTaskId);
-            itemSelectionTaskId = -1;
-            DebugMsg("Removed `itemSelectionTaskId`.\n");
-        }
-        if (playbackTaskId != -1){
-            RemoveTask(playbackTaskId);
-            playbackTaskId = -1;
-            DebugMsg("Removed `playbackTaskId`.\n");
-        }
-
-        // Nullify the ImGui context to signify the window is closed
-        reaMOD_Main_ImGui_Context = nullptr;
-        DebugMsg("Set `reaMod_Main_ImGui_Context` = to `nullptr`.\n");
+        CloseReaMODWindow();
     }
 }
 
@@ -4155,6 +4134,36 @@ void AutoLoadReaMODFile() {
     }
 }
 
+void CloseReaMODWindow() {
+    DebugMsg("Closing the ReaMOD window...\n");
+
+    if (guiTaskId != -1) {
+        RemoveTask(guiTaskId);
+        guiTaskId = -1;
+        DebugMsg("Removed `guiTaskId'.\n");
+    }
+    if (itemSelectionTaskId != -1) {
+        RemoveTask(itemSelectionTaskId);
+        itemSelectionTaskId = -1;
+        DebugMsg("Removed `itemSelectionTaskId`.\n");
+    }
+    if (playbackTaskId != -1){
+        RemoveTask(playbackTaskId);
+        playbackTaskId = -1;
+        DebugMsg("Removed `playbackTaskId`.\n");
+    }
+
+    if (reaMOD_Main_ImGui_Context) {
+        ImGui::DestroyContext(reaMOD_Main_ImGui_Context);
+        reaMOD_Main_ImGui_Context = nullptr;
+        DebugMsg("Destroyed `reaMOD_Main_ImGui_Context`.\n");
+    }
+
+    reaMODRegularFont = nullptr;
+    reaMODMediumFont = nullptr;
+    reaMODBoldFont = nullptr;
+}
+
 void toggleReaMODWindow() {
     if (!reaMOD_Main_ImGui_Context) {
         DebugMsg("Opening the ReaMOD window...\n");
@@ -4183,27 +4192,7 @@ void toggleReaMODWindow() {
             reaModWindowPreviouslyOpen = true;
         }
     } else {
-        DebugMsg("Closing the ReaMOD window...\n");
-        // Clean up: remove tasks and close the window
-        if (guiTaskId != -1) {
-            RemoveTask(guiTaskId);
-            guiTaskId = -1;
-            DebugMsg("Removed `guiTaskId'.\n");
-        }
-        if (itemSelectionTaskId != -1) {
-            RemoveTask(itemSelectionTaskId);
-            itemSelectionTaskId = -1;
-            DebugMsg("Removed `itemSelectionTaskId`.\n");
-        }
-        if (playbackTaskId != -1){
-            RemoveTask(playbackTaskId);
-            playbackTaskId = -1;
-            DebugMsg("Removed `playbackTaskId`.\n");
-        }
-
-        // Nullify the ImGui context to signify the window is closed
-        reaMOD_Main_ImGui_Context = nullptr;
-        DebugMsg("Set `reaMod_Main_ImGui_Context` = to `nullptr`.\n");
+        CloseReaMODWindow();
     }
 }
 
