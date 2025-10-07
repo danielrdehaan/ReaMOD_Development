@@ -16,6 +16,7 @@
 #include <fstream> // Include for file I/O operations
 #include <ctime>
 #include <cstdlib>
+#include <mutex>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -111,21 +112,15 @@ void MonitorPlayback();
 int AddTask(std::function<void()> task);
 void RemoveTask(int taskId);
 
-namespace {
-ImGui_Context* g_cachedReaModContext = nullptr;
-}
-
 class ReaModWindowContext {
 public:
     explicit ReaModWindowContext(const char* name) {
-        ImGui::init(plugin_getapi);
+        static std::once_flag initFlag;
+        std::call_once(initFlag, []() {
+            ImGui::init(plugin_getapi);
+        });
 
-        if (g_cachedReaModContext) {
-            context = g_cachedReaModContext;
-            g_cachedReaModContext = nullptr;
-        } else {
-            context = ImGui::CreateContext(name);
-        }
+        context = ImGui::CreateContext(name);
 
         reaMOD_Main_ImGui_Context = context;
 
@@ -144,10 +139,6 @@ public:
         if (itemSelectionTaskId != -1) {
             RemoveTask(itemSelectionTaskId);
             itemSelectionTaskId = -1;
-        }
-
-        if (!g_cachedReaModContext && context) {
-            g_cachedReaModContext = context;
         }
 
         context = nullptr;
