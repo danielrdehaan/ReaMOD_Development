@@ -4148,24 +4148,13 @@ void toggleReaMODWindow() {
         itemSelectionTaskId = AddTask(MonitorItemSelection);
 
         // Auto-load the .ReaMOD file if available
-        if (reaModWindowPreviouslyOpen != true) {
-            AutoLoadReaMODFile();
-            reaModWindowPreviouslyOpen = true;
-        }
+        // if (reaModWindowPreviouslyOpen != true) {
+        //     AutoLoadReaMODFile();
+        //     reaModWindowPreviouslyOpen = true;
+        // }
     } else {
         // Clean up: remove tasks and close the window
-        if (guiTaskId != -1) {
-            RemoveTask(guiTaskId);
-            guiTaskId = -1;
-        }
-        if (itemSelectionTaskId != -1) {
-            RemoveTask(itemSelectionTaskId);
-            itemSelectionTaskId = -1;
-        }
-        if (playbackTaskId != -1){
-            RemoveTask(playbackTaskId);
-            playbackTaskId = -1;
-        }
+        taskMap.clear()
 
         // Nullify the ImGui context to signify the window is closed
         reaMOD_Main_ImGui_Context = nullptr;
