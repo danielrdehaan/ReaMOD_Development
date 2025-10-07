@@ -111,11 +111,22 @@ void MonitorPlayback();
 int AddTask(std::function<void()> task);
 void RemoveTask(int taskId);
 
+namespace {
+ImGui_Context* g_cachedReaModContext = nullptr;
+}
+
 class ReaModWindowContext {
 public:
     explicit ReaModWindowContext(const char* name) {
         ImGui::init(plugin_getapi);
-        context = ImGui::CreateContext(name);
+
+        if (g_cachedReaModContext) {
+            context = g_cachedReaModContext;
+            g_cachedReaModContext = nullptr;
+        } else {
+            context = ImGui::CreateContext(name);
+        }
+
         reaMOD_Main_ImGui_Context = context;
 
         if (context) {
@@ -135,11 +146,11 @@ public:
             itemSelectionTaskId = -1;
         }
 
-        if (context) {
-            ImGui::DestroyContext(context);
-            context = nullptr;
+        if (!g_cachedReaModContext && context) {
+            g_cachedReaModContext = context;
         }
 
+        context = nullptr;
         reaMOD_Main_ImGui_Context = nullptr;
     }
 
