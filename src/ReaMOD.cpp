@@ -105,6 +105,7 @@ int searchEventGuiTaskId = -1;
 int playbackTaskId = -1;
 int itemSelectionTaskId = -1;
 bool clearTasksPending = false;
+bool closeWindowPending = false;
 
 
 // Global variable to store the last triggered FMOD event path
@@ -3359,9 +3360,9 @@ void CloseReaModWindow(bool open){
         {
             ImGui::End(reaMOD_Main_ImGui_Context);
         }
-        reaMOD_Main_ImGui_Context = nullptr;
-        // Clear all tasks
+        // Defer cleanup until after the timer finishes iterating tasks
         clearTasksPending = true;
+        closeWindowPending = true;
     }
 }
 
@@ -4105,13 +4106,27 @@ void RemoveTask(int taskId) {
 
 // Timer function
 void OnTimer() {
-    for (auto& [taskId, task] : taskMap) {
-        task();
-    }
-
     if (clearTasksPending) {
         taskMap.clear();
         clearTasksPending = false;
+    } else {
+        for (auto it = taskMap.begin(); it != taskMap.end(); ++it) {
+            it->second();
+
+            if (clearTasksPending) {
+                break;
+            }
+        }
+
+        if (clearTasksPending) {
+            taskMap.clear();
+            clearTasksPending = false;
+        }
+    }
+
+    if (closeWindowPending) {
+        reaMOD_Main_ImGui_Context = nullptr;
+        closeWindowPending = false;
     }
 }
 
@@ -4161,9 +4176,7 @@ void toggleReaMODWindow() {
     } else {
         // Clean up: remove tasks and close the window
         clearTasksPending = true;
-
-        // Nullify the ImGui context to signify the window is closed
-        reaMOD_Main_ImGui_Context = nullptr;
+        closeWindowPending = true;
     }
 }
 
