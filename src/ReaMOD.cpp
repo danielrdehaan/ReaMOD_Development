@@ -4154,7 +4154,7 @@ void toggleReaMODWindow() {
         // }
     } else {
         // Clean up: remove tasks and close the window
-        taskMap.clear()
+        taskMap.clear();
 
         // Nullify the ImGui context to signify the window is closed
         reaMOD_Main_ImGui_Context = nullptr;
