@@ -3869,7 +3869,8 @@ void RenderGUI() {
     RenderEventSearchWindow();
 
     if (!open) {
-        CloseReaMODWindow();
+        ImGui::End(reaMOD_Main_ImGui_Context);
+        reaMOD_Main_ImGui_Context = nullptr;
     }
 }
 
