@@ -3,7 +3,7 @@
 ReaMOD is a plugin for [REAPER](https://www.reaper.fm/), a digital audio workstation, that integrates FMOD Studio projects into REAPER. It allows users to trigger FMOD events and snapshots directly within REAPER, providing a seamless workflow for game audio development and other interactive audio applications.
 
 A little out of date (I will record a new one ASAP) but here is a [video](https://youtu.be/Ba8OaWds1cA?si=spkIjTHCcWLAjVsR) showing the basic workflow/concepts of ReaMOD.
-And as a follow-up, here is a [video](https://youtu.be/fMs5XgDoW08?si=SGDt8DHpOxcRPckR)that shows some of the updates that have occured.
+
 
 ## Features
 
