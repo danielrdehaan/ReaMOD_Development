@@ -105,6 +105,58 @@ int searchEventGuiTaskId = -1;
 int playbackTaskId = -1;
 int itemSelectionTaskId = -1;
 
+void RenderGUI();
+void MonitorItemSelection();
+void MonitorPlayback();
+int AddTask(std::function<void()> task);
+void RemoveTask(int taskId);
+
+class ReaModWindowContext {
+public:
+    explicit ReaModWindowContext(const char* name) {
+        ImGui::init(plugin_getapi);
+        context = ImGui::CreateContext(name);
+        reaMOD_Main_ImGui_Context = context;
+
+        if (context) {
+            guiTaskId = AddTask(RenderGUI);
+            itemSelectionTaskId = AddTask(MonitorItemSelection);
+        }
+    }
+
+    ~ReaModWindowContext() {
+        if (guiTaskId != -1) {
+            RemoveTask(guiTaskId);
+            guiTaskId = -1;
+        }
+
+        if (itemSelectionTaskId != -1) {
+            RemoveTask(itemSelectionTaskId);
+            itemSelectionTaskId = -1;
+        }
+
+        if (context) {
+            ImGui::DestroyContext(context);
+            context = nullptr;
+        }
+
+        reaMOD_Main_ImGui_Context = nullptr;
+    }
+
+    ReaModWindowContext(const ReaModWindowContext&) = delete;
+    ReaModWindowContext& operator=(const ReaModWindowContext&) = delete;
+
+    ReaModWindowContext(ReaModWindowContext&& other) noexcept = delete;
+    ReaModWindowContext& operator=(ReaModWindowContext&& other) noexcept = delete;
+
+    ImGui_Context* get() const { return context; }
+
+private:
+    ImGui_Context* context = nullptr;
+};
+
+std::unique_ptr<ReaModWindowContext> reaModWindowContext;
+
 
 // Global variable to store the last triggered FMOD event path
 std::string lastTriggeredFMODEvent;
@@ -3354,18 +3406,16 @@ void RenderEventSearchWindow() {
 // Close and clean-up from ReaMOD window
 void CloseReaModWindow(bool open){
     if (!open) {
-        if (reaMOD_Main_ImGui_Context != nullptr)
-        {
-            ImGui::End(reaMOD_Main_ImGui_Context);
-        }
-        reaMOD_Main_ImGui_Context = nullptr;
-        // Clear all tasks
-        taskMap.clear();
+        reaModWindowContext.reset();
     }
 }
 
 
 void RenderGUI() {
+    if (!reaMOD_Main_ImGui_Context) {
+        return;
+    }
+
     EnsureReaMODFontsLoaded();
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
@@ -3957,6 +4007,11 @@ void MonitorPlayback() {
 void MonitorItemSelection() {
     // DebugMsg("MonitorItemSelection called.\n");
 
+    if (!reaMOD_Main_ImGui_Context) {
+        lastSelectedItem = nullptr;
+        return;
+    }
+
     if (!syncSelectedEventWithItemSelection) {
         DebugMsg("Sync with selected item is disabled.\n");
         lastSelectedItem = nullptr; // Reset if not syncing
@@ -4104,8 +4159,17 @@ void RemoveTask(int taskId) {
 
 // Timer function
 void OnTimer() {
+    std::vector<std::function<void()>> tasks;
+    tasks.reserve(taskMap.size());
+
     for (auto& [taskId, task] : taskMap) {
-        task();
+        tasks.push_back(task);
+    }
+
+    for (auto& task : tasks) {
+        if (task) {
+            task();
+        }
     }
 }
 
@@ -4132,10 +4196,8 @@ void AutoLoadReaMODFile() {
 }
 
 void toggleReaMODWindow() {
-    if (!reaMOD_Main_ImGui_Context) {
-        // First-time setup: initialize ReaImGui and FMOD, and start rendering
-        ImGui::init(plugin_getapi);
-        reaMOD_Main_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
+    if (!reaModWindowContext) {
+        reaModWindowContext = std::make_unique<ReaModWindowContext>("ReaMOD Window");
 
         // Initialize FMOD only if it's not already initialized
         if (!IsFMODInitialized()) {
@@ -4143,21 +4205,14 @@ void toggleReaMODWindow() {
             playbackTaskId = AddTask(MonitorPlayback);
         }
 
-        // Add tasks to monitor and render the GUI
-        guiTaskId = AddTask(RenderGUI);
-        itemSelectionTaskId = AddTask(MonitorItemSelection);
-
         // Auto-load the .ReaMOD file if available
         // if (reaModWindowPreviouslyOpen != true) {
         //     AutoLoadReaMODFile();
         //     reaModWindowPreviouslyOpen = true;
         // }
     } else {
-        // Clean up: remove tasks and close the window
-        taskMap.clear();
-
-        // Nullify the ImGui context to signify the window is closed
-        reaMOD_Main_ImGui_Context = nullptr;
+        reaModWindowOpen = false;
+        reaModWindowContext.reset();
     }
 }
 
