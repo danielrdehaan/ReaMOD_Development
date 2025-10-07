@@ -3351,6 +3351,19 @@ void RenderEventSearchWindow() {
     PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 }
 
+// Close and clean-up from ReaMOD window
+void CloseReaModWindow(){
+    if (!open) {
+        if (reaMOD_Main_ImGui_Context != nullptr)
+        {
+            ImGui::End(reaMOD_Main_ImGui_Context);
+        }
+        reaMOD_Main_ImGui_Context = nullptr;
+        // Clear all tasks
+        taskMap.clear();
+    }
+}
+
 
 void RenderGUI() {
     EnsureReaMODFontsLoaded();
@@ -3836,13 +3849,7 @@ void RenderGUI() {
 
     RenderEventSearchWindow();
 
-    if (!open) {
-        if (reaMOD_Main_ImGui_Context != nullptr)
-        {
-            ImGui::End(reaMOD_Main_ImGui_Context);
-            reaMOD_Main_ImGui_Context = nullptr;
-        }
-    }
+    CloseReaModWindow();
 }
 
 void UpdateEventPlayStates() {
