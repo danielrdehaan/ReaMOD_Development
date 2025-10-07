@@ -3352,7 +3352,7 @@ void RenderEventSearchWindow() {
 }
 
 // Close and clean-up from ReaMOD window
-void CloseReaModWindow(){
+void CloseReaModWindow(bool open){
     if (!open) {
         if (reaMOD_Main_ImGui_Context != nullptr)
         {
@@ -3849,7 +3849,7 @@ void RenderGUI() {
 
     RenderEventSearchWindow();
 
-    CloseReaModWindow();
+    CloseReaModWindow(open);
 }
 
 void UpdateEventPlayStates() {
