@@ -3351,6 +3351,38 @@ void RenderEventSearchWindow() {
     PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 }
 
+// Add task and return its ID
+int AddTask(std::function<void()> task) {
+    int taskId = nextTaskId++;
+    taskMap[taskId] = task;
+    return taskId;
+}
+
+// Remove a task by ID
+void RemoveTask(int taskId) {
+    taskMap.erase(taskId);
+}
+
+// Timer function
+void OnTimer() {
+    // Copy the tasks that should be executed before running them. This prevents
+    // iterator invalidation when a task removes itself (or another task) while
+    // the timer is iterating over the task map. Without this safeguard, closing
+    // the ReaMOD window from within its RenderGUI task would erase the task from
+    // taskMap while the range-based for loop was still referencing the erased
+    // element, leading to a crash.
+    std::vector<std::function<void()>> tasksToRun;
+    tasksToRun.reserve(taskMap.size());
+
+    for (const auto& [taskId, task] : taskMap) {
+        tasksToRun.push_back(task);
+    }
+
+    for (auto& task : tasksToRun) {
+        task();
+    }
+}
+
 
 void RenderGUI() {
     EnsureReaMODFontsLoaded();
@@ -4080,24 +4112,6 @@ void MonitorItemSelection() {
     }
 }
 
-// Add task and return its ID
-int AddTask(std::function<void()> task) {
-    int taskId = nextTaskId++;
-    taskMap[taskId] = task;
-    return taskId;
-}
-
-// Remove a task by ID
-void RemoveTask(int taskId) {
-    taskMap.erase(taskId);
-}
-
-// Timer function
-void OnTimer() {
-    for (auto& [taskId, task] : taskMap) {
-        task();
-    }
-}
 
 void AutoLoadReaMODFile() {
     std::string reaperProjectName = GetCurrentReaperProjectName();
@@ -4121,44 +4135,65 @@ void AutoLoadReaMODFile() {
     }
 }
 
+void CloseReaMODWindow() {
+    DebugMsg("Closing the ReaMOD window...\n");
+
+    if (guiTaskId != -1) {
+        RemoveTask(guiTaskId);
+        guiTaskId = -1;
+        DebugMsg("Removed `guiTaskId'.\n");
+    }
+    if (itemSelectionTaskId != -1) {
+        RemoveTask(itemSelectionTaskId);
+        itemSelectionTaskId = -1;
+        DebugMsg("Removed `itemSelectionTaskId`.\n");
+    }
+    if (playbackTaskId != -1){
+        RemoveTask(playbackTaskId);
+        playbackTaskId = -1;
+        DebugMsg("Removed `playbackTaskId`.\n");
+    }
+
+    if (reaMOD_Main_ImGui_Context) {
+        ImGui::DestroyContext(reaMOD_Main_ImGui_Context);
+        reaMOD_Main_ImGui_Context = nullptr;
+        DebugMsg("Destroyed `reaMOD_Main_ImGui_Context`.\n");
+    }
+
+    reaMODRegularFont = nullptr;
+    reaMODMediumFont = nullptr;
+    reaMODBoldFont = nullptr;
+}
+
 void toggleReaMODWindow() {
     if (!reaMOD_Main_ImGui_Context) {
+        DebugMsg("Opening the ReaMOD window...\n");
         // First-time setup: initialize ReaImGui and FMOD, and start rendering
         ImGui::init(plugin_getapi);
         reaMOD_Main_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
 
         // Initialize FMOD only if it's not already initialized
         if (!IsFMODInitialized()) {
+            DebugMsg("FMOD was not initialized.\n");
             InitializeFMOD();
             playbackTaskId = AddTask(MonitorPlayback);
+            DebugMsg("Added `playbackTaskId` for `MonitorPlayback`.\n");
         }
 
         // Add tasks to monitor and render the GUI
         guiTaskId = AddTask(RenderGUI);
+        DebugMsg("Added `guiTaskId` for `RenderGUI`.\n");
         itemSelectionTaskId = AddTask(MonitorItemSelection);
+        DebugMsg("Added `itemSelctionTaskId` for `MonitorItemSelection`.\n");
 
         // Auto-load the .ReaMOD file if available
         if (reaModWindowPreviouslyOpen != true) {
+
             AutoLoadReaMODFile();
             reaModWindowPreviouslyOpen = true;
         }
     } else {
-        // Clean up: remove tasks and close the window
-        if (guiTaskId != -1) {
-            RemoveTask(guiTaskId);
-            guiTaskId = -1;
-        }
-        if (itemSelectionTaskId != -1) {
-            RemoveTask(itemSelectionTaskId);
-            itemSelectionTaskId = -1;
-        }
-        if (playbackTaskId != -1){
-            RemoveTask(playbackTaskId);
-            playbackTaskId = -1;
-        }
-
-        // Nullify the ImGui context to signify the window is closed
-        reaMOD_Main_ImGui_Context = nullptr;
+        CloseReaMODWindow();
     }
 }
 
