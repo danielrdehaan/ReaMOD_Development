@@ -3352,16 +3352,40 @@ void RenderEventSearchWindow() {
 }
 
 // Close and clean-up from ReaMOD window
-void CloseReaModWindow(bool open){
-    if (!open) {
-        reaMOD_Main_ImGui_Context = nullptr; // do not call ImGui::End here
-        taskMap.clear();
+void CloseReaModWindow() {
+    // Remove tasks first to prevent them from accessing the context
+    if (guiTaskId >= 0) {
+        RemoveTask(guiTaskId);
+        guiTaskId = -1;
     }
+    if (searchEventGuiTaskId >= 0) {
+        RemoveTask(searchEventGuiTaskId);
+        searchEventGuiTaskId = -1;
+    }
+    if (itemSelectionTaskId >= 0) {
+        RemoveTask(itemSelectionTaskId);
+        itemSelectionTaskId = -1;
+    }
+    
+    // For ReaImGui, we just set the context to nullptr
+    // The context will be cleaned up by ReaImGui itself
+    reaMOD_Main_ImGui_Context = nullptr;
+    reaMOD_EventSearch_ImGui_Context = nullptr;
+    
+    searchFmodEventWindowOpen = false;
+    
+    DebugMsg("ReaMOD window closed and tasks removed.\n");
 }
 
 
 
 void RenderGUI() {
+
+    // Early exit if context is null (safety check)
+    if (!reaMOD_Main_ImGui_Context) {
+        return;
+    }
+
     EnsureReaMODFontsLoaded();
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
@@ -3840,12 +3864,19 @@ void RenderGUI() {
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
 
-    // Pop the style colors
+    // Pop style colors after End() but before cleanup
     PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
-
+    
+    // Render search window while main context is still valid
     RenderEventSearchWindow();
-
-    CloseReaModWindow(open);
+    
+    // Check if user closed the window - do cleanup LAST
+    if (!open) {
+        // CloseReaModWindow will set context to nullptr
+        // So this must be the very last thing we do
+        CloseReaModWindow();
+        return;
+    }
 }
 
 void UpdateEventPlayStates() {
