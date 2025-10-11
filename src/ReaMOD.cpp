@@ -104,6 +104,7 @@ int guiTaskId = -1;
 int searchEventGuiTaskId = -1;
 int playbackTaskId = -1;
 int itemSelectionTaskId = -1;
+bool clearTasksRequested = false;
 
 
 // Global variable to store the last triggered FMOD event path
@@ -3061,8 +3062,21 @@ void ReaMODText(ImGui_Context* ctx, const char* text, ImGui_Font* font) {
     }
 }
 
-void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
+struct ReaMODInterfaceStyleToken {
+    int colorCount = 0;
+    bool fontPushed = false;
+};
+
+static constexpr int kInterfaceStyleColorCount = 13;
+
+ReaMODInterfaceStyleToken PushReaMODInterfaceStyle(ImGui_Context* ctx) {
+    ReaMODInterfaceStyleToken token;
+    if (!ctx) {
+        return token;
+    }
+
     EnsureReaMODFontsLoaded();
+
     ImGui::PushStyleColor(ctx, ImGui::Col_WindowBg, greyDark);
     ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
     ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, supportButtonHovered);
@@ -3076,17 +3090,46 @@ void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
     ImGui::PushStyleColor(ctx, ImGui::Col_Header, supportButtonBackground);
     ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, supportButtonHovered);
     ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, supportButtonActive);
+    token.colorCount = kInterfaceStyleColorCount;
+
     if (reaMODRegularFont) {
         ImGui::PushFont(ctx, reaMODRegularFont);
+        token.fontPushed = true;
+    }
+
+    return token;
+}
+
+void PopReaMODInterfaceStyle(ImGui_Context* ctx, const ReaMODInterfaceStyleToken& token) {
+    if (!ctx) {
+        return;
+    }
+
+    if (token.fontPushed) {
+        ImGui::PopFont(ctx);
+    }
+
+    if (token.colorCount > 0) {
+        ImGui::PopStyleColor(ctx, token.colorCount);
     }
 }
 
-void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
-    if (reaMODRegularFont) {
-        ImGui::PopFont(ctx);
+class ReaMODInterfaceStyleScope {
+public:
+    explicit ReaMODInterfaceStyleScope(ImGui_Context* ctx)
+        : ctx_(ctx), token_(PushReaMODInterfaceStyle(ctx)) {}
+
+    ~ReaMODInterfaceStyleScope() {
+        PopReaMODInterfaceStyle(ctx_, token_);
     }
-    ImGui::PopStyleColor(ctx, 13);
-}
+
+    ReaMODInterfaceStyleScope(const ReaMODInterfaceStyleScope&) = delete;
+    ReaMODInterfaceStyleScope& operator=(const ReaMODInterfaceStyleScope&) = delete;
+
+private:
+    ImGui_Context* ctx_;
+    ReaMODInterfaceStyleToken token_;
+};
 
 bool StyledButton(ImGui_Context* ctx, const char* label) {
     bool fontActive = false;
@@ -3109,6 +3152,10 @@ bool StyledButton(ImGui_Context* ctx, const std::string& label) {
 
 void RenderEventSearchWindow() {
 
+    if (!reaMOD_Main_ImGui_Context) {
+        return;
+    }
+
     // Check if the search window should be open
     if (!searchFmodEventWindowOpen) {
         return;
@@ -3119,7 +3166,7 @@ void RenderEventSearchWindow() {
     // Set the initial window size
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 400, 300, ImGui::Cond_FirstUseEver);
 
-    PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+    ReaMODInterfaceStyleScope styleScope(reaMOD_Main_ImGui_Context);
 
     // Begin the window using the searchFmodEventWindowOpen flag
     if (ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost)) {
@@ -3348,28 +3395,27 @@ void RenderEventSearchWindow() {
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
 
-    PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 }
 
 // Close and clean-up from ReaMOD window
 void CloseReaModWindow(bool open){
     if (!open) {
-        if (reaMOD_Main_ImGui_Context != nullptr)
-        {
-            ImGui::End(reaMOD_Main_ImGui_Context);
-        }
         reaMOD_Main_ImGui_Context = nullptr;
-        // Clear all tasks
-        taskMap.clear();
+        searchFmodEventWindowOpen = false;
+        clearTasksRequested = true;
     }
 }
 
 
 void RenderGUI() {
+    if (!reaMOD_Main_ImGui_Context) {
+        return;
+    }
+
     EnsureReaMODFontsLoaded();
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
-    PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+    ReaMODInterfaceStyleScope styleScope(reaMOD_Main_ImGui_Context);
 
     bool open = true;  // Open flag for the window
     if (ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing)) {
@@ -3844,9 +3890,6 @@ void RenderGUI() {
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
 
-    // Pop the style colors
-    PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
-
     RenderEventSearchWindow();
 
     CloseReaModWindow(open);
@@ -4104,8 +4147,23 @@ void RemoveTask(int taskId) {
 
 // Timer function
 void OnTimer() {
-    for (auto& [taskId, task] : taskMap) {
-        task();
+    if (clearTasksRequested) {
+        taskMap.clear();
+        clearTasksRequested = false;
+        return;
+    }
+
+    std::vector<std::function<void()>> tasksToRun;
+    tasksToRun.reserve(taskMap.size());
+
+    for (const auto& [taskId, task] : taskMap) {
+        tasksToRun.push_back(task);
+    }
+
+    for (auto& task : tasksToRun) {
+        if (task) {
+            task();
+        }
     }
 }
 
@@ -4154,9 +4212,8 @@ void toggleReaMODWindow() {
         // }
     } else {
         // Clean up: remove tasks and close the window
-        taskMap.clear();
-
-        // Nullify the ImGui context to signify the window is closed
+        clearTasksRequested = true;
+        searchFmodEventWindowOpen = false;
         reaMOD_Main_ImGui_Context = nullptr;
     }
 }
