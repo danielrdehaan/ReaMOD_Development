@@ -3124,7 +3124,9 @@ void RenderEventSearchWindow() {
     PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     // Begin the window using the searchFmodEventWindowOpen flag
-    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost)) {
+    bool searchWindowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost);
+
+    if (searchWindowVisible) {
 
         // Display a label for the input field
         if (reaMODMediumFont) {
@@ -3322,8 +3324,9 @@ void RenderEventSearchWindow() {
                     }
                 }
 
-                ImGui::EndChild(reaMOD_Main_ImGui_Context);
             }
+
+            ImGui::EndChild(reaMOD_Main_ImGui_Context);
 
         } else if (!inputText.empty()) {
             // If there are no matches, inform the user
@@ -3346,9 +3349,10 @@ void RenderEventSearchWindow() {
             selectedIndex = -1;
         }
 
-        // End the window
-        ImGui::End(reaMOD_Main_ImGui_Context);
     }
+
+    // End must be called even when Begin returns false
+    ImGui::End(reaMOD_Main_ImGui_Context);
 
     PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 }
@@ -3438,7 +3442,9 @@ void RenderGUI() {
     PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     bool open = true;  // Open flag for the window
-    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing)) {
+    bool mainWindowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing);
+
+    if (mainWindowVisible) {
 
         // Display the formatted ReaMOD session text
         ReaMODText(reaMOD_Main_ImGui_Context, "ReaMOD Session:", reaMODBoldFont);
@@ -3907,8 +3913,10 @@ void RenderGUI() {
             }
         }
 
-        ImGui::End(reaMOD_Main_ImGui_Context);
     }
+
+    // ImGui requires End to be called even when Begin returns false
+    ImGui::End(reaMOD_Main_ImGui_Context);
 
     // Pop style colors after End() but before cleanup
     PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
