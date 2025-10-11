@@ -3912,14 +3912,14 @@ void RenderGUI() {
             }
         }
 
+        // Pop style colors after End() but before cleanup
+        PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
 
     // Render search window while main context is still valid
     RenderEventSearchWindow();
-
-    // Pop style colors after End() but before cleanup
-    PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
     
     // Check if user closed the window - do cleanup LAST
     if (!open) {
