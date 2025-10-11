@@ -14,6 +14,7 @@
 #include <chrono>
 #include <thread>
 #include <fstream> // Include for file I/O operations
+#include <mutex>
 #include <ctime>
 #include <cstdlib>
 
@@ -99,6 +100,7 @@ int lookAheadTimeMs = 60;  // Default look-ahead time set to 0 milliseconds
 
 // Task management
 std::unordered_map<int, std::function<void()>> taskMap;
+std::mutex taskMapMutex;
 int nextTaskId = 0;
 int guiTaskId = -1;
 int searchEventGuiTaskId = -1;
@@ -3354,20 +3356,43 @@ void RenderEventSearchWindow() {
 
 // Add task and return its ID
 int AddTask(std::function<void()> task) {
+    std::lock_guard<std::mutex> lock(taskMapMutex);
     int taskId = nextTaskId++;
-    taskMap[taskId] = task;
+    taskMap[taskId] = std::move(task);
     return taskId;
 }
 
 // Remove a task by ID
 void RemoveTask(int taskId) {
+    std::lock_guard<std::mutex> lock(taskMapMutex);
     taskMap.erase(taskId);
 }
 
 // Timer function
 void OnTimer() {
-    for (auto& [taskId, task] : taskMap) {
-        task();
+    std::vector<std::function<void()>> tasksToRun;
+    {
+        std::lock_guard<std::mutex> lock(taskMapMutex);
+        tasksToRun.reserve(taskMap.size());
+        for (const auto& [taskId, task] : taskMap) {
+            if (task) {
+                tasksToRun.push_back(task);
+            }
+        }
+    }
+
+    for (auto& task : tasksToRun) {
+        if (!task) {
+            continue;
+        }
+
+        try {
+            task();
+        } catch (const std::exception& e) {
+            DebugMsg("Exception in timer task: %s\n", e.what());
+        } catch (...) {
+            DebugMsg("Unknown exception in timer task.\n");
+        }
     }
 }
 
@@ -3937,6 +3962,10 @@ void UpdateEventPlayStates() {
 }
 
 void MonitorPlayback() {
+    if (!reaMOD_Main_ImGui_Context) {
+        return;
+    }
+
     if (!IsFMODInitialized()) {
         DebugMsg("FMOD system is not initialized.\n");
         DebugMsg("Attempting to re-initialize FMOD...\n");
@@ -4004,6 +4033,17 @@ void MonitorPlayback() {
 
 void MonitorItemSelection() {
     // DebugMsg("MonitorItemSelection called.\n");
+
+    if (!reaMOD_Main_ImGui_Context) {
+        return;
+    }
+
+    if (!CountSelectedMediaItems || !GetSelectedMediaItem || !GetActiveTake ||
+        !GetSetMediaItemTakeInfo_String || !GetSetMediaItemInfo_String) {
+        DebugMsg("Media item selection functions are not available.\n");
+        lastSelectedItem = nullptr;
+        return;
+    }
 
     if (!syncSelectedEventWithItemSelection) {
         DebugMsg("Sync with selected item is disabled.\n");
