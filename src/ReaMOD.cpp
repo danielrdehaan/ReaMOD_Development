@@ -3923,10 +3923,7 @@ void RenderGUI() {
     
     // Check if user closed the window - do cleanup LAST
     if (!open) {
-        // CloseReaModWindow will set context to nullptr
-        // So this must be the very last thing we do
         CloseReaModWindow();
-        return;
     }
 }
 
