@@ -3397,6 +3397,27 @@ void RenderEventSearchWindow() {
 
 }
 
+
+// Add task and return its ID
+int AddTask(std::function<void()> task) {
+    int taskId = nextTaskId++;
+    taskMap[taskId] = task;
+    return taskId;
+}
+
+// Remove a task by ID
+void RemoveTask(int taskId) {
+    taskMap.erase(taskId);
+}
+
+// Timer function
+void OnTimer() {
+    for (auto& [taskId, task] : taskMap) {
+        task();
+    }
+}
+
+
 // Close and clean-up from ReaMOD window
 void CloseReaModWindow(bool open){
     if (!open) {
@@ -3404,7 +3425,21 @@ void CloseReaModWindow(bool open){
         searchFmodEventWindowOpen = false;
         clearTasksRequested = true;
     }
+    if (itemSelectionTaskId >= 0) {
+        RemoveTask(itemSelectionTaskId);
+        itemSelectionTaskId = -1;
+    }
+    
+    // For ReaImGui, we just set the context to nullptr
+    // The context will be cleaned up by ReaImGui itself
+    reaMOD_Main_ImGui_Context = nullptr;
+    reaMOD_EventSearch_ImGui_Context = nullptr;
+    
+    searchFmodEventWindowOpen = false;
+    
+    DebugMsg("ReaMOD window closed and tasks removed.\n");
 }
+
 
 
 void RenderGUI() {
@@ -3891,8 +3926,14 @@ void RenderGUI() {
     }
 
     RenderEventSearchWindow();
-
-    CloseReaModWindow(open);
+    
+    // Check if user closed the window - do cleanup LAST
+    if (!open) {
+        // CloseReaModWindow will set context to nullptr
+        // So this must be the very last thing we do
+        CloseReaModWindow();
+        return;
+    }
 }
 
 void UpdateEventPlayStates() {
