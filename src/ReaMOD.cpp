@@ -3111,6 +3111,11 @@ bool StyledButton(ImGui_Context* ctx, const std::string& label) {
 
 void RenderEventSearchWindow() {
 
+    // Early exit if the context is not available
+    if (!reaMOD_Main_ImGui_Context) {
+        return;
+    }
+
     // Check if the search window should be open
     if (!searchFmodEventWindowOpen) {
         return;
