@@ -3124,7 +3124,9 @@ void RenderEventSearchWindow() {
     PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     // Begin the window using the searchFmodEventWindowOpen flag
-    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost)) {
+    bool windowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost);
+
+    if (windowVisible) {
 
         // Display a label for the input field
         if (reaMODMediumFont) {
@@ -3345,10 +3347,10 @@ void RenderEventSearchWindow() {
             errorMessage.clear();
             selectedIndex = -1;
         }
-
-        // End the window
-        ImGui::End(reaMOD_Main_ImGui_Context);
     }
+
+    // End the window (must be called even if Begin returned false)
+    ImGui::End(reaMOD_Main_ImGui_Context);
 
     PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 }
@@ -3438,7 +3440,9 @@ void RenderGUI() {
     PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     bool open = true;  // Open flag for the window
-    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing)) {
+    bool windowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing);
+
+    if (windowVisible) {
 
         // Display the formatted ReaMOD session text
         ReaMODText(reaMOD_Main_ImGui_Context, "ReaMOD Session:", reaMODBoldFont);
@@ -3906,9 +3910,9 @@ void RenderGUI() {
                 DebugMsg("Failed to open website URL.\n");
             }
         }
-
-        ImGui::End(reaMOD_Main_ImGui_Context);
     }
+
+    ImGui::End(reaMOD_Main_ImGui_Context);
 
     // Pop style colors after End() but before cleanup
     PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
