@@ -3354,15 +3354,11 @@ void RenderEventSearchWindow() {
 // Close and clean-up from ReaMOD window
 void CloseReaModWindow(bool open){
     if (!open) {
-        if (reaMOD_Main_ImGui_Context != nullptr)
-        {
-            ImGui::End(reaMOD_Main_ImGui_Context);
-        }
-        reaMOD_Main_ImGui_Context = nullptr;
-        // Clear all tasks
+        reaMOD_Main_ImGui_Context = nullptr; // do not call ImGui::End here
         taskMap.clear();
     }
 }
+
 
 
 void RenderGUI() {
