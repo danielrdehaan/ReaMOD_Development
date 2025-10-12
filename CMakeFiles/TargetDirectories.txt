@@ -1,3 +1,0 @@
-/home/runner/work/ReaMOD/ReaMOD/CMakeFiles/reaper_ReaMOD_Plugin.dir
-/home/runner/work/ReaMOD/ReaMOD/CMakeFiles/edit_cache.dir
-/home/runner/work/ReaMOD/ReaMOD/CMakeFiles/rebuild_cache.dir
