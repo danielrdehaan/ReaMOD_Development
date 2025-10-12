@@ -1317,15 +1317,15 @@ bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
     bool is_active = buttonStates[event_path];
 
     // Push button color based on its state
-    if (is_active) {
-        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0x32CD32FF); // Active (green)
-        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0x008000FF); // Dark green when hovered
-        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x006400FF); // Even darker green when clicked
-    } else {
-        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0xC0C0C0FF); // Inactive (grey)
-        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0xA9A9A9FF); // Darker grey when hovered
-        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x808080FF); // Dark grey when clicked
-    }
+    // if (is_active) {
+    //     ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0x32CD32FF); // Active (green)
+    //     ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0x008000FF); // Dark green when hovered
+    //     ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x006400FF); // Even darker green when clicked
+    // } else {
+    //     ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0xC0C0C0FF); // Inactive (grey)
+    //     ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0xA9A9A9FF); // Darker grey when hovered
+    //     ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x808080FF); // Dark grey when clicked
+    // }
 
     // Render the button
     if (ImGui::ArrowButton(ctx, unique_button_id.c_str(), ImGui::Dir_Right)) {
@@ -3044,64 +3044,64 @@ void EnsureReaMODFontsLoaded() {
 
 void ReaMODSeparatorText(ImGui_Context* ctx, const char* label) {
     EnsureReaMODFontsLoaded();
-    if (reaMODBoldFont) {
-        ImGui::PushFont(ctx, reaMODBoldFont);
-    }
+    // if (reaMODBoldFont) {
+    //     ImGui::PushFont(ctx, reaMODBoldFont);
+    // }
     ImGui::SeparatorText(ctx, label);
-    if (reaMODBoldFont) {
-        ImGui::PopFont(ctx);
-    }
+    // if (reaMODBoldFont) {
+    //     ImGui::PopFont(ctx);
+    // }
 }
 
 void ReaMODText(ImGui_Context* ctx, const char* text, ImGui_Font* font) {
-    if (font) {
-        ImGui::PushFont(ctx, font);
-    }
+    // if (font) {
+    //     ImGui::PushFont(ctx, font);
+    // }
     ImGui::Text(ctx, text);
-    if (font) {
-        ImGui::PopFont(ctx);
-    }
+    // if (font) {
+    //     ImGui::PopFont(ctx);
+    // }
 }
 
 void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
-    EnsureReaMODFontsLoaded();
-    ImGui::PushStyleColor(ctx, ImGui::Col_WindowBg, greyDark);
-    ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
-    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, supportButtonActive);
-    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBg, supportButtonBackground);
-    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgHovered, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgActive, supportButtonActive);
-    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrab, supportButtonActive);
-    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrabActive, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_CheckMark, blue);
-    ImGui::PushStyleColor(ctx, ImGui::Col_Header, supportButtonBackground);
-    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, supportButtonActive);
-    if (reaMODRegularFont) {
-        ImGui::PushFont(ctx, reaMODRegularFont);
-    }
+    // EnsureReaMODFontsLoaded();
+    // ImGui::PushStyleColor(ctx, ImGui::Col_WindowBg, greyDark);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, supportButtonHovered);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, supportButtonActive);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_FrameBg, supportButtonBackground);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgHovered, supportButtonHovered);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgActive, supportButtonActive);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrab, supportButtonActive);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrabActive, supportButtonHovered);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_CheckMark, blue);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_Header, supportButtonBackground);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, supportButtonHovered);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, supportButtonActive);
+    // if (reaMODRegularFont) {
+    //     ImGui::PushFont(ctx, reaMODRegularFont);
+    // }
 }
 
 void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
-    if (reaMODRegularFont) {
-        ImGui::PopFont(ctx);
-    }
-    ImGui::PopStyleColor(ctx, 13);
+    // if (reaMODRegularFont) {
+    //     ImGui::PopFont(ctx);
+    // }
+    // ImGui::PopStyleColor(ctx, 13);
 }
 
 bool StyledButton(ImGui_Context* ctx, const char* label) {
     bool fontActive = false;
-    if (reaMODMediumFont) {
-        ImGui::PushFont(ctx, reaMODMediumFont);
-        fontActive = true;
-    }
-    ImGui::PushStyleColor(ctx, ImGui::Col_Text, blue);
+    // if (reaMODMediumFont) {
+    //     ImGui::PushFont(ctx, reaMODMediumFont);
+    //     fontActive = true;
+    // }
+    // ImGui::PushStyleColor(ctx, ImGui::Col_Text, blue);
     bool pressed = ImGui::Button(ctx, label);
-    ImGui::PopStyleColor(ctx);
-    if (fontActive) {
-        ImGui::PopFont(ctx);
-    }
+    // ImGui::PopStyleColor(ctx);
+    // if (fontActive) {
+    //     ImGui::PopFont(ctx);
+    // }
     return pressed;
 }
 
@@ -3121,25 +3121,25 @@ void RenderEventSearchWindow() {
         return;
     }
 
-    EnsureReaMODFontsLoaded();
+    // EnsureReaMODFontsLoaded();
 
     // Set the initial window size
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 400, 300, ImGui::Cond_FirstUseEver);
 
-    PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+    // PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
      bool windowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost);
 
     // Begin the window using the searchFmodEventWindowOpen flag
     if (windowVisible) {
 
         // Display a label for the input field
-        if (reaMODMediumFont) {
-            ImGui::PushFont(reaMOD_Main_ImGui_Context, reaMODMediumFont);
-        }
+        // if (reaMODMediumFont) {
+        //     ImGui::PushFont(reaMOD_Main_ImGui_Context, reaMODMediumFont);
+        // }
         ImGui::Text(reaMOD_Main_ImGui_Context, "Event Search:");
-        if (reaMODMediumFont) {
-            ImGui::PopFont(reaMOD_Main_ImGui_Context);
-        }
+        // if (reaMODMediumFont) {
+        //     ImGui::PopFont(reaMOD_Main_ImGui_Context);
+        // }
 
         // Static buffer to hold user input
         static char eventSearchBuffer[256] = "";    
@@ -3354,7 +3354,7 @@ void RenderEventSearchWindow() {
         
     }
 
-    PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+    // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     // End the window
     ImGui::End(reaMOD_Main_ImGui_Context);
@@ -3439,7 +3439,7 @@ void RenderGUI() {
         return;
     }
 
-    EnsureReaMODFontsLoaded();
+    // EnsureReaMODFontsLoaded();
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
     // PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
