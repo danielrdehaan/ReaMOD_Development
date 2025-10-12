@@ -3127,9 +3127,10 @@ void RenderEventSearchWindow() {
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 400, 300, ImGui::Cond_FirstUseEver);
 
     // PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+     bool windowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost);
 
     // Begin the window using the searchFmodEventWindowOpen flag
-    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost)) {
+    if (windowVisible) {
 
         // Display a label for the input field
         if (reaMODMediumFont) {
@@ -3350,10 +3351,11 @@ void RenderEventSearchWindow() {
             errorMessage.clear();
             selectedIndex = -1;
         }
-
-        // End the window
-        ImGui::End(reaMOD_Main_ImGui_Context);
+        
     }
+
+    // End the window
+    ImGui::End(reaMOD_Main_ImGui_Context);
 
     // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 }
