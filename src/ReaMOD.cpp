@@ -1317,15 +1317,15 @@ bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
     bool is_active = buttonStates[event_path];
 
     // Push button color based on its state
-    // if (is_active) {
-    //     ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0x32CD32FF); // Active (green)
-    //     ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0x008000FF); // Dark green when hovered
-    //     ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x006400FF); // Even darker green when clicked
-    // } else {
-    //     ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0xC0C0C0FF); // Inactive (grey)
-    //     ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0xA9A9A9FF); // Darker grey when hovered
-    //     ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x808080FF); // Dark grey when clicked
-    // }
+    if (is_active) {
+        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0x32CD32FF); // Active (green)
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0x008000FF); // Dark green when hovered
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x006400FF); // Even darker green when clicked
+    } else {
+        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0xC0C0C0FF); // Inactive (grey)
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0xA9A9A9FF); // Darker grey when hovered
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x808080FF); // Dark grey when clicked
+    }
 
     // Render the button
     if (ImGui::ArrowButton(ctx, unique_button_id.c_str(), ImGui::Dir_Right)) {
@@ -1348,7 +1348,7 @@ bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
     }
 
     // Pop the style colors
-    // ImGui::PopStyleColor(ctx, 3);
+    ImGui::PopStyleColor(ctx, 3);
 
     return is_active;
 }
