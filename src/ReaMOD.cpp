@@ -3066,28 +3066,28 @@ void ReaMODText(ImGui_Context* ctx, const char* text, ImGui_Font* font) {
 void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
     EnsureReaMODFontsLoaded();
     ImGui::PushStyleColor(ctx, ImGui::Col_WindowBg, greyDark);
-    ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
-    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, supportButtonActive);
-    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBg, supportButtonBackground);
-    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgHovered, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgActive, supportButtonActive);
-    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrab, supportButtonActive);
-    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrabActive, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_CheckMark, blue);
-    ImGui::PushStyleColor(ctx, ImGui::Col_Header, supportButtonBackground);
-    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, supportButtonActive);
-    if (reaMODRegularFont) {
-        ImGui::PushFont(ctx, reaMODRegularFont);
-    }
+    // ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, supportButtonHovered);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, supportButtonActive);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_FrameBg, supportButtonBackground);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgHovered, supportButtonHovered);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgActive, supportButtonActive);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrab, supportButtonActive);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrabActive, supportButtonHovered);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_CheckMark, blue);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_Header, supportButtonBackground);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, supportButtonHovered);
+    // ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, supportButtonActive);
+    // if (reaMODRegularFont) {
+    //     ImGui::PushFont(ctx, reaMODRegularFont);
+    // }
 }
 
 void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
-    if (reaMODRegularFont) {
-        ImGui::PopFont(ctx);
-    }
-    ImGui::PopStyleColor(ctx, 13);
+    // if (reaMODRegularFont) {
+    //     ImGui::PopFont(ctx);
+    // }
+    ImGui::PopStyleColor(ctx, 1);
 }
 
 bool StyledButton(ImGui_Context* ctx, const char* label) {
@@ -3442,7 +3442,7 @@ void RenderGUI() {
     EnsureReaMODFontsLoaded();
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
-    // PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+    PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     bool open = true;  // Open flag for the window
     bool windowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing);
@@ -3917,7 +3917,7 @@ void RenderGUI() {
         }
 
         // Pop style colors after End() but before cleanup
-        // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+        PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     }
 
