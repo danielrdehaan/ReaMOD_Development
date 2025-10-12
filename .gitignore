@@ -13,6 +13,8 @@
 
 # Compiled Dynamic libraries
 *.so
+*.dylib
+*.dll
 
 # Fortran module files
 *.mod
@@ -28,7 +30,13 @@
 *.out
 *.app
 
+# CMake build files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+build/
+
 # Fmod API
 # fmod/**
-build/CMakeFiles/CMakeConfigureLog.yaml
-build/reaper_ReaMOD_Plugin.dylib
