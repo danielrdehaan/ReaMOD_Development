@@ -3923,7 +3923,7 @@ void RenderGUI() {
     }
 
     // Render search window while main context is still valid
-    RenderEventSearchWindow();
+    // RenderEventSearchWindow();
     
     // Check if user closed the window - do cleanup LAST
     if (!open) {
