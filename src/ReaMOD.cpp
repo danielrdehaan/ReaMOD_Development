@@ -3084,9 +3084,7 @@ void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
 }
 
 void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
-    if (reaMODRegularFont) {
-        ImGui::PopFont(ctx);
-    }
+    ImGui::PopFont(ctx);
     ImGui::PopStyleColor(ctx, 13);
 }
 
