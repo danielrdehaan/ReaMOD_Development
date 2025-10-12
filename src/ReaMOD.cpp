@@ -3355,7 +3355,7 @@ void RenderEventSearchWindow() {
     }
 
     PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
-    
+
     // End the window
     ImGui::End(reaMOD_Main_ImGui_Context);
 }
@@ -3919,8 +3919,9 @@ void RenderGUI() {
         // Pop style colors after End() but before cleanup
         // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
-        ImGui::End(reaMOD_Main_ImGui_Context);
     }
+
+    ImGui::End(reaMOD_Main_ImGui_Context);
 
     // Render search window while main context is still valid
     // RenderEventSearchWindow();
