@@ -3087,7 +3087,7 @@ void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
     if (reaMODRegularFont) {
         ImGui::PopFont(ctx);
     }
-    ImGui::PopStyleColor(ctx, 13);
+    ImGui::PopStyleColor(ctx, 14);
 }
 
 bool StyledButton(ImGui_Context* ctx, const char* label) {
