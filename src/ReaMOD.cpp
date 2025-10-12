@@ -2998,6 +2998,11 @@ ImGui_Font* LoadReaMODFont(const fs::path& fontsDir, const std::string& fileName
 }
 
 void EnsureReaMODFontsLoaded() {
+    // Do nothing if we don't have an active ImGui context
+    if (!reaMOD_Main_ImGui_Context) {
+        return;
+    }
+
     std::string fontsDirectory = LocateReaMODFontsDirectory();
     if (fontsDirectory.empty()) {
         return;
@@ -3014,6 +3019,8 @@ void EnsureReaMODFontsLoaded() {
         if (!reaMODRegularFont && !reportedRegularMissing) {
             DebugMsg("Roboto-Regular.ttf could not be loaded; using ImGui's default font.\n");
             reportedRegularMissing = true;
+        } else if (reaMODRegularFont) {
+            DebugMsg("EnsureReaMODFontsLoaded(): Loaded Roboto-Regular.ttf.\n");
         }
     }
 
@@ -3022,6 +3029,8 @@ void EnsureReaMODFontsLoaded() {
         if (!reaMODMediumFont && !reportedMediumMissing) {
             DebugMsg("Roboto-Medium.ttf could not be loaded; buttons will use the regular font.\n");
             reportedMediumMissing = true;
+        } else if (reaMODMediumFont) {
+            DebugMsg("EnsureReaMODFontsLoaded(): Loaded Roboto-Medium.ttf.\n");
         }
     }
 
@@ -3030,6 +3039,8 @@ void EnsureReaMODFontsLoaded() {
         if (!reaMODBoldFont && !reportedBoldMissing) {
             DebugMsg("Roboto-Bold.ttf could not be loaded; headings will use the regular font.\n");
             reportedBoldMissing = true;
+        } else if (reaMODBoldFont) {
+            DebugMsg("EnsureReaMODFontsLoaded(): Loaded Roboto-Black.ttf.\n");
         }
     }
 
@@ -3043,6 +3054,7 @@ void EnsureReaMODFontsLoaded() {
 }
 
 void ReaMODSeparatorText(ImGui_Context* ctx, const char* label) {
+    if (!ctx) return;
     EnsureReaMODFontsLoaded();
     if (reaMODBoldFont) {
         ImGui::PushFont(ctx, reaMODBoldFont);
@@ -3054,6 +3066,7 @@ void ReaMODSeparatorText(ImGui_Context* ctx, const char* label) {
 }
 
 void ReaMODText(ImGui_Context* ctx, const char* text, ImGui_Font* font) {
+    if (!ctx) return;
     if (font) {
         ImGui::PushFont(ctx, font);
     }
@@ -3064,6 +3077,7 @@ void ReaMODText(ImGui_Context* ctx, const char* text, ImGui_Font* font) {
 }
 
 void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
+    if (!ctx) return;
     EnsureReaMODFontsLoaded();
     ImGui::PushStyleColor(ctx, ImGui::Col_WindowBg, greyDark);
     ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
@@ -3084,6 +3098,7 @@ void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
 }
 
 void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
+    if (!ctx) return;
     if (reaMODRegularFont) {
         ImGui::PopFont(ctx);
     }
@@ -3091,6 +3106,7 @@ void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
 }
 
 bool StyledButton(ImGui_Context* ctx, const char* label) {
+    if (!ctx) return false;
     bool fontActive = false;
     if (reaMODMediumFont) {
         ImGui::PushFont(ctx, reaMODMediumFont);
@@ -3404,9 +3420,9 @@ void OnTimer() {
 }
 
 
-// Close and clean-up from ReaMOD window
-void CloseReaModWindow() {
-    // Remove tasks first to prevent them from accessing the context
+// Centralized shutdown helper for ImGui context and resources
+void ShutdownImGuiContextAndResources() {
+    // Remove tasks safely
     if (guiTaskId >= 0) {
         RemoveTask(guiTaskId);
         guiTaskId = -1;
@@ -3419,15 +3435,35 @@ void CloseReaModWindow() {
         RemoveTask(itemSelectionTaskId);
         itemSelectionTaskId = -1;
     }
-    
-    // For ReaImGui, we just set the context to nullptr
-    // The context will be cleaned up by ReaImGui itself
+    if (playbackTaskId >= 0) {
+        RemoveTask(playbackTaskId);
+        playbackTaskId = -1;
+    }
+
+    // As a final fallback, clear any leftover tasks
+    {
+        std::lock_guard<std::mutex> lock(taskMapMutex);
+        taskMap.clear();
+    }
+
+    // Nullify/release ImGui contexts that we own/refer to
     reaMOD_Main_ImGui_Context = nullptr;
     reaMOD_EventSearch_ImGui_Context = nullptr;
-    
+
+    // Null out font pointers so EnsureReaMODFontsLoaded will recreate them for a new context
+    reaMODRegularFont = nullptr;
+    reaMODMediumFont = nullptr;
+    reaMODBoldFont = nullptr;
+
+    // Reset UI open flags
     searchFmodEventWindowOpen = false;
-    
-    DebugMsg("ReaMOD window closed and tasks removed.\n");
+
+    DebugMsg("ShutdownImGuiContextAndResources(): tasks removed, contexts nulled, fonts reset.\n");
+}
+
+// Close and clean-up from ReaMOD window
+void CloseReaModWindow() {
+    ShutdownImGuiContextAndResources();
 }
 
 
@@ -4213,6 +4249,7 @@ void toggleReaMODWindow() {
         // First-time setup: initialize ReaImGui and FMOD, and start rendering
         ImGui::init(plugin_getapi);
         reaMOD_Main_ImGui_Context = ImGui::CreateContext("ReaMOD Window");
+        DebugMsg("toggleReaMODWindow(): Created ImGui context.\n");
 
         // Initialize FMOD only if it's not already initialized
         if (!IsFMODInitialized()) {
@@ -4230,11 +4267,8 @@ void toggleReaMODWindow() {
         //     reaModWindowPreviouslyOpen = true;
         // }
     } else {
-        // Clean up: remove tasks and close the window
-        taskMap.clear();
-
-        // Nullify the ImGui context to signify the window is closed
-        reaMOD_Main_ImGui_Context = nullptr;
+        // Clean up and shut down
+        ShutdownImGuiContextAndResources();
     }
 }
 

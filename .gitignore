@@ -32,3 +32,9 @@
 # fmod/**
 build/CMakeFiles/CMakeConfigureLog.yaml
 build/reaper_ReaMOD_Plugin.dylib
+
+# CMake build artifacts
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
