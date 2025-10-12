@@ -688,7 +688,7 @@ char const *info_cray = "INFO" ":" "compiler_wrapper[CrayPrgEnv]";
 
 #elif defined(__clang__) && defined(__ti__)
 # if defined(__ARM_ARCH)
-#  define ARCHITECTURE_ID "Arm"
+#  define ARCHITECTURE_ID "ARM"
 
 # else /* unknown architecture */
 #  define ARCHITECTURE_ID ""

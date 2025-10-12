@@ -3419,11 +3419,33 @@ void CloseReaModWindow() {
         RemoveTask(itemSelectionTaskId);
         itemSelectionTaskId = -1;
     }
-    
-    // For ReaImGui, we just set the context to nullptr
-    // The context will be cleaned up by ReaImGui itself
-    reaMOD_Main_ImGui_Context = nullptr;
-    reaMOD_EventSearch_ImGui_Context = nullptr;
+    if (playbackTaskId >= 0) {
+        RemoveTask(playbackTaskId);
+        playbackTaskId = -1;
+    }
+
+    // Remove any tasks referenced in taskMap safely
+    // We make a copy of task IDs to avoid iterator invalidation
+    std::vector<int> taskIds;
+    {
+        std::lock_guard<std::mutex> lock(taskMapMutex);
+        for (const auto& [taskId, task] : taskMap) {
+            taskIds.push_back(taskId);
+        }
+    }
+    for (int taskId : taskIds) {
+        RemoveTask(taskId);
+    }
+
+    // Detach ImGui contexts via ReaImGui so it can clean up internal resources
+    if (reaMOD_Main_ImGui_Context) {
+        ImGui::Detach(reaMOD_Main_ImGui_Context, nullptr);
+        reaMOD_Main_ImGui_Context = nullptr;
+    }
+    if (reaMOD_EventSearch_ImGui_Context) {
+        ImGui::Detach(reaMOD_EventSearch_ImGui_Context, nullptr);
+        reaMOD_EventSearch_ImGui_Context = nullptr;
+    }
     
     searchFmodEventWindowOpen = false;
     
@@ -4230,11 +4252,8 @@ void toggleReaMODWindow() {
         //     reaModWindowPreviouslyOpen = true;
         // }
     } else {
-        // Clean up: remove tasks and close the window
-        taskMap.clear();
-
-        // Nullify the ImGui context to signify the window is closed
-        reaMOD_Main_ImGui_Context = nullptr;
+        // Clean up: remove tasks and close the window using the centralized cleanup function
+        CloseReaModWindow();
     }
 }
 

@@ -1,10 +1,11 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/reaper_ReaMOD_Plugin.dir/link.d"
   "CMakeFiles/reaper_ReaMOD_Plugin.dir/src/ReaMOD.cpp.o"
   "CMakeFiles/reaper_ReaMOD_Plugin.dir/src/ReaMOD.cpp.o.d"
   "CMakeFiles/reaper_ReaMOD_Plugin.dir/tinyfiledialogs/tinyfiledialogs.c.o"
   "CMakeFiles/reaper_ReaMOD_Plugin.dir/tinyfiledialogs/tinyfiledialogs.c.o.d"
-  "reaper_ReaMOD_Plugin.dylib"
-  "reaper_ReaMOD_Plugin.pdb"
+  "libreaper_ReaMOD_Plugin.pdb"
+  "libreaper_ReaMOD_Plugin.so"
 )
 
 # Per-language clean rules from dependency scanning.
