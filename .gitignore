@@ -30,5 +30,12 @@
 
 # Fmod API
 # fmod/**
-build/CMakeFiles/CMakeConfigureLog.yaml
-build/reaper_ReaMOD_Plugin.dylib
+
+# CMake build artifacts
+build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.dylib
+*.dll

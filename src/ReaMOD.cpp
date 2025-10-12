@@ -3064,6 +3064,11 @@ void ReaMODText(ImGui_Context* ctx, const char* text, ImGui_Font* font) {
 }
 
 void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
+    // Early return if context is null to avoid calling ImGui APIs with null context
+    if (!ctx) {
+        return;
+    }
+    
     EnsureReaMODFontsLoaded();
     ImGui::PushStyleColor(ctx, ImGui::Col_WindowBg, greyDark);
     ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
@@ -3084,6 +3089,11 @@ void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
 }
 
 void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
+    // Early return if context is null to avoid calling ImGui APIs with null context
+    if (!ctx) {
+        return;
+    }
+    
     if (reaMODRegularFont) {
         ImGui::PopFont(ctx);
     }
@@ -3424,6 +3434,14 @@ void CloseReaModWindow() {
     // The context will be cleaned up by ReaImGui itself
     reaMOD_Main_ImGui_Context = nullptr;
     reaMOD_EventSearch_ImGui_Context = nullptr;
+    
+    // Reset font pointers to nullptr since fonts are context-specific
+    // and will be invalid once the ImGui context is destroyed.
+    // EnsureReaMODFontsLoaded() will recreate fonts for the next context.
+    // TODO: If ReaImGui exposes a font destruction API, call it here before nulling.
+    reaMODRegularFont = nullptr;
+    reaMODMediumFont = nullptr;
+    reaMODBoldFont = nullptr;
     
     searchFmodEventWindowOpen = false;
     
@@ -4235,6 +4253,14 @@ void toggleReaMODWindow() {
 
         // Nullify the ImGui context to signify the window is closed
         reaMOD_Main_ImGui_Context = nullptr;
+        
+        // Reset font pointers to nullptr since fonts are context-specific
+        // and will be invalid once the ImGui context is destroyed.
+        // EnsureReaMODFontsLoaded() will recreate fonts for the next context.
+        // TODO: If ReaImGui exposes a font destruction API, call it here before nulling.
+        reaMODRegularFont = nullptr;
+        reaMODMediumFont = nullptr;
+        reaMODBoldFont = nullptr;
     }
 }
 
