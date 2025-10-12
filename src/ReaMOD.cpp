@@ -3078,15 +3078,15 @@ void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
     ImGui::PushStyleColor(ctx, ImGui::Col_Header, supportButtonBackground);
     ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, supportButtonHovered);
     ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, supportButtonActive);
-    // if (reaMODRegularFont) {
-    //     ImGui::PushFont(ctx, reaMODRegularFont);
-    // }
+    if (reaMODRegularFont) {
+        ImGui::PushFont(ctx, reaMODRegularFont);
+    }
 }
 
 void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
-    // if (reaMODRegularFont) {
-    //     ImGui::PopFont(ctx);
-    // }
+    if (reaMODRegularFont) {
+        ImGui::PopFont(ctx);
+    }
     ImGui::PopStyleColor(ctx, 13);
 }
 
