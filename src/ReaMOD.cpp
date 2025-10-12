@@ -1348,7 +1348,7 @@ bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
     }
 
     // Pop the style colors
-    ImGui::PopStyleColor(ctx, 3);
+    // ImGui::PopStyleColor(ctx, 3);
 
     return is_active;
 }
