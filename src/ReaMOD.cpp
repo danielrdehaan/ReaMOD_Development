@@ -3066,18 +3066,18 @@ void ReaMODText(ImGui_Context* ctx, const char* text, ImGui_Font* font) {
 void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
     EnsureReaMODFontsLoaded();
     ImGui::PushStyleColor(ctx, ImGui::Col_WindowBg, greyDark);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, supportButtonHovered);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, supportButtonActive);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_FrameBg, supportButtonBackground);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgHovered, supportButtonHovered);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgActive, supportButtonActive);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrab, supportButtonActive);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrabActive, supportButtonHovered);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_CheckMark, blue);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_Header, supportButtonBackground);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, supportButtonHovered);
-    // ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, supportButtonActive);
+    ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, supportButtonHovered);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, supportButtonActive);
+    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBg, supportButtonBackground);
+    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgHovered, supportButtonHovered);
+    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgActive, supportButtonActive);
+    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrab, supportButtonActive);
+    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrabActive, supportButtonHovered);
+    ImGui::PushStyleColor(ctx, ImGui::Col_CheckMark, blue);
+    ImGui::PushStyleColor(ctx, ImGui::Col_Header, supportButtonBackground);
+    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, supportButtonHovered);
+    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, supportButtonActive);
     // if (reaMODRegularFont) {
     //     ImGui::PushFont(ctx, reaMODRegularFont);
     // }
@@ -3087,7 +3087,7 @@ void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
     // if (reaMODRegularFont) {
     //     ImGui::PopFont(ctx);
     // }
-    ImGui::PopStyleColor(ctx, 1);
+    ImGui::PopStyleColor(ctx, 13);
 }
 
 bool StyledButton(ImGui_Context* ctx, const char* label) {
