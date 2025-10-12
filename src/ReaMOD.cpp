@@ -3084,10 +3084,10 @@ void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
 }
 
 void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
-    // if (reaMODRegularFont) {
-    //     ImGui::PopFont(ctx);
-    // }
-    // ImGui::PopStyleColor(ctx, 13);
+    if (reaMODRegularFont) {
+        ImGui::PopFont(ctx);
+    }
+    ImGui::PopStyleColor(ctx, 13);
 }
 
 bool StyledButton(ImGui_Context* ctx, const char* label) {
@@ -3439,7 +3439,7 @@ void RenderGUI() {
         return;
     }
 
-    // EnsureReaMODFontsLoaded();
+    EnsureReaMODFontsLoaded();
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
     PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
