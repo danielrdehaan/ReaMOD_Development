@@ -3126,7 +3126,7 @@ void RenderEventSearchWindow() {
     // Set the initial window size
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 400, 300, ImGui::Cond_FirstUseEver);
 
-    // PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+    PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
      bool windowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "Event Search", &searchFmodEventWindowOpen, ImGui::WindowFlags_TopMost);
 
     // Begin the window using the searchFmodEventWindowOpen flag
@@ -3354,10 +3354,10 @@ void RenderEventSearchWindow() {
         
     }
 
+    PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+    
     // End the window
     ImGui::End(reaMOD_Main_ImGui_Context);
-
-    // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 }
 
 
@@ -3442,7 +3442,7 @@ void RenderGUI() {
     EnsureReaMODFontsLoaded();
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
-    // PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+    PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     bool open = true;  // Open flag for the window
     bool windowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing);
@@ -3917,7 +3917,7 @@ void RenderGUI() {
         }
 
         // Pop style colors after End() but before cleanup
-        // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+        PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
         ImGui::End(reaMOD_Main_ImGui_Context);
     }
