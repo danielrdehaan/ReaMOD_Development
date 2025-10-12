@@ -3443,7 +3443,9 @@ void RenderGUI() {
     // PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     bool open = true;  // Open flag for the window
-    if (ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing)) {
+    bool windowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing);
+
+    if (windowVisible) {
 
         // Display the formatted ReaMOD session text
         ReaMODText(reaMOD_Main_ImGui_Context, "ReaMOD Session:", reaMODBoldFont);
