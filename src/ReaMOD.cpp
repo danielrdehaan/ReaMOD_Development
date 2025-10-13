@@ -3090,14 +3090,16 @@ void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
 
 bool StyledButton(ImGui_Context* ctx, const char* label) {
     bool fontActive = false;
-    if (reaMODMediumFont) {
-        ImGui::PushFont(ctx, reaMODMediumFont);
-        fontActive = true;
-    }
+    // if (reaMODMediumFont) {
+    //     ImGui::PushFont(ctx, reaMODMediumFont);
+    //     fontActive = true;
+    // }
     ImGui::PushStyleColor(ctx, ImGui::Col_Text, blue);
     bool pressed = ImGui::Button(ctx, label);
-    ImGui::PopStyleColor(ctx,1);
-    ImGui::PopFont(ctx);
+    ImGui::PopStyleColor(ctx);
+    // if (fontActive) {
+    //     ImGui::PopFont(ctx);
+    // }
     return pressed;
 }
 
