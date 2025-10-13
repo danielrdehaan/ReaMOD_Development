@@ -3096,10 +3096,8 @@ bool StyledButton(ImGui_Context* ctx, const char* label) {
     }
     ImGui::PushStyleColor(ctx, ImGui::Col_Text, blue);
     bool pressed = ImGui::Button(ctx, label);
-    ImGui::PopStyleColor(ctx);
-    if (fontActive) {
-        ImGui::PopFont(ctx);
-    }
+    ImGui::PopStyleColor(ctx,1);
+    ImGui::PopFont(ctx);
     return pressed;
 }
 
