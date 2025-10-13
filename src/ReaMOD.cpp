@@ -3447,6 +3447,10 @@ void RenderGUI() {
 
     if (windowVisible) {
 
+        ImGui::PushFont(ctx, reaMODBoldFont);
+        ImGui::Text(ctx, "ReaMOD");
+        ImGui::PopFont(ctx);
+
         // Display the formatted ReaMOD session text
         ReaMODText(reaMOD_Main_ImGui_Context, "ReaMOD Session:", reaMODBoldFont);
         ImGui::SameLine(reaMOD_Main_ImGui_Context);
