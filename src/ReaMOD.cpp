@@ -3094,12 +3094,14 @@ bool StyledButton(ImGui_Context* ctx, const char* label) {
     //     ImGui::PushFont(ctx, reaMODMediumFont);
     //     fontActive = true;
     // }
+    ImGui::PushFont(ctx, reaMODMediumFont);
     ImGui::PushStyleColor(ctx, ImGui::Col_Text, blue);
     bool pressed = ImGui::Button(ctx, label);
     ImGui::PopStyleColor(ctx);
     // if (fontActive) {
     //     ImGui::PopFont(ctx);
     // }
+    ImGui::PopFont(ctx);
     return pressed;
 }
 
