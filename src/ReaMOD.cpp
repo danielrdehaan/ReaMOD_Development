@@ -3054,13 +3054,13 @@ void ReaMODSeparatorText(ImGui_Context* ctx, const char* label) {
 }
 
 void ReaMODText(ImGui_Context* ctx, const char* text, ImGui_Font* font) {
-    // if (font) {
-    //     ImGui::PushFont(ctx, font);
-    // }
+    if (font) {
+        ImGui::PushFont(ctx, font);
+    }
     ImGui::Text(ctx, text);
-    // if (font) {
-    //     ImGui::PopFont(ctx);
-    // }
+    if (font) {
+        ImGui::PopFont(ctx);
+    }
 }
 
 void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
