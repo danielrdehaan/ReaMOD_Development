@@ -28,6 +28,14 @@ This REAPER script requires:
 
 At this time, ReaMOD is intended to be used with FMOD version 2.03.09.
 
+### FMOD Distribution Notice
+This repository includes FMOD API library files (.dylib/.lib) for convenience in building and using the ReaMOD extension. This distribution has been authorized by Firelight Technologies.
+
+**Important Licensing Information:**
+The inclusion of FMOD library files in this repository does not constitute a license to use FMOD commercially. If you plan to use ReaMOD (or FMOD directly) in any commercial capacity, you must obtain your own license from FMOD.
+For complete licensing information and to obtain a commercial license, please visit: [www.fmod.com/legal](www.fmod.com/legal)
+
+
 ## Installation Instructions
 
 ReaMOD is a REAPER extension that integrates FMOD functionality. Due to FMOD licensing, you must supply your own FMOD API libraries.
@@ -36,7 +44,7 @@ ReaMOD is a REAPER extension that integrates FMOD functionality. Due to FMOD lic
 
 Before instllating ReaMOD be sure that you have already installed both the SWS/S&M and ReaImGui extension. They can be installed via the ReaPack Pack Manager for Reaper.
 
-1. Download and follow the installation instruction for ReaPack: https://reapack.com/
+1. Download and follow the installation instruction for ReaPack: [https://reapack.com/](https://reapack.com/)
 
 Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in System Preferences > Security & Privacy after launching REAPER once for ReaPack to load when installed for the first time. Restart REAPER after approving.
 
@@ -51,7 +59,7 @@ Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in Sy
    This opens the root directory where REAPER expects extensions.
 
 2) Install the ReaMOD plugin
-   - Download the latest release: https://github.com/danielrdehaan/ReaMOD/releases
+   - Download the [latest release](https://github.com/danielrdehaan/ReaMOD/releases)
    - Copy the plugin into the UserPlugins subfolder:
 
      macOS   → REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib
