@@ -3447,7 +3447,7 @@ void RenderGUI() {
 
     if (windowVisible) {
 
-        ImGui::PushFont(reaMOD_Main_ImGui_Context,reaMODBoldFont,18);
+        ImGui::PushFont(reaMOD_Main_ImGui_Context,reaMODBoldFont);
         ImGui::Text(reaMOD_Main_ImGui_Context, "ReaMOD");
         ImGui::PopFont(reaMOD_Main_ImGui_Context);
 
