@@ -3442,7 +3442,7 @@ void RenderGUI() {
     EnsureReaMODFontsLoaded();
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
-    // PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+    PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     bool open = true;  // Open flag for the window
     bool windowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing);
@@ -3917,7 +3917,7 @@ void RenderGUI() {
         }
 
         // Pop style colors after End() but before cleanup
-        // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
+        PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
 
     }
 
