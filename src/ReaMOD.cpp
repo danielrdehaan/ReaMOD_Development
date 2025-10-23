@@ -3043,10 +3043,10 @@ void EnsureReaMODFontsLoaded() {
 }
 
 void ReaMODSeparatorText(ImGui_Context* ctx, const char* label) {
-    EnsureReaMODFontsLoaded();
-    ImGui::PushFont(ctx, reaMODBoldFont);
+    // EnsureReaMODFontsLoaded();
+    // ImGui::PushFont(ctx, reaMODBoldFont);
     ImGui::SeparatorText(ctx, label);
-    ImGui::PopFont(ctx);
+    // ImGui::PopFont(ctx);
 }
 
 void ReaMODText(ImGui_Context* ctx, const char* text, ImGui_Font* font) {
