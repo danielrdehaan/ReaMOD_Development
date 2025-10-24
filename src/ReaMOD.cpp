@@ -3483,7 +3483,10 @@ void RenderGUI() {
         ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
         // ImGui::Separator(reaMOD_Main_ImGui_Context);
-        ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "FMOD Project:");
+        // ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "FMOD Project:");
+        ImGui::PushFont(reaMOD_Main_ImGui_Context, reaMODBoldFont);
+        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "FMOD Project:");
+        ImGui::PopFont(reaMOD_Main_ImGui_Context);
 
         // Move the "Select" button to the left of the selected .fspro file
         if (StyledButton(reaMOD_Main_ImGui_Context, "Select")) {
@@ -3494,7 +3497,10 @@ void RenderGUI() {
         ReaMODText(reaMOD_Main_ImGui_Context, selected_file_name, reaMODMediumFont);
         ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
-        ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "FMOD Bank Files:");
+        // ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "FMOD Bank Files:");
+        ImGui::PushFont(reaMOD_Main_ImGui_Context, reaMODBoldFont);
+        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "FMOD Bank Files:");
+        ImGui::PopFont(reaMOD_Main_ImGui_Context);
 
         ReaMODText(reaMOD_Main_ImGui_Context, "Search directories:", reaMODMediumFont);
         bool directoryListChanged = false;
@@ -3672,7 +3678,10 @@ void RenderGUI() {
         if (!groupedGlobalParameters.empty()) {
 
             // Global Parameters Section
-            ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Global Parameters:");
+            // ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Global Parameters:");
+            ImGui::PushFont(reaMOD_Main_ImGui_Context, reaMODBoldFont);
+            ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Global Parameters:");
+            ImGui::PopFont(reaMOD_Main_ImGui_Context);
             
             // Separate "No Prefix" group from others
             std::map<std::string, std::vector<GlobalParameter>> otherGroups;
@@ -3755,7 +3764,10 @@ void RenderGUI() {
         // Render Section for selected event and parameters if event is selected
         if (!selectedFMODEvent.empty()) {
             // ImGui::Separator(reaMOD_Main_ImGui_Context);
-            ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Selected Event:");
+            // ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Selected Event:");
+            ImGui::PushFont(reaMOD_Main_ImGui_Context, reaMODBoldFont);
+            ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Selected Event:");
+            ImGui::PopFont(reaMOD_Main_ImGui_Context);
         
             // Render the play button
             std::string play_button_label = "Play##SelectedEvent";
@@ -3849,7 +3861,12 @@ void RenderGUI() {
         
         if (selectedItem) {
             // New section to display and edit the notes of the selected media item
-            ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Selected Media Item Notes:");
+            // ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Selected Media Item Notes:");
+            ImGui::PushFont(reaMOD_Main_ImGui_Context, reaMODBoldFont);
+            ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Selected Media Item:");
+            ImGui::PopFont(reaMOD_Main_ImGui_Context);
+
+
             // If the selected item has changed, load the notes
             if (selectedItem != lastSelectedItem) {
                 GetSetMediaItemInfo_String(selectedItem, "P_NOTES", itemNotes, false);
@@ -3879,7 +3896,10 @@ void RenderGUI() {
 
 
         // ImGui::Separator(reaMOD_Main_ImGui_Context);
-        ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Settings:");
+        // ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Settings:");
+        ImGui::PushFont(reaMOD_Main_ImGui_Context, reaMODBoldFont);
+        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Settings:");
+        ImGui::PopFont(reaMOD_Main_ImGui_Context);
 
         // Add the InputInt control for Look Ahead Time and keep the text on the same line
         ImGui::SetNextItemWidth(reaMOD_Main_ImGui_Context, 90);
@@ -3905,7 +3925,10 @@ void RenderGUI() {
 
         // Support & Links section
         ImGui::Separator(reaMOD_Main_ImGui_Context);
-        ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Support & Links");
+        // ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Support & Links");
+        ImGui::PushFont(reaMOD_Main_ImGui_Context, reaMODBoldFont);
+        ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "Support & Links:");
+        ImGui::PopFont(reaMOD_Main_ImGui_Context);
 
         if (StyledButton(reaMOD_Main_ImGui_Context, "Support Developer")) {
             if (!OpenURLInDefaultBrowser("https://www.buymeacoffee.com/danielrdehaan")) {
