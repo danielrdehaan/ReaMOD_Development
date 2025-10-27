@@ -557,10 +557,12 @@ void RefreshBankFiles() {
         return;
     }
 
-    if (customBankDirectories.empty()) {
-        UnloadAllBanks();
-        return;
-    }
+    UnloadAllBanks();
+
+    // if (customBankDirectories.empty()) {
+    //     UnloadAllBanks();
+    //     return;
+    // }
 
     std::unordered_map<std::string, bool> previousLoadStates;
     for (size_t i = 0; i < bank_files.size(); ++i) {
@@ -2249,8 +2251,8 @@ void MonitorEnvelopesForEventItem(MediaItem_Take* take, const std::string& itemG
 
     int fxIndex = 0; // Assuming JSFX is the first FX in the chain
 
-    double projectSampleRate = GetSetProjectInfo(nullptr, "PROJECT_SRATE", 0.0, false);
-    if (projectSampleRate <= 0.0) projectSampleRate = 48000.0; // fallback if project SR is not set
+    double projectSampleRate = GetSetProjectInfo(nullptr, "PROJECT_SRATE", 0, false);
+    if (projectSampleRate <= 0) projectSampleRate = 48000; // fallback if project SR is not set
 
     for (int paramIndex = 0; paramIndex < selectedEventParameters.size(); ++paramIndex) {
         // Retrieve the envelope for this parameter
@@ -3462,25 +3464,25 @@ void RenderGUI() {
 
     if (windowVisible) {
 
-        // Display the formatted ReaMOD session text
-        ReaMODText(reaMOD_Main_ImGui_Context, "ReaMOD Session:", reaMODBoldFont);
-        ImGui::SameLine(reaMOD_Main_ImGui_Context);
-        ReaMODText(reaMOD_Main_ImGui_Context, currentDisplayedFileName.c_str(), reaMODMediumFont);
+        // // Display the formatted ReaMOD session text
+        // ReaMODText(reaMOD_Main_ImGui_Context, "ReaMOD Session:", reaMODBoldFont);
+        // ImGui::SameLine(reaMOD_Main_ImGui_Context);
+        // ReaMODText(reaMOD_Main_ImGui_Context, currentDisplayedFileName.c_str(), reaMODMediumFont);
 
-        // Display the formatted last save timestamp if available
-        if (!formattedLastSaveTimestamp.empty()) {
-            ReaMODText(reaMOD_Main_ImGui_Context, formattedLastSaveTimestamp.c_str(), reaMODMediumFont);
-        }
+        // // Display the formatted last save timestamp if available
+        // if (!formattedLastSaveTimestamp.empty()) {
+        //     ReaMODText(reaMOD_Main_ImGui_Context, formattedLastSaveTimestamp.c_str(), reaMODMediumFont);
+        // }
 
-        // Add Save and Load State buttons
-        if (StyledButton(reaMOD_Main_ImGui_Context, "Save")) {
-            SaveStateDialog();
-        }
-        ImGui::SameLine(reaMOD_Main_ImGui_Context);
-        if (StyledButton(reaMOD_Main_ImGui_Context, "Load")) {
-            LoadStateDialog();
-        }
-        ImGui::Text(reaMOD_Main_ImGui_Context, "");
+        // // Add Save and Load State buttons
+        // if (StyledButton(reaMOD_Main_ImGui_Context, "Save")) {
+        //     SaveStateDialog();
+        // }
+        // ImGui::SameLine(reaMOD_Main_ImGui_Context);
+        // if (StyledButton(reaMOD_Main_ImGui_Context, "Load")) {
+        //     LoadStateDialog();
+        // }
+        // ImGui::Text(reaMOD_Main_ImGui_Context, "");
 
         // ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "FMOD Project:");
         ImGui::SeparatorText(reaMOD_Main_ImGui_Context, "FMOD Project:");
