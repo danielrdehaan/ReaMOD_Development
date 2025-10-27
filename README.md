@@ -1,6 +1,6 @@
-# ReaMOD Plugin for REAPER
+# ReaMOD Extension for REAPER
 
-ReaMOD is a plugin for [REAPER](https://www.reaper.fm/), a digital audio workstation, that integrates FMOD Studio projects into REAPER. It allows users to trigger FMOD events and snapshots directly within REAPER, providing a seamless workflow for game audio development and other interactive audio applications.
+ReaMOD is an extension for [REAPER](https://www.reaper.fm/), a digital audio workstation, that integrates FMOD Studio projects into REAPER. It allows users to trigger FMOD events and snapshots directly within REAPER, providing a seamless workflow for game audio development and other interactive audio applications.
 
 A little out of date (I will record a new one ASAP) but here is a [video](https://youtu.be/Ba8OaWds1cA?si=spkIjTHCcWLAjVsR) showing the basic workflow/concepts of ReaMOD.
 
@@ -13,7 +13,6 @@ A little out of date (I will record a new one ASAP) but here is a [video](https:
 - **Item Insertion**: Insert items associated with FMOD events into the REAPER timeline, allowing for precise synchronization.
 - **FMOD-Aware Item Lengths**: Optionally size inserted media items from the FMOD event's reported timeline length for tighter timing against authored content.
 - **Playback Monitoring**: Monitor REAPER's playback and trigger FMOD events based on markers or items.
-- **Session Management**: Save and load plugin states (`.ReaMOD` files) for consistent sessions across projects.
 - **Custom Actions**: Provides custom actions that can be assigned to keyboard shortcuts or toolbar buttons for quick access.
 
 ## Requirements:
@@ -58,12 +57,12 @@ Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in Sy
    In REAPER: Options → “Show REAPER resource path in explorer/finder”.
    This opens the root directory where REAPER expects extensions.
 
-2) Install the ReaMOD plugin
+2) Install ReaMOD
    - Download the [latest release](https://github.com/danielrdehaan/ReaMOD/releases)
-   - Copy the plugin into the UserPlugins subfolder:
+   - Copy the extension into the UserPlugins subfolder:
 
-     macOS   → REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib
-     Windows → REAPER/UserPlugins/reaper_ReaMOD_Plugin.dll   ← (underscore)
+     - macOS   → REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib
+     - Windows → REAPER/UserPlugins/reaper_ReaMOD_Plugin.dll
 
 3) Provide the FMOD runtime libraries
 
@@ -72,22 +71,18 @@ Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in Sy
    macOS
    -----
    - From the FMOD API download, copy **these two files** into the paths below:
-       `REAPER/ReaMOD/fmod/core/lib/libfmod.dylib`
-       `REAPER/ReaMOD/fmod/studio/lib/libfmodstudio.dylib`
-   - The plugin uses relative rpaths:
-       `@loader_path`
-       `@loader_path/../ReaMOD/fmod/core/lib`
-       `@loader_path/../ReaMOD/fmod/studio/lib`
+       - `libfmod.dylib` → `<REAPER Resource Folder>/ReaMOD/fmod/core/lib/libfmod.dylib`
+       - `libfmodstudio.dylib` → `<REAPER Resource Folder>/ReaMOD/fmod/studio/lib/libfmodstudio.dylib`
 
    Windows
    -------
    - From the FMOD Windows Desktop SDK (x64), end users need **only**:
-       fmod.dll
-       fmodstudio.dll
+       - `fmod.dll`
+       - `fmodstudio.dll`
      (Do NOT copy the *.lib files; those are only for building.)
    - Place the DLLs in ONE of these locations so Windows can find them:
        • Same folder as REAPER.exe (recommended)
-         e.g., C:\Program Files\REAPER (x64)\
+         e.g., `C:\Program Files\REAPER (x64)\ReaMOD\fmod\`
        • Or any folder that is on the user/system PATH
          (You can add your chosen ReaMOD\...\lib folder to PATH if preferred.)
 
@@ -106,7 +101,7 @@ Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in Sy
                  └─ libfmodstudio.dylib        (macOS)
     ```
 
-4) Verify
+4) Verify (optional)
 
    *macOS:*
     Show rpaths recorded in the plugin
@@ -124,11 +119,6 @@ Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in Sy
 
    After copying everything into place, restart REAPER. The ReaMOD menu/actions should appear.
 
-6) Installing fonts
-    - If you'd like to use the custom fonts for the ReaMOD GUI...
-        - Download and unzip the [resources.zip](https://github.com/danielrdehaan/ReaMOD/raw/refs/heads/Main/resources.zip) file.
-        - Place the complete `resources` folder it inside the ReaMOD folder inside the Reaper Resources folder. `<Reaper Resources Folder>/ReaMOD/resources`
-
 Notes
 -----
 - macOS Gatekeeper: if macOS blocks the dylib, open System Settings → Privacy & Security and “Allow Anyway”, then restart REAPER. If needed:
@@ -144,7 +134,7 @@ Note to Windows users: ASIO audio drivers have been reported to NOT work with Re
 
 ### Opening the ReaMOD Window
 
-- After installing the plugin, you can open the ReaMOD window by running the custom action:
+- After installing ReaMOD, you can open the ReaMOD window by running the custom action:
 
   ```
   ReaMOD: Open/Close Window
@@ -158,10 +148,14 @@ Note to Windows users: ASIO audio drivers have been reported to NOT work with Re
 
    - In the ReaMOD window, click the `Select` button to choose an `.fspro` FMOD Studio project file.
 
-2. **Load Banks**
+2. **Manage Bank Directories**
 
-   - After selecting the project, the plugin will find and list the available `.bank` files in the project's `Build/Desktop` directory.
-   - Use the `Load` buttons next to each bank to load them into the plugin.
+   - After selecting the project, by default ReaMOD will find and list the any available `.bank` files in the project's `Build/Desktop` directory and load the `Master.bank`.
+   - The list of bank directories can be managed with the `Add directory...` or `Remove` directory buttons.
+
+3. **Managing Banks**
+   - Use the `Load`/`Unload` buttons next to each bank to load/unload them .
+   - Press the `Rescan` button to update the `.bank` files after making any changes in FMOD Studio.
 
 ### Browsing and Playing Events
 
@@ -180,23 +174,19 @@ Note to Windows users: ASIO audio drivers have been reported to NOT work with Re
 
   - **Add Item with selected event at edit cursor**: Inserts an empty media item at the edit cursor on the selected track with the selected FMOD event and the current value of any associated FMOD parameters in the item's notes.
   - **Add Item with selected event within current time selection**: Inserts an empty media item spanning the time selection with the selected event and the current value of any associated FMOD parameters in the item's notes.
+  - **Add item with selected event length at edit cursor**: Inserts an empty media item with the same length as the selected FMOD event and the current value of any associated FMOD parameters in the item's notes.
 
 - These actions can be assigned to keyboard shortcuts or added to toolbars.
 
 ### Playback Integration
 
-- When you play back your REAPER project, the plugin will automatically check all tracks for FMOD-related media items. It looks for tracks whose names contain ‘FMOD’ or ‘fmod,’ as well as any tracks inside a parent folder whose name contains ‘FMOD’ or ‘fmod.’
+- The ReaMOD window must be open for FMOD events to be triggered.
+- When you play back your REAPER project, ReaMOD will automatically check all tracks for FMOD-related media items. It looks for tracks whose names contain ‘FMOD’ or ‘fmod,’ as well as any tracks inside a parent folder whose name contains ‘FMOD’ or ‘fmod.’
 - Adjust the `Event detection lookahead time (ms)` in ReaMOD's setting to accomadate any latency issues. Note that timing is a little "loose" in ReaMOD due to several factors that may not be possible to solve.
-
-### Saving and Loading Plugin State
-
-- **Save State**: Use the `Save` button to save the current plugin state to a `.ReaMOD` file.
-- **Load State**: Use the `Load` button to load a previously saved `.ReaMOD` state.
-- The plugin attempts to auto-load a `.ReaMOD` file matching the current REAPER project on startup.
 
 ### Custom Actions
 
-The plugin provides several custom actions for enhanced workflow:
+ReaMOD provides several custom actions for enhanced workflow:
 
 - **ReaMOD: Open/Close Window**
     Open or close the ReaMOD window.
@@ -233,7 +223,7 @@ All the audio triggered by ReaMOD does not actually flow through Reaper so there
 
 ## Notes
 
-- **Track Naming**: The plugin monitors tracks named "FMOD" (case-insensitive) for triggering events based on items.
+- **Track Naming**: ReaMOD monitors tracks named "FMOD" (case-insensitive) for triggering events based on items.
 - **Parameter Automation**: You can automate FMOD event parameters using items and take names starting with `param:`.
 
 ## Contributing
@@ -256,4 +246,4 @@ For any questions or suggestions, please contact [Daniel Dehaan](http://www.dani
 
 ---
 
-**Disclaimer**: This plugin is provided as-is without any warranty. Use at your own risk.
+**Disclaimer**: ReaMOD is provided as-is without any warranty. Use at your own risk.
