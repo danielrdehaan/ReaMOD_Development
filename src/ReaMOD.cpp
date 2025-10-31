@@ -2260,6 +2260,7 @@ void ApplyEnvelopeValueToFMODEvent(const std::string& itemGUID, const std::strin
     fmod_system->update();
 }
 
+
 void ApplyTrackEnvelopeValueToFMODGlobalParameter(const std::string& paramName, float value) {
     if (!IsFMODInitialized()) {
         return;
@@ -2317,11 +2318,9 @@ void MonitorTrackEnvelopesForGlobalParameters(MediaTrack* track) {
         return;
     }
 
-    auto globalParams = GetGlobalParametersSnapshot();
-    if (globalParams.empty()) {
+    if (globalParameters.empty()) {
         RetrieveGlobalParameters();
-        globalParams = GetGlobalParametersSnapshot();
-        if (globalParams.empty()) {
+        if (globalParameters.empty()) {
             return;
         }
     }
@@ -2351,7 +2350,7 @@ void MonitorTrackEnvelopesForGlobalParameters(MediaTrack* track) {
 
         std::string envelopeNameLower = ToLower(std::string(envelopeName));
 
-        for (const auto& globalParam : globalParams) {
+        for (const auto& globalParam : globalParameters) {
             std::string paramNameLower = ToLower(globalParam.name);
             if (envelopeNameLower == paramNameLower || envelopeNameLower.find(paramNameLower) != std::string::npos) {
                 double envelopeValue = 0.0;
@@ -2385,6 +2384,9 @@ void CheckItems(double playPosition) {
         MonitorTrackEnvelopesForGlobalParameters(track);
 
         if (isTrackActive(track)){
+
+            MonitorTrackEnvelopesForGlobalParameters(track);
+
             int itemCount = CountTrackMediaItems(track);
             for (int j = 0; j < itemCount; ++j) {
                 MediaItem* item = GetTrackMediaItem(track, j);
