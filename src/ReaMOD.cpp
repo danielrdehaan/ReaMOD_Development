@@ -375,6 +375,8 @@ void InitializeFMOD() {
     DebugMsg("Initialized FMOD System with Live Update enabled.\n");
 }
 
+bool IsFMODInitialized();
+
 bool EnsureFMODInitialized() {
     if (IsFMODInitialized()) {
         return true;
