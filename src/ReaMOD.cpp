@@ -17,6 +17,7 @@
 #include <mutex>
 #include <ctime>
 #include <cstdlib>
+#include <cmath>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -2246,6 +2247,30 @@ void ApplyEnvelopeValueToFMODEvent(const std::string& itemGUID, const std::strin
     fmod_system->update();
 }
 
+
+void ApplyTrackEnvelopeValueToFMODGlobalParameter(const std::string& paramName, float value) {
+    if (!IsFMODInitialized()) {
+        return;
+    }
+
+    float currentValue = 0.0f;
+    FMOD_RESULT getResult = fmod_system->getParameterByName(paramName.c_str(), &currentValue);
+    if (getResult == FMOD_OK) {
+        if (std::fabs(currentValue - value) < 0.0001f) {
+            return; // No meaningful change, skip update
+        }
+    }
+
+    FMOD_RESULT result = fmod_system->setParameterByName(paramName.c_str(), value);
+    if (result == FMOD_OK) {
+        DebugMsg("Updated FMOD global parameter %s to %.2f via track envelope.\n", paramName.c_str(), value);
+    } else {
+        DebugMsg("Failed to update FMOD global parameter %s via track envelope.\n", paramName.c_str());
+    }
+
+    fmod_system->update();
+}
+
 void MonitorEnvelopesForEventItem(MediaItem_Take* take, const std::string& itemGUID) {
     if (!take || itemGUID.empty()) return;
 
@@ -2275,6 +2300,59 @@ void MonitorEnvelopesForEventItem(MediaItem_Take* take, const std::string& itemG
     }
 }
 
+void MonitorTrackEnvelopesForGlobalParameters(MediaTrack* track) {
+    if (!track || !IsFMODInitialized()) {
+        return;
+    }
+
+    if (globalParameters.empty()) {
+        RetrieveGlobalParameters();
+        if (globalParameters.empty()) {
+            return;
+        }
+    }
+
+    int envelopeCount = CountTrackEnvelopes(track);
+    if (envelopeCount <= 0) {
+        return;
+    }
+
+    double projectSampleRate = GetSetProjectInfo(nullptr, "PROJECT_SRATE", 0, false);
+    if (projectSampleRate <= 0) {
+        projectSampleRate = 48000;
+    }
+
+    double playPosition = GetPlayPosition();
+
+    for (int envIndex = 0; envIndex < envelopeCount; ++envIndex) {
+        TrackEnvelope* envelope = GetTrackEnvelope(track, envIndex);
+        if (!envelope) {
+            continue;
+        }
+
+        char envelopeName[512] = "";
+        if (!GetEnvelopeName(envelope, envelopeName)) {
+            continue;
+        }
+
+        std::string envelopeNameLower = ToLower(std::string(envelopeName));
+
+        for (const auto& globalParam : globalParameters) {
+            std::string paramNameLower = ToLower(globalParam.name);
+            if (envelopeNameLower == paramNameLower || envelopeNameLower.find(paramNameLower) != std::string::npos) {
+                double envelopeValue = 0.0;
+                bool result = Envelope_Evaluate(envelope, playPosition, projectSampleRate, 1, &envelopeValue, nullptr, nullptr, 0);
+                if (result) {
+                    float floatValue = static_cast<float>(envelopeValue);
+                    floatValue = std::clamp(floatValue, globalParam.minValue, globalParam.maxValue);
+                    ApplyTrackEnvelopeValueToFMODGlobalParameter(globalParam.name, floatValue);
+                }
+                break;
+            }
+        }
+    }
+}
+
 void CheckItems(double playPosition) {
     UpdateTrackCache(); // Refresh the track cache before checking items
 
@@ -2291,6 +2369,9 @@ void CheckItems(double playPosition) {
         DebugMsg("Checking items on track: %s\n", trackName.c_str());
 
         if (isTrackActive(track)){
+
+            MonitorTrackEnvelopesForGlobalParameters(track);
+
             int itemCount = CountTrackMediaItems(track);
             for (int j = 0; j < itemCount; ++j) {
                 MediaItem* item = GetTrackMediaItem(track, j);
