@@ -116,7 +116,7 @@ Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in Sy
     Or use the "Dependencies" GUI tool to check resolution.
 
 5) Add ReaMOD JSFX for automating FMOD Parameters
-    - Download the [ReaMOD JSFX.zip](https://github.com/danielrdehaan/ReaMOD/blob/e284a8879326f9861c7ddf5f7e31e8613cd0a0b5/Effects/ReaMOD%20JSFX.zip) file.
+    - Download the [ReaMOD JSFX.zip](https://github.com/danielrdehaan/ReaMOD/raw/e284a8879326f9861c7ddf5f7e31e8613cd0a0b5/Effects/ReaMOD%20JSFX.zip) file.
     - Unzip the file and place this ReaMOD folder inside the "Effects" folder in Reaper's Resource directory.
 
 5) Restart REAPER
