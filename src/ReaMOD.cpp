@@ -212,6 +212,11 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         TakeFX_GetEnvelope = reinterpret_cast<decltype(TakeFX_GetEnvelope)>(rec->GetFunc("TakeFX_GetEnvelope"));                // Load TakeFX_GetEnvelope
         Envelope_Evaluate = reinterpret_cast<decltype(Envelope_Evaluate)>(rec->GetFunc("Envelope_Evaluate"));                    // Load Envelope_Evaluate
         GetSetProjectInfo = reinterpret_cast<decltype(GetSetProjectInfo)>(rec->GetFunc("GetSetProjectInfo"));
+        GetTrackEnvelope = reinterpret_cast<decltype(GetTrackEnvelope)>(rec->GetFunc("GetTrackEnvelope"));
+        CountTrackEnvelopes = reinterpret_cast<decltype(CountTrackEnvelopes)>(rec->GetFunc("CountTrackEnvelopes"));
+        GetTrackEnvelopeByName = reinterpret_cast<decltype(GetTrackEnvelopeByName)>(rec->GetFunc("GetTrackEnvelopeByName"));
+        GetEnvelopeName = reinterpret_cast<decltype(GetEnvelopeName)>(rec->GetFunc("GetEnvelopeName"));
+
     }
 }
 
@@ -2337,19 +2342,19 @@ void MonitorTrackEnvelopesForGlobalParameters(MediaTrack* track) {
 
         std::string envelopeNameLower = ToLower(std::string(envelopeName));
 
-        // for (const auto& globalParam : globalParameters) {
-        //     std::string paramNameLower = ToLower(globalParam.name);
-        //     if (envelopeNameLower == paramNameLower || envelopeNameLower.find(paramNameLower) != std::string::npos) {
-        //         double envelopeValue = 0.0;
-        //         bool result = Envelope_Evaluate(envelope, playPosition, projectSampleRate, 1, &envelopeValue, nullptr, nullptr, 0);
-        //         if (result) {
-        //             float floatValue = static_cast<float>(envelopeValue);
-        //             floatValue = std::clamp(floatValue, globalParam.minValue, globalParam.maxValue);
-        //             ApplyTrackEnvelopeValueToFMODGlobalParameter(globalParam.name, floatValue);
-        //         }
-        //         break;
-        //     }
-        // }
+        for (const auto& globalParam : globalParameters) {
+            std::string paramNameLower = ToLower(globalParam.name);
+            if (envelopeNameLower == paramNameLower || envelopeNameLower.find(paramNameLower) != std::string::npos) {
+                double envelopeValue = 0.0;
+                bool result = Envelope_Evaluate(envelope, playPosition, projectSampleRate, 1, &envelopeValue, nullptr, nullptr, 0);
+                if (result) {
+                    float floatValue = static_cast<float>(envelopeValue);
+                    floatValue = std::clamp(floatValue, globalParam.minValue, globalParam.maxValue);
+                    ApplyTrackEnvelopeValueToFMODGlobalParameter(globalParam.name, floatValue);
+                }
+                break;
+            }
+        }
     }
 }
 
