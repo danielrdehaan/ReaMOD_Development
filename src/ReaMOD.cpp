@@ -2987,31 +2987,30 @@ bool LoadStateFromProject() {
         return false;
     }
 
-    std::vector<char> buffer(1);
-    int length = GetProjExtState(project, REAMOD_PROJECT_EXT_SECTION, REAMOD_PROJECT_EXT_KEY, buffer.data(), static_cast<int>(buffer.size()));
+    int length = GetProjExtState(project, REAMOD_PROJECT_EXT_SECTION, REAMOD_PROJECT_EXT_KEY, nullptr, 0);
     if (length <= 0) {
         return false;
     }
 
-    if (length >= static_cast<int>(buffer.size())) {
-        buffer.resize(length + 1);
-        length = GetProjExtState(project, REAMOD_PROJECT_EXT_SECTION, REAMOD_PROJECT_EXT_KEY, buffer.data(), static_cast<int>(buffer.size()));
-        if (length <= 0) {
-            return false;
-        }
+    std::vector<char> buffer(static_cast<size_t>(length) + 1);
+    int written = GetProjExtState(project, REAMOD_PROJECT_EXT_SECTION, REAMOD_PROJECT_EXT_KEY, buffer.data(), static_cast<int>(buffer.size()));
+    if (written <= 0) {
+        return false;
+    }
+
+    size_t stringLength = static_cast<size_t>(length);
+    if (written > 0 && written < static_cast<int>(stringLength)) {
+        stringLength = static_cast<size_t>(written);
     }
 
     if (!buffer.empty()) {
-        if (static_cast<size_t>(length) < buffer.size()) {
-            buffer[length] = '\0';
-        } else {
-            buffer.back() = '\0';
-        }
+        size_t nullIndex = (written < static_cast<int>(buffer.size())) ? static_cast<size_t>(written) : buffer.size() - 1;
+        buffer[nullIndex] = '\0';
     }
 
     UnloadAllBanks();
 
-    std::istringstream stream(std::string(buffer.data(), length));
+    std::istringstream stream(std::string(buffer.data(), stringLength));
 
     isRestoringReaMODState = true;
     bool loaded = LoadStateFromStream(stream);
