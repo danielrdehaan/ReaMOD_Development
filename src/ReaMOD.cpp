@@ -17,6 +17,7 @@
 #include <mutex>
 #include <ctime>
 #include <cstdlib>
+#include <cmath>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -146,8 +147,10 @@ struct GlobalParameter {
 // Declare a global vector to store parameters of the selected event
 std::vector<ParameterInfo> selectedEventParameters;
 std::vector<GlobalParameter> globalParameters;
+std::map<std::string, std::vector<GlobalParameter>> groupedGlobalParameters;
 // Map to store cached parameters for each event
 std::unordered_map<std::string, std::vector<ParameterInfo>> eventParameterCache;
+std::mutex globalParametersMutex;
 
 
 // Define the EventInstanceData struct
@@ -368,10 +371,8 @@ bool IsFMODInitialized() {
     return false;  // FMOD is not initialized
 }
 
-// Declare at global scope or as a class member
-std::map<std::string, std::vector<GlobalParameter>> groupedGlobalParameters;
-
 void RetrieveGlobalParameters() {
+    std::lock_guard<std::mutex> lock(globalParametersMutex);
     globalParameters.clear();           // Clear any existing parameters
     groupedGlobalParameters.clear();    // Clear existing grouped parameters
 
@@ -437,6 +438,16 @@ void RetrieveGlobalParameters() {
             return a.name < b.name;
         });
     }
+}
+
+std::vector<GlobalParameter> GetGlobalParametersSnapshot() {
+    std::lock_guard<std::mutex> lock(globalParametersMutex);
+    return globalParameters;
+}
+
+std::map<std::string, std::vector<GlobalParameter>> GetGroupedGlobalParametersSnapshot() {
+    std::lock_guard<std::mutex> lock(globalParametersMutex);
+    return groupedGlobalParameters;
 }
 
 // Load a bank and retrieve its events
@@ -545,8 +556,11 @@ void UnloadAllBanks() {
     bank_load_states.clear();
     bank_events.clear();
     masterStringEvents.clear();
-    globalParameters.clear();
-    groupedGlobalParameters.clear();
+    {
+        std::lock_guard<std::mutex> lock(globalParametersMutex);
+        globalParameters.clear();
+        groupedGlobalParameters.clear();
+    }
 }
 
 void RefreshBankFiles() {
@@ -2246,6 +2260,29 @@ void ApplyEnvelopeValueToFMODEvent(const std::string& itemGUID, const std::strin
     fmod_system->update();
 }
 
+void ApplyTrackEnvelopeValueToFMODGlobalParameter(const std::string& paramName, float value) {
+    if (!IsFMODInitialized()) {
+        return;
+    }
+
+    float currentValue = 0.0f;
+    FMOD_RESULT getResult = fmod_system->getParameterByName(paramName.c_str(), &currentValue);
+    if (getResult == FMOD_OK) {
+        if (std::fabs(currentValue - value) < 0.0001f) {
+            return; // No meaningful change, skip update
+        }
+    }
+
+    FMOD_RESULT result = fmod_system->setParameterByName(paramName.c_str(), value);
+    if (result == FMOD_OK) {
+        DebugMsg("Updated FMOD global parameter %s to %.2f via track envelope.\n", paramName.c_str(), value);
+    } else {
+        DebugMsg("Failed to update FMOD global parameter %s via track envelope.\n", paramName.c_str());
+    }
+
+    fmod_system->update();
+}
+
 void MonitorEnvelopesForEventItem(MediaItem_Take* take, const std::string& itemGUID) {
     if (!take || itemGUID.empty()) return;
 
@@ -2275,6 +2312,61 @@ void MonitorEnvelopesForEventItem(MediaItem_Take* take, const std::string& itemG
     }
 }
 
+void MonitorTrackEnvelopesForGlobalParameters(MediaTrack* track) {
+    if (!track || !IsFMODInitialized()) {
+        return;
+    }
+
+    auto globalParams = GetGlobalParametersSnapshot();
+    if (globalParams.empty()) {
+        RetrieveGlobalParameters();
+        globalParams = GetGlobalParametersSnapshot();
+        if (globalParams.empty()) {
+            return;
+        }
+    }
+
+    int envelopeCount = CountTrackEnvelopes(track);
+    if (envelopeCount <= 0) {
+        return;
+    }
+
+    double projectSampleRate = GetSetProjectInfo(nullptr, "PROJECT_SRATE", 0, false);
+    if (projectSampleRate <= 0) {
+        projectSampleRate = 48000;
+    }
+
+    double playPosition = GetPlayPosition();
+
+    for (int envIndex = 0; envIndex < envelopeCount; ++envIndex) {
+        TrackEnvelope* envelope = GetTrackEnvelope(track, envIndex);
+        if (!envelope) {
+            continue;
+        }
+
+        char envelopeName[512] = "";
+        if (!GetEnvelopeName(envelope, envelopeName, sizeof(envelopeName))) {
+            continue;
+        }
+
+        std::string envelopeNameLower = ToLower(std::string(envelopeName));
+
+        for (const auto& globalParam : globalParams) {
+            std::string paramNameLower = ToLower(globalParam.name);
+            if (envelopeNameLower == paramNameLower || envelopeNameLower.find(paramNameLower) != std::string::npos) {
+                double envelopeValue = 0.0;
+                bool result = Envelope_Evaluate(envelope, playPosition, projectSampleRate, 1, &envelopeValue, nullptr, nullptr, 0);
+                if (result) {
+                    float floatValue = static_cast<float>(envelopeValue);
+                    floatValue = std::clamp(floatValue, globalParam.minValue, globalParam.maxValue);
+                    ApplyTrackEnvelopeValueToFMODGlobalParameter(globalParam.name, floatValue);
+                }
+                break;
+            }
+        }
+    }
+}
+
 void CheckItems(double playPosition) {
     UpdateTrackCache(); // Refresh the track cache before checking items
 
@@ -2289,6 +2381,8 @@ void CheckItems(double playPosition) {
         char* trackNameChar = (char*)GetSetMediaTrackInfo(track, "P_NAME", nullptr);
         std::string trackName(trackNameChar);
         DebugMsg("Checking items on track: %s\n", trackName.c_str());
+
+        MonitorTrackEnvelopesForGlobalParameters(track);
 
         if (isTrackActive(track)){
             int itemCount = CountTrackMediaItems(track);
@@ -3671,8 +3765,9 @@ void RenderGUI() {
 
         // Render Global Parameters Section if loaded FMOD Project has global paramters
         RetrieveGlobalParameters();
-    
-        if (!groupedGlobalParameters.empty()) {
+        auto groupedParams = GetGroupedGlobalParametersSnapshot();
+
+        if (!groupedParams.empty()) {
 
             // Global Parameters Section
             // ReaMODSeparatorText(reaMOD_Main_ImGui_Context, "Global Parameters:");
@@ -3682,7 +3777,7 @@ void RenderGUI() {
             std::map<std::string, std::vector<GlobalParameter>> otherGroups;
             std::vector<GlobalParameter> noPrefixParameters;
     
-            for (const auto& group : groupedGlobalParameters) {
+            for (const auto& group : groupedParams) {
                 if (group.first == "No Prefix") {
                     noPrefixParameters = group.second;
                 } else {
