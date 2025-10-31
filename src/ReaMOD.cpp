@@ -1,4 +1,5 @@
 #include <cstdarg>
+#include <cstdint>
 #include <string>
 #include <memory>
 #include <cstring>
@@ -86,6 +87,9 @@ static constexpr const char* REAMOD_PROJECT_EMBEDDED_SUFFIX = " (Embedded)";
 
 bool isRestoringReaMODState = false;
 
+std::string lastKnownProjectIdentifier;
+bool pendingProjectStateReload = true;
+
 
 std::vector<std::string> masterStringEvents;  // Store event paths from Master.strings.bank
 std::vector<std::string> bank_files; // Store the list of found .bank files and their toggle states
@@ -135,6 +139,7 @@ FMOD::Studio::System* fmod_system = nullptr;
 void RefreshBankFiles();
 void SynchronizeLoadedBanks();
 void PersistStateToProjectIfPossible();
+bool EnsureFMODInitialized();
 
 // Define the ParameterInfo struct
 struct ParameterInfo {
@@ -368,6 +373,20 @@ void InitializeFMOD() {
         return;
     }
     DebugMsg("Initialized FMOD System with Live Update enabled.\n");
+}
+
+bool EnsureFMODInitialized() {
+    if (IsFMODInitialized()) {
+        return true;
+    }
+
+    InitializeFMOD();
+    if (!IsFMODInitialized()) {
+        DebugMsg("Failed to initialize FMOD system when ensuring readiness.\n");
+        return false;
+    }
+
+    return true;
 }
 
 // Function to check if FMOD System is Initialzed
@@ -2971,11 +2990,6 @@ void LoadStateFromFile(const std::string& filePath) {
 }
 
 bool LoadStateFromProject() {
-    if (!IsFMODInitialized()) {
-        DebugMsg("FMOD system is not initialized. Cannot load state from project.\n");
-        return false;
-    }
-
     if (!GetProjExtState || !EnumProjects) {
         DebugMsg("Project state APIs unavailable. Cannot load embedded state.\n");
         return false;
@@ -3006,6 +3020,11 @@ bool LoadStateFromProject() {
     if (!buffer.empty()) {
         size_t nullIndex = (written < static_cast<int>(buffer.size())) ? static_cast<size_t>(written) : buffer.size() - 1;
         buffer[nullIndex] = '\0';
+    }
+
+    if (!EnsureFMODInitialized()) {
+        DebugMsg("Unable to initialize FMOD before loading project state.\n");
+        return false;
     }
 
     UnloadAllBanks();
@@ -3600,6 +3619,36 @@ void RemoveTask(int taskId) {
 
 // Timer function
 void OnTimer() {
+    if (EnumProjects) {
+        char projectFilePath[FILE_PATH_BUFFER_SIZE] = {0};
+        ReaProject* project = EnumProjects(-1, projectFilePath, sizeof(projectFilePath));
+
+        std::string identifier;
+        if (project) {
+            identifier = projectFilePath;
+            if (identifier.empty()) {
+                identifier = "<untitled>";
+            }
+            identifier += "|";
+            identifier += std::to_string(reinterpret_cast<uintptr_t>(project));
+        }
+
+        if (identifier != lastKnownProjectIdentifier) {
+            lastKnownProjectIdentifier = identifier;
+            pendingProjectStateReload = !identifier.empty();
+        }
+
+        if (pendingProjectStateReload && !identifier.empty() && project && GetProjExtState) {
+            int length = GetProjExtState(project, REAMOD_PROJECT_EXT_SECTION, REAMOD_PROJECT_EXT_KEY, nullptr, 0);
+            if (length > 0) {
+                LoadStateFromProject();
+            }
+            pendingProjectStateReload = false;
+        } else if (pendingProjectStateReload && !GetProjExtState) {
+            pendingProjectStateReload = false;
+        }
+    }
+
     std::vector<std::function<void()>> tasksToRun;
     {
         std::lock_guard<std::mutex> lock(taskMapMutex);
