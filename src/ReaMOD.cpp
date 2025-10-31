@@ -2331,7 +2331,7 @@ void MonitorTrackEnvelopesForGlobalParameters(MediaTrack* track) {
         }
 
         char envelopeName[512] = "";
-        if (!GetEnvelopeName(envelope, envelopeName)) {
+        if (!GetEnvelopeName(envelope, envelopeName, sizeof(envelopeName))) {
             continue;
         }
 
