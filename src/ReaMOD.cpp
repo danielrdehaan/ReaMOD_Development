@@ -212,6 +212,11 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         TakeFX_GetEnvelope = reinterpret_cast<decltype(TakeFX_GetEnvelope)>(rec->GetFunc("TakeFX_GetEnvelope"));                // Load TakeFX_GetEnvelope
         Envelope_Evaluate = reinterpret_cast<decltype(Envelope_Evaluate)>(rec->GetFunc("Envelope_Evaluate"));                    // Load Envelope_Evaluate
         GetSetProjectInfo = reinterpret_cast<decltype(GetSetProjectInfo)>(rec->GetFunc("GetSetProjectInfo"));
+        GetTrackEnvelope = reinterpret_cast<decltype(GetTrackEnvelope)>(rec->GetFunc("GetTrackEnvelope"));
+        CountTrackEnvelopes = reinterpret_cast<decltype(CountTrackEnvelopes)>(rec->GetFunc("CountTrackEnvelopes"));
+        GetTrackEnvelopeByName = reinterpret_cast<decltype(GetTrackEnvelopeByName)>(rec->GetFunc("GetTrackEnvelopeByName"));
+        GetEnvelopeName = reinterpret_cast<decltype(GetEnvelopeName)>(rec->GetFunc("GetEnvelopeName"));
+
     }
 }
 
