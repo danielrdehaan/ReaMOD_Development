@@ -14,6 +14,7 @@
 #include <chrono>
 #include <thread>
 #include <fstream> // Include for file I/O operations
+#include <sstream>
 #include <mutex>
 #include <ctime>
 #include <cstdlib>
@@ -79,6 +80,13 @@ bool reaModWindowPreviouslyOpen = false;
 bool searchFmodEventWindowOpen = false;
 
 
+static constexpr const char* REAMOD_PROJECT_EXT_SECTION = "ReaMOD";
+static constexpr const char* REAMOD_PROJECT_EXT_KEY = "state";
+static constexpr const char* REAMOD_PROJECT_EMBEDDED_SUFFIX = " (Embedded)";
+
+bool isRestoringReaMODState = false;
+
+
 std::vector<std::string> masterStringEvents;  // Store event paths from Master.strings.bank
 std::vector<std::string> bank_files; // Store the list of found .bank files and their toggle states
 std::vector<bool> bank_load_states;
@@ -126,6 +134,7 @@ FMOD::Studio::System* fmod_system = nullptr;
 
 void RefreshBankFiles();
 void SynchronizeLoadedBanks();
+void PersistStateToProjectIfPossible();
 
 // Define the ParameterInfo struct
 struct ParameterInfo {
@@ -194,6 +203,9 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         SetEditCurPos = reinterpret_cast<decltype(SetEditCurPos)>(rec->GetFunc("SetEditCurPos")); // Load SetEditCurPos
         TimeMap_curFrameRate = reinterpret_cast<decltype(TimeMap_curFrameRate)>(rec->GetFunc("TimeMap_curFrameRate")); // Load TimeMap_curFrameRate
         EnumProjects = reinterpret_cast<decltype(EnumProjects)>(rec->GetFunc("EnumProjects"));
+        SetProjExtState = reinterpret_cast<decltype(SetProjExtState)>(rec->GetFunc("SetProjExtState"));
+        GetProjExtState = reinterpret_cast<decltype(GetProjExtState)>(rec->GetFunc("GetProjExtState"));
+        MarkProjectDirty = reinterpret_cast<decltype(MarkProjectDirty)>(rec->GetFunc("MarkProjectDirty"));
         BR_GetMediaItemGUID = reinterpret_cast<decltype(BR_GetMediaItemGUID)>(rec->GetFunc("BR_GetMediaItemGUID"));
         GetSetMediaItemTakeInfo_String = reinterpret_cast<decltype(GetSetMediaItemTakeInfo_String)>(rec->GetFunc("GetSetMediaItemTakeInfo_String"));
         AddTakeToMediaItem = reinterpret_cast<decltype(AddTakeToMediaItem)>(rec->GetFunc("AddTakeToMediaItem"));
@@ -733,6 +745,8 @@ void RefreshBankFiles() {
     }
 
     SynchronizeLoadedBanks();
+
+    PersistStateToProjectIfPossible();
 }
 
 // Function to find all .bank files in the "Build/Desktop/" directory relative to the selected .fspro file
@@ -779,6 +793,7 @@ void OpenFileDialog() {
         // Find the .bank files in the "Build/Desktop/" directory
         FindBankFiles(fspro_directory);
         RetrieveGlobalParameters();
+        PersistStateToProjectIfPossible();
     } else {
         // Unload any previously loaded banks
         UnloadAllBanks();
@@ -2564,6 +2579,13 @@ std::string GetCurrentReaperProjectName() {
     return projectFileName;
 }
 
+ReaProject* GetCurrentReaperProject() {
+    if (!EnumProjects) {
+        return nullptr;
+    }
+    return EnumProjects(-1, nullptr, 0);
+}
+
 // Function to get the base file name without the ".ReaMOD" extension
 std::string getReaMODFileName(const std::string& filePath) {
     // Find the last occurrence of a slash or backslash to get the base file name
@@ -2579,10 +2601,88 @@ std::string getReaMODFileName(const std::string& filePath) {
     return baseFileName;
 }
 
+std::string BuildSerializedReaMODState() {
+    std::ostringstream out;
+    out << "fspro_file=" << selected_file_path << "\n";
+    out << "lookahead_time_ms=" << lookAheadTimeMs << "\n";
+    out << "move_cursor_after_insert=" << (moveCursorAfterInsert ? 1 : 0) << "\n";
+    out << "num_frames_for_item=" << numFramesForItem << "\n";
+    out << "item_sync_selection=" << (syncSelectedEventWithItemSelection ? 1 : 0) << "\n";
+    out << "update_item_insertion_length_from_last_time_selection=" << (updateItemInsertionLength ? 1 : 0) << "\n";
+    out << "show_full_bank_directory_paths=" << (showFullBankDirectoryPaths ? 1 : 0) << "\n";
+
+    out << "<bank_directories>\n";
+    for (const auto& directory : customBankDirectories) {
+        out << "bank_directory=" << directory << "\n";
+    }
+    out << "</bank_directories>\n";
+
+    out << "<bank_files>\n";
+
+    std::string master_bank_file;
+    bool master_bank_loaded = false;
+    std::vector<std::pair<std::string, bool>> other_banks;
+
+    for (size_t i = 0; i < bank_files.size(); ++i) {
+        bool loadState = (i < bank_load_states.size()) ? bank_load_states[i] : false;
+        if (bank_files[i].find("Master.bank") != std::string::npos) {
+            master_bank_file = bank_files[i];
+            master_bank_loaded = loadState;
+        } else {
+            other_banks.emplace_back(bank_files[i], loadState);
+        }
+    }
+
+    if (!master_bank_file.empty()) {
+        out << "bank_file=" << master_bank_file << "\n";
+        out << "load_state=" << (master_bank_loaded ? 1 : 0) << "\n";
+    }
+
+    std::sort(other_banks.begin(), other_banks.end());
+
+    for (const auto& bank_pair : other_banks) {
+        out << "bank_file=" << bank_pair.first << "\n";
+        out << "load_state=" << (bank_pair.second ? 1 : 0) << "\n";
+    }
+
+    out << "</bank_files>\n";
+
+    return out.str();
+}
+
+void SaveStateToProject(const std::string& serializedState) {
+    if (!SetProjExtState || !EnumProjects) {
+        DebugMsg("Project state APIs unavailable. Skipping embed.\n");
+        return;
+    }
+
+    ReaProject* project = GetCurrentReaperProject();
+    if (!project) {
+        DebugMsg("Unable to resolve current project. Skipping embed.\n");
+        return;
+    }
+
+    int result = SetProjExtState(project, REAMOD_PROJECT_EXT_SECTION, REAMOD_PROJECT_EXT_KEY, serializedState.c_str());
+    if (result >= 0) {
+        if (MarkProjectDirty) {
+            MarkProjectDirty(project);
+        }
+        DebugMsg("Embedded ReaMOD state into project (%d bytes).\n", result);
+    } else {
+        DebugMsg("Failed to embed ReaMOD state into project.\n");
+    }
+}
+
+void PersistStateToProjectIfPossible() {
+    if (isRestoringReaMODState) {
+        return;
+    }
+    SaveStateToProject(BuildSerializedReaMODState());
+}
+
 void SaveStateToFile(const std::string& filePath = "") {
     std::string finalFilePath;
 
-    // Determine the default file name
     if (filePath.empty()) {
         if (!currentDisplayedFileName.empty() && currentDisplayedFileName != "No ReaMOD session loaded.") {
             finalFilePath = currentDisplayedFileName + ".ReaMOD";
@@ -2594,68 +2694,20 @@ void SaveStateToFile(const std::string& filePath = "") {
         finalFilePath = filePath;
     }
 
-    // Open the file for writing
+    std::string serializedState = BuildSerializedReaMODState();
+
     std::ofstream outFile(finalFilePath);
     if (!outFile) {
         DebugMsg("Failed to open file for saving: %s\n", finalFilePath.c_str());
         return;
     }
 
-    // Save relevant state information
-    outFile << "fspro_file=" << selected_file_path << "\n";
-    outFile << "lookahead_time_ms=" << lookAheadTimeMs << "\n";
-    outFile << "move_cursor_after_insert=" << (moveCursorAfterInsert ? 1 : 0) << "\n";
-    outFile << "num_frames_for_item=" << numFramesForItem << "\n";
-    outFile << "item_sync_selection=" << syncSelectedEventWithItemSelection << "\n";
-    outFile << "update_item_insertion_length_from_last_time_selection=" << updateItemInsertionLength << "\n";
-    outFile << "show_full_bank_directory_paths=" << (showFullBankDirectoryPaths ? 1 : 0) << "\n";
-
-    // Separate Master.bank and other bank files
-    std::string master_bank_file;
-    bool master_bank_loaded = false;
-    std::vector<std::pair<std::string, bool>> other_banks;
-
-    for (size_t i = 0; i < bank_files.size(); ++i) {
-        if (bank_files[i].find("Master.bank") != std::string::npos) {
-            master_bank_file = bank_files[i];
-            master_bank_loaded = bank_load_states[i];
-        } else {
-            other_banks.emplace_back(bank_files[i], bank_load_states[i]);
-        }
-    }
-
-    // Sort other bank files
-    std::sort(other_banks.begin(), other_banks.end());
-
-    outFile << "<bank_directories>\n";
-    for (const auto& directory : customBankDirectories) {
-        outFile << "bank_directory=" << directory << "\n";
-    }
-    outFile << "</bank_directories>\n";
-
-    outFile << "<bank_files>\n";
-
-    // Write Master.bank first if it exists
-    if (!master_bank_file.empty()) {
-        outFile << "bank_file=" << master_bank_file << "\n";
-        outFile << "load_state=" << (master_bank_loaded ? 1 : 0) << "\n";
-    }
-
-    // Write other bank files
-    for (const auto& bank_pair : other_banks) {
-        outFile << "bank_file=" << bank_pair.first << "\n";
-        outFile << "load_state=" << (bank_pair.second ? 1 : 0) << "\n";
-    }
-
-    outFile << "</bank_files>\n";
-
+    outFile << serializedState;
     outFile.close();
     DebugMsg("State saved successfully to: %s\n", finalFilePath.c_str());
 
-    // Update the displayed file name
     currentDisplayedFileName = getReaMODFileName(finalFilePath);
 
-    // Get the last modification time and update formattedLastSaveTimestamp
     std::error_code ec;
     auto ftime = fs::last_write_time(finalFilePath, ec);
     if (!ec) {
@@ -2669,6 +2721,8 @@ void SaveStateToFile(const std::string& filePath = "") {
         DebugMsg("Error retrieving last modification time: %s\n", ec.message().c_str());
         formattedLastSaveTimestamp.clear();
     }
+
+    SaveStateToProject(serializedState);
 }
 
 // Utility function to trim leading and trailing whitespace from a string
@@ -2682,40 +2736,28 @@ std::string TrimString(const std::string& str) {
     return str.substr(start, end - start + 1);
 }
 
-void LoadStateFromFile(const std::string& filePath) {
-    if (!IsFMODInitialized()) {
-        DebugMsg("FMOD system is not initialized. Cannot load state from file.\n");
-        return;
-    }
-
-    UnloadAllBanks();
-
-    std::ifstream inFile(filePath);
-    if (!inFile.is_open()) {
-        DebugMsg("Failed to open file for loading: %s\n", filePath.c_str());
-        return;
-    }
-
+bool LoadStateFromStream(std::istream& input) {
     bank_files.clear();
     bank_load_states.clear();
     bank_events.clear();
     loaded_banks.clear();
     masterStringEvents.clear();
     std::strncpy(selected_file_name, "No project selected.", FILE_PATH_BUFFER_SIZE - 1);
+    selected_file_name[FILE_PATH_BUFFER_SIZE - 1] = '\0';
 
     std::string line;
     std::string fsproDirectory;
     std::unordered_map<std::string, bool> savedBankStates;
     std::vector<std::string> parsedDirectories;
 
-    while (std::getline(inFile, line)) {
+    while (std::getline(input, line)) {
         line = TrimString(line);
         if (line.empty()) {
             continue;
         }
 
         if (line == "<bank_directories>") {
-            while (std::getline(inFile, line)) {
+            while (std::getline(input, line)) {
                 line = TrimString(line);
                 if (line.empty()) {
                     continue;
@@ -2746,7 +2788,7 @@ void LoadStateFromFile(const std::string& filePath) {
         }
 
         if (line == "<bank_files>") {
-            while (std::getline(inFile, line)) {
+            while (std::getline(input, line)) {
                 line = TrimString(line);
                 if (line.empty()) {
                     continue;
@@ -2768,15 +2810,18 @@ void LoadStateFromFile(const std::string& filePath) {
                     std::string bankPath = fs::path(value).lexically_normal().string();
 
                     std::string stateLine;
-                    while (std::getline(inFile, stateLine) && TrimString(stateLine).empty()) {
+                    while (std::getline(input, stateLine)) {
+                        stateLine = TrimString(stateLine);
+                        if (!stateLine.empty()) {
+                            break;
+                        }
                     }
 
-                    if (inFile.eof()) {
-                        DebugMsg("Error: Unexpected end of file after bank_file entry.\n");
+                    if (stateLine.empty()) {
+                        DebugMsg("Error: Unexpected end of state data after bank_file entry.\n");
                         break;
                     }
 
-                    stateLine = TrimString(stateLine);
                     size_t stateEquals = stateLine.find('=');
                     if (stateEquals == std::string::npos) {
                         DebugMsg("Error: Invalid load_state entry: %s\n", stateLine.c_str());
@@ -2806,7 +2851,7 @@ void LoadStateFromFile(const std::string& filePath) {
 
         size_t equalsPos = line.find('=');
         if (equalsPos == std::string::npos) {
-            DebugMsg("Error: Invalid line in .ReaMOD file: %s\n", line.c_str());
+            DebugMsg("Error: Invalid line in state data: %s\n", line.c_str());
             continue;
         }
 
@@ -2851,14 +2896,12 @@ void LoadStateFromFile(const std::string& filePath) {
                 showFullBankDirectoryPaths = (std::stoi(value) != 0);
                 DebugMsg("Loaded show_full_bank_directory_paths: %d\n", showFullBankDirectoryPaths);
             } else {
-                DebugMsg("Error: Unknown key in .ReaMOD file: %s\n", key.c_str());
+                DebugMsg("Error: Unknown key in state data: %s\n", key.c_str());
             }
         } catch (const std::exception& e) {
             DebugMsg("Error parsing value for key %s: %s\n", key.c_str(), e.what());
         }
     }
-
-    inFile.close();
 
     if (parsedDirectories.empty() && !fsproDirectory.empty()) {
         fs::path defaultDir = fs::path(fsproDirectory) / "Build" / "Desktop";
@@ -2880,6 +2923,31 @@ void LoadStateFromFile(const std::string& filePath) {
 
     SynchronizeLoadedBanks();
 
+    return true;
+}
+
+void LoadStateFromFile(const std::string& filePath) {
+    if (!IsFMODInitialized()) {
+        DebugMsg("FMOD system is not initialized. Cannot load state from file.\n");
+        return;
+    }
+
+    UnloadAllBanks();
+
+    std::ifstream inFile(filePath);
+    if (!inFile.is_open()) {
+        DebugMsg("Failed to open file for loading: %s\n", filePath.c_str());
+        return;
+    }
+
+    isRestoringReaMODState = true;
+    bool loaded = LoadStateFromStream(inFile);
+    isRestoringReaMODState = false;
+
+    if (!loaded) {
+        return;
+    }
+
     DebugMsg("State loaded from file: %s\n", filePath.c_str());
 
     currentDisplayedFileName = getReaMODFileName(filePath);
@@ -2899,6 +2967,74 @@ void LoadStateFromFile(const std::string& filePath) {
     }
 
     RetrieveGlobalParameters();
+    SaveStateToProject(BuildSerializedReaMODState());
+}
+
+bool LoadStateFromProject() {
+    if (!IsFMODInitialized()) {
+        DebugMsg("FMOD system is not initialized. Cannot load state from project.\n");
+        return false;
+    }
+
+    if (!GetProjExtState || !EnumProjects) {
+        DebugMsg("Project state APIs unavailable. Cannot load embedded state.\n");
+        return false;
+    }
+
+    ReaProject* project = GetCurrentReaperProject();
+    if (!project) {
+        DebugMsg("Unable to resolve current project. Cannot load embedded state.\n");
+        return false;
+    }
+
+    std::vector<char> buffer(1);
+    int length = GetProjExtState(project, REAMOD_PROJECT_EXT_SECTION, REAMOD_PROJECT_EXT_KEY, buffer.data(), static_cast<int>(buffer.size()));
+    if (length <= 0) {
+        return false;
+    }
+
+    if (length >= static_cast<int>(buffer.size())) {
+        buffer.resize(length + 1);
+        length = GetProjExtState(project, REAMOD_PROJECT_EXT_SECTION, REAMOD_PROJECT_EXT_KEY, buffer.data(), static_cast<int>(buffer.size()));
+        if (length <= 0) {
+            return false;
+        }
+    }
+
+    if (!buffer.empty()) {
+        if (static_cast<size_t>(length) < buffer.size()) {
+            buffer[length] = '\0';
+        } else {
+            buffer.back() = '\0';
+        }
+    }
+
+    UnloadAllBanks();
+
+    std::istringstream stream(std::string(buffer.data(), length));
+
+    isRestoringReaMODState = true;
+    bool loaded = LoadStateFromStream(stream);
+    isRestoringReaMODState = false;
+
+    if (!loaded) {
+        return false;
+    }
+
+    std::string projectName = GetCurrentReaperProjectName();
+    if (projectName.empty() || projectName == "Untitled") {
+        currentDisplayedFileName = "Embedded ReaMOD State";
+    } else {
+        currentDisplayedFileName = projectName + REAMOD_PROJECT_EMBEDDED_SUFFIX;
+    }
+
+    formattedLastSaveTimestamp = "Last Save: Embedded in project";
+    currentReaMODFileName.clear();
+
+    RetrieveGlobalParameters();
+
+    DebugMsg("State loaded from project extension state.\n");
+    return true;
 }
 
 void SaveStateDialog() {
@@ -3688,6 +3824,7 @@ void RenderGUI() {
                         LoadBank(bank_files[i]);
                     }
                     bank_load_states[i] = !bank_load_states[i];
+                    PersistStateToProjectIfPossible();
                 }
 
                 ImGui::SameLine(reaMOD_Main_ImGui_Context);
@@ -3926,7 +4063,9 @@ void RenderGUI() {
                 }
             }
     
-            ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Sync with selected item", &syncSelectedEventWithItemSelection);
+            if (ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Sync with selected item", &syncSelectedEventWithItemSelection)) {
+                PersistStateToProjectIfPossible();
+            }
             ImGui::Text(reaMOD_Main_ImGui_Context, "");
         }
         
@@ -3978,25 +4117,37 @@ void RenderGUI() {
 
         // Add the InputInt control for Look Ahead Time and keep the text on the same line
         ImGui::SetNextItemWidth(reaMOD_Main_ImGui_Context, 90);
-        ImGui::InputInt(reaMOD_Main_ImGui_Context, "##look_ahead_time_ms", &lookAheadTimeMs);
+        if (ImGui::InputInt(reaMOD_Main_ImGui_Context, "##look_ahead_time_ms", &lookAheadTimeMs)) {
+            PersistStateToProjectIfPossible();
+        }
         ImGui::SameLine(reaMOD_Main_ImGui_Context);
         ImGui::Text(reaMOD_Main_ImGui_Context, "Event detection look ahead time (ms)");
 
         // Add the InputInt control for number of frames
         ImGui::SetNextItemWidth(reaMOD_Main_ImGui_Context, 90);
-        ImGui::InputInt(reaMOD_Main_ImGui_Context, "##num_frames_for_item", &numFramesForItem);
+        if (ImGui::InputInt(reaMOD_Main_ImGui_Context, "##num_frames_for_item", &numFramesForItem)) {
+            PersistStateToProjectIfPossible();
+        }
         ImGui::SameLine(reaMOD_Main_ImGui_Context);
         ImGui::Text(reaMOD_Main_ImGui_Context, "Number of frames for inserted item");
 
         // Add the checkbox for moving the cursor after inserting an item
-        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Move edit to end of inserted item.", &moveCursorAfterInsert);
-        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Update item length from last time-selection insert.", &updateItemInsertionLength);
+        if (ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Move edit to end of inserted item.", &moveCursorAfterInsert)) {
+            PersistStateToProjectIfPossible();
+        }
+        if (ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Update item length from last time-selection insert.", &updateItemInsertionLength)) {
+            PersistStateToProjectIfPossible();
+        }
 
         // Add the checkbox for toggling display of full directory path.
-        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Show full bank directory paths", &showFullBankDirectoryPaths);
+        if (ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Show full bank directory paths", &showFullBankDirectoryPaths)) {
+            PersistStateToProjectIfPossible();
+        }
         
         // Add the checkbox for toggling debug messages in Reaper
-        ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Enable debug messages to be posted to Reaper console", &debugMessages);
+        if (ImGui::Checkbox(reaMOD_Main_ImGui_Context, "Enable debug messages to be posted to Reaper console", &debugMessages)) {
+            PersistStateToProjectIfPossible();
+        }
 
         // Support & Links section
         ImGui::Separator(reaMOD_Main_ImGui_Context);
@@ -4333,6 +4484,10 @@ void toggleReaMODWindow() {
         // Add tasks to monitor and render the GUI
         guiTaskId = AddTask(RenderGUI);
         itemSelectionTaskId = AddTask(MonitorItemSelection);
+
+        if (!LoadStateFromProject()) {
+            DebugMsg("No embedded ReaMOD state found in project.\n");
+        }
 
         // Auto-load the .ReaMOD file if available
         // if (reaModWindowPreviouslyOpen != true) {
