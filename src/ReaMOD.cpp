@@ -2337,19 +2337,19 @@ void MonitorTrackEnvelopesForGlobalParameters(MediaTrack* track) {
 
         std::string envelopeNameLower = ToLower(std::string(envelopeName));
 
-        for (const auto& globalParam : globalParameters) {
-            std::string paramNameLower = ToLower(globalParam.name);
-            if (envelopeNameLower == paramNameLower || envelopeNameLower.find(paramNameLower) != std::string::npos) {
-                double envelopeValue = 0.0;
-                bool result = Envelope_Evaluate(envelope, playPosition, projectSampleRate, 1, &envelopeValue, nullptr, nullptr, 0);
-                if (result) {
-                    float floatValue = static_cast<float>(envelopeValue);
-                    floatValue = std::clamp(floatValue, globalParam.minValue, globalParam.maxValue);
-                    ApplyTrackEnvelopeValueToFMODGlobalParameter(globalParam.name, floatValue);
-                }
-                break;
-            }
-        }
+        // for (const auto& globalParam : globalParameters) {
+        //     std::string paramNameLower = ToLower(globalParam.name);
+        //     if (envelopeNameLower == paramNameLower || envelopeNameLower.find(paramNameLower) != std::string::npos) {
+        //         double envelopeValue = 0.0;
+        //         bool result = Envelope_Evaluate(envelope, playPosition, projectSampleRate, 1, &envelopeValue, nullptr, nullptr, 0);
+        //         if (result) {
+        //             float floatValue = static_cast<float>(envelopeValue);
+        //             floatValue = std::clamp(floatValue, globalParam.minValue, globalParam.maxValue);
+        //             ApplyTrackEnvelopeValueToFMODGlobalParameter(globalParam.name, floatValue);
+        //         }
+        //         break;
+        //     }
+        // }
     }
 }
 
