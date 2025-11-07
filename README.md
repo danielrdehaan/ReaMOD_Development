@@ -4,6 +4,9 @@ ReaMOD is an extension for [REAPER](https://www.reaper.fm/), a digital audio wor
 
 I recorded a quick [video](https://www.youtube.com/live/mngoJSFgblk) showing the basic workflow/concepts of ReaMOD. For some reason, OBS captured the audio from Reaper twice so all the playback examples sound off. Sorry! Someday I'll produce a better quality demo video.
 
+## Discord Community
+Join the [Simple Sound Tools](https://discord.gg/jX3sFetnD3) Discord community.
+
 
 ## Features
 
