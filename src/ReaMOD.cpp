@@ -4012,7 +4012,7 @@ void RenderGUI() {
         ImGui::Spacing(reaMOD_Main_ImGui_Context);
 
         if (StyledButton(reaMOD_Main_ImGui_Context, "Discord Server")) {
-            if (!OpenURLInDefaultBrowser("https://discord.gg/C9FYD8Qf4g")) {
+            if (!OpenURLInDefaultBrowser("https://discord.gg/jX3sFetnD3")) {
                 DebugMsg("Failed to open Discord URL.\n");
             }
         }
