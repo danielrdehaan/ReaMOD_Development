@@ -235,7 +235,7 @@ All the audio triggered by ReaMOD does not actually flow through Reaper so there
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit pull requests or open issues on the GitHub repository.
+Contributions are welcome! Message me on Discord: [Simple Sound Tools](https://discord.gg/jX3sFetnD3)
 
 ## License
 
