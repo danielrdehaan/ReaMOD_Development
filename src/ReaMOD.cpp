@@ -4026,7 +4026,7 @@ void RenderGUI() {
         }
 
         ImGui::Separator(reaMOD_Main_ImGui_Context);
-        ImGui::Text(reaMOD_Main_ImGui_Context,"Beta V1.0")
+        ImGui::Text(reaMOD_Main_ImGui_Context,"Beta V1.0");
 
         // Pop style colors after End() but before cleanup
         // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
