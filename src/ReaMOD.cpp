@@ -4993,7 +4993,7 @@ void RegisterActions() {
     actionIDInsertPositionInterpolationItemsForSelectedMediaItem = plugin_register("custom_action", &actionInsertPositionInterpolationItemsForSelectedMediaItem);
 
     // Register the custom action for inserting Global Parameter SFX on selected track
-    static custom_action_register_t actionInsertGlobalParametersJSFX = {0, "ReaMOD_actionInsertGlobalParametersJSFXonSelectedTrack", "ReaMOD: Insert FMOD Global Parameters JSFX on selected track"};
+    static custom_action_register_t actionInsertGlobalParametersJSFX = {0, "ReaMOD_actionInsertGlobalParametersJSFXonSelectedTrack", "ReaMOD: Insert track and custom JSFX for controlling/automating FMOD global parameters"};
     actionIDInsertGlobalParametersJSFX = plugin_register("custom_action", &actionInsertGlobalParametersJSFX);
 
     // static custom_action_register_t actionPostFmodTracksListToConsole = { 0, "ReaMOD_PostFmodTracksListToConsole", "ReaMOD: Post current list of FMOD tracks to console" };
