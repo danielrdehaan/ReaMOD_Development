@@ -61,7 +61,7 @@ Note: Users of macOS Catalina or newer may need to click on "Allow Anyway" in Sy
    This opens the root directory where REAPER expects extensions.
 
 2) Install ReaMOD
-   - Download the [latest release](https://github.com/danielrdehaan/ReaMOD/releases)
+   - Download the [latest release](https://github.com/danielrdehaan/ReaMOD_Development/releases)
    - Copy the extension into the UserPlugins subfolder:
 
      - macOS   → REAPER/UserPlugins/reaper_ReaMOD_Plugin.dylib
