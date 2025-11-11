@@ -235,6 +235,8 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         GetEnvelopeName = reinterpret_cast<decltype(GetEnvelopeName)>(rec->GetFunc("GetEnvelopeName"));
         GetSetMediaTrackInfo_String = reinterpret_cast<decltype(GetSetMediaTrackInfo_String)>(rec->GetFunc("GetSetMediaTrackInfo_String"));
         InsertTrackAtIndex         = reinterpret_cast<decltype(InsertTrackAtIndex)>(rec->GetFunc("InsertTrackAtIndex"));
+        GetProjExtState = reinterpret_cast<decltype(GetProjExtState)>(rec->GetFunc("GetProjExtState"));
+        SetProjExtState = reinterpret_cast<decltype(SetProjExtState)>(rec->GetFunc("SetProjExtState"));
     }
 }
 
@@ -335,6 +337,26 @@ void PostMsg(const char* fmt, ...) {
     va_end(args);
 }
 
+static ReaProject* CurrentProject() {
+    return EnumProjects ? EnumProjects(-1, nullptr, 0) : nullptr;
+}
+
+static std::string Join(const std::vector<std::string>& v, const char* sep) {
+    std::string out;
+    for (size_t i=0;i<v.size();++i){ if(i) out += sep; out += v[i]; }
+    return out;
+}
+
+static std::vector<std::string> Split(const std::string& s, char delim) {
+    std::vector<std::string> out; std::string cur;
+    for (char c : s) {
+        if (c==delim) { out.push_back(cur); cur.clear(); }
+        else cur.push_back(c);
+    }
+    out.push_back(cur);
+    return out;
+}
+
 std::string Trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\n\r");
     if (first == std::string::npos)
@@ -360,6 +382,32 @@ std::vector<std::string> SplitString(const std::string& str, const std::string& 
     
     return tokens;
 }
+
+static void SaveReaMODToProjectExtState() {
+    if (!SetProjExtState) return;
+    ReaProject* proj = CurrentProject();
+    if (!proj) return;
+
+    // 1) FMOD project (.fspro) path
+    SetProjExtState(proj, "ReaMOD", "fspro_path", selected_file_path);
+
+    // 2) Bank search directories (pipe-separated)
+    std::string dirsJoined = Join(customBankDirectories, "|");
+    SetProjExtState(proj, "ReaMOD", "bank_dirs", dirsJoined.c_str());
+
+    // 3) Bank load states (one per line: "<absolute_bank_path>|0/1")
+    //    We save *all* known banks so we can map states reliably after rescan.
+    std::string states;
+    for (size_t i = 0; i < bank_files.size(); ++i) {
+        if (i) states += "\n";
+        states += bank_files[i];
+        states += "|";
+        states += (bank_load_states[i] ? "1" : "0");
+    }
+    SetProjExtState(proj, "ReaMOD", "bank_states", states.c_str());
+}
+
+
 
 // Initialize FMOD system
 void InitializeFMOD() {
@@ -483,6 +531,76 @@ void RetrieveGlobalParameters() {
             return a.name < b.name;
         });
     }
+}
+
+static bool LoadReaMODFromProjectExtState() {
+    if (!GetProjExtState) return false;
+    ReaProject* proj = CurrentProject();
+    if (!proj) return false;
+
+    bool loadedAnything = false;
+    char buf[65536] = {0};
+
+    // fspro path
+    if (GetProjExtState(proj, "ReaMOD", "fspro_path", buf, sizeof(buf)) > 0 && buf[0]) {
+        std::strncpy(selected_file_path, buf, FILE_PATH_BUFFER_SIZE-1);
+        // derive file name + directory like your OpenFileDialog() does
+        std::string file_path(selected_file_path);
+        size_t p1 = file_path.find_last_of("/\\");
+        std::string fsproDirectory;
+        if (p1 != std::string::npos) {
+            std::string file_name = file_path.substr(p1 + 1);
+            std::strncpy(selected_file_name, file_name.c_str(), FILE_PATH_BUFFER_SIZE - 1);
+            selected_file_name[FILE_PATH_BUFFER_SIZE - 1] = '\0';
+            fsproDirectory = file_path.substr(0, p1);
+        } else {
+            std::strncpy(selected_file_name, file_path.c_str(), FILE_PATH_BUFFER_SIZE - 1);
+            selected_file_name[FILE_PATH_BUFFER_SIZE - 1] = '\0';
+            fsproDirectory.clear();
+        }
+        fmodProjectDirectory = fsproDirectory;
+        loadedAnything = true;
+    }
+
+    // bank dirs
+    std::vector<std::string> parsedDirs;
+    if (GetProjExtState(proj, "ReaMOD", "bank_dirs", buf, sizeof(buf)) > 0 && buf[0]) {
+        parsedDirs = Split(std::string(buf), '|');
+        loadedAnything = true;
+    } else if (!fmodProjectDirectory.empty()) {
+        // fallback to Build/Desktop/ if dirs weren't saved yet
+        fs::path defDir = fs::path(fmodProjectDirectory) / "Build" / "Desktop";
+        parsedDirs.push_back(defDir.lexically_normal().string());
+    }
+    customBankDirectories = parsedDirs;
+
+    // Rescan banks now that dirs are known
+    RefreshBankFiles(); // rebuilds bank_files/bank_load_states
+    // (At this point bank_load_states reflect previous defaults or remembered per-path states)
+
+    // bank load states (path|0/1 per line)
+    if (GetProjExtState(proj, "ReaMOD", "bank_states", buf, sizeof(buf)) > 0 && buf[0]) {
+        std::unordered_map<std::string, bool> saved;
+        for (const auto& line : Split(std::string(buf), '\n')) {
+            size_t bar = line.find('|');
+            if (bar == std::string::npos) continue;
+            std::string p = line.substr(0, bar);
+            bool st = (bar+1 < line.size() && line[bar+1] == '1');
+            saved[p] = st;
+        }
+        // apply onto current bank_files order
+        for (size_t i = 0; i < bank_files.size(); ++i) {
+            auto it = saved.find(bank_files[i]);
+            if (it != saved.end()) bank_load_states[i] = it->second;
+        }
+        SynchronizeLoadedBanks();
+        loadedAnything = true;
+    }
+
+    // Update globals/UI bits that depend on loaded banks
+    RetrieveGlobalParameters();
+
+    return loadedAnything;
 }
 
 // Load a bank and retrieve its events
@@ -773,6 +891,7 @@ void RefreshBankFiles() {
     }
 
     SynchronizeLoadedBanks();
+    SaveReaMODToProjectExtState();
 }
 
 // Function to find all .bank files in the "Build/Desktop/" directory relative to the selected .fspro file
@@ -819,6 +938,7 @@ void OpenFileDialog() {
         // Find the .bank files in the "Build/Desktop/" directory
         FindBankFiles(fspro_directory);
         RetrieveGlobalParameters();
+        SaveReaMODToProjectExtState();
     } else {
         // Unload any previously loaded banks
         UnloadAllBanks();
@@ -4090,7 +4210,7 @@ void RenderGUI() {
         }
 
         ImGui::Separator(reaMOD_Main_ImGui_Context);
-        ImGui::Text(reaMOD_Main_ImGui_Context,"Beta V1.0");
+        ImGui::Text(reaMOD_Main_ImGui_Context,"Beta V1.1");
 
         // Pop style colors after End() but before cleanup
         // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
@@ -4401,11 +4521,11 @@ void toggleReaMODWindow() {
         guiTaskId = AddTask(RenderGUI);
         itemSelectionTaskId = AddTask(MonitorItemSelection);
 
-        // Auto-load the .ReaMOD file if available
-        // if (reaModWindowPreviouslyOpen != true) {
-        //     AutoLoadReaMODFile();
-        //     reaModWindowPreviouslyOpen = true;
-        // }
+        if (reaModWindowPreviouslyOpen != true) {
+            LoadReaMODFromProjectExtState();
+            // AutoLoadReaMODFile();
+            reaModWindowPreviouslyOpen = true;
+        }
     } else {
         // Clean up: remove tasks and close the window
         taskMap.clear();
