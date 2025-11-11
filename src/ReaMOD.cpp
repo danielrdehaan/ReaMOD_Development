@@ -135,7 +135,15 @@ struct ParameterInfo {
     float maxValue;
     float defaultValue;
     float currentValue;
+
+    // NEW:
+    unsigned int flags = 0;               // FMOD_STUDIO_PARAMETER_FLAGS
+    std::vector<std::string> labels;      // for labeled params
+
+    bool isDiscrete() const { return (flags & FMOD_STUDIO_PARAMETER_DISCRETE) != 0; }
+    bool isLabeled()  const { return (flags & FMOD_STUDIO_PARAMETER_LABELED)  != 0; }
 };
+
 
 struct GlobalParameter {
     std::string name;
@@ -1287,20 +1295,44 @@ bool UpdateSelectedEventParameters(const std::string& eventPath) {
     for (int i = 0; i < paramCount; ++i) {
         FMOD_STUDIO_PARAMETER_DESCRIPTION paramDesc;
         result = eventDesc->getParameterDescriptionByIndex(i, &paramDesc);
-        if (result != FMOD_OK) {
-            DebugMsg("Failed to get parameter description by index %d for event: %s\n", i, eventPath.c_str());
-            continue;
-        }
-
+        if (result != FMOD_OK) { /* ... continue; */ }
+        
         ParameterInfo paramInfo;
-        paramInfo.name = paramDesc.name;
-        paramInfo.id = paramDesc.id;
-        paramInfo.minValue = paramDesc.minimum;
-        paramInfo.maxValue = paramDesc.maximum;
+        paramInfo.name         = paramDesc.name;
+        paramInfo.id           = paramDesc.id;
+        paramInfo.minValue     = paramDesc.minimum;
+        paramInfo.maxValue     = paramDesc.maximum;
         paramInfo.defaultValue = paramDesc.defaultvalue;
-        paramInfo.currentValue = paramDesc.defaultvalue; // Initialize to default value
+        paramInfo.currentValue = paramDesc.defaultvalue;
+        paramInfo.flags        = paramDesc.flags;
+        
+        // If labeled, pull label strings for each integer index in range:
+        if ((paramInfo.flags & FMOD_STUDIO_PARAMETER_LABELED) != 0) {
+            const int first = (int)std::round(paramInfo.minValue);
+            const int last  = (int)std::round(paramInfo.maxValue);
+            for (int li = first; li <= last; ++li) {
+                char buf[256] = {};
+                // Prefer the API that exists in your FMOD version:
+                // - getParameterLabelByIndex(paramIndex, labelIndex, buf, buflen)
+                // - OR getParameterLabelByName(paramDesc.name, labelIndex, ...)
+                // - OR getParameterLabelByID(paramDesc.id, labelIndex, ...)
+                //
+                // Replace the call below with the variant you have:
+                int retrieved = 0;
+                result = eventDesc->getParameterLabelByIndex(i, li - first, buf, sizeof(buf), &retrieved);
 
-        selectedEventParameters.push_back(paramInfo);
+        
+                if (result == FMOD_OK && buf[0] != '\0') {
+                    paramInfo.labels.emplace_back(buf);
+                } else {
+                    // Fallback: if label missing, insert the numeric index as text
+                    paramInfo.labels.emplace_back(std::to_string(li));
+                }
+            }
+        }
+        
+        selectedEventParameters.push_back(std::move(paramInfo));
+        
     }
 
     // Cache the parameters
@@ -4374,6 +4406,59 @@ bool CreateDirectoryIfNotExists(const std::string& directoryPath) {
     return true; // Directory already exists
 }
 
+static inline std::string FmtFloat(double v) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.6f", v);
+    std::string s(buf);
+    while (!s.empty() && s.back() == '0') s.pop_back();
+    if (!s.empty() && s.back() == '.') s.pop_back();
+    if (s.empty()) s = "0";
+    return s;
+}
+
+static inline std::string SanitizeForJSFXName(const std::string& s) {
+    std::string out; out.reserve(s.size());
+    for (char c : s) {
+        if (c == '\n' || c == '\r' || c == '{' || c == '}' || c == '<' || c == '>') out.push_back(' ');
+        else out.push_back(c);
+    }
+    return out;
+}
+
+static inline std::string SanitizeLabel(const std::string& s) {
+    std::string out; out.reserve(s.size());
+    for (char c : s) {
+        if (c == ',' || c == '{' || c == '}' || c == '<' || c == '>') out.push_back(' ');
+        else out.push_back(c);
+    }
+    return out;
+}
+
+static std::string BuildJSFXSliderLine(int sliderIndex, const ParameterInfo& p) {
+    const bool stepIsOne = p.isDiscrete() || p.isLabeled();
+
+    std::string line = "slider" + std::to_string(sliderIndex) + ": "
+        + FmtFloat(p.defaultValue) + "<"
+        + FmtFloat(p.minValue) + ","
+        + FmtFloat(p.maxValue);
+
+    if (stepIsOne) line += ",1";
+
+    // Insert labels *inside* the brackets if labeled
+    if (p.isLabeled() && !p.labels.empty()) {
+        line += "{";
+        for (size_t i = 0; i < p.labels.size(); ++i) {
+            if (i) line += ",";
+            line += SanitizeLabel(p.labels[i]);
+        }
+        line += "}";
+    }
+
+    line += "> " + SanitizeForJSFXName(p.name) + "\n";
+    return line;
+}
+
+
 void InsertEventParameterJSFXForSelectedMediaItem() {
     DebugMsg("Starting InsertEventParameterJSFXForSelectedMediaItem...\n");
 
@@ -4433,7 +4518,7 @@ void InsertEventParameterJSFXForSelectedMediaItem() {
 
 
     // Create the "ReaMOD" directory if it doesn't exist
-    std::string effectsPath = std::string(GetResourcePath()) + "/Effects/ReaMOD";
+    std::string effectsPath = std::string(GetResourcePath()) + "/Effects/ReaMOD/" + projectName;
     DebugMsg("Effects path: %s\n", effectsPath.c_str());
 
     if (!DirectoryExists(effectsPath.c_str())) {
@@ -4450,15 +4535,16 @@ void InsertEventParameterJSFXForSelectedMediaItem() {
 
     // Build JSFX content from FMOD parameters with sequential slider indices
     std::string jsfxContent = "desc: " + jsfxName + "\n";
-    int sliderIndex = 1;  // Start slider indices from 1
+    int sliderIndex = 1;
     for (const auto& param : selectedEventParameters) {
-        jsfxContent += "slider" + std::to_string(sliderIndex++) + ": " +
-                       std::to_string(param.defaultValue) + "<" +
-                       std::to_string(param.minValue) + "," +
-                       std::to_string(param.maxValue) + "> " + param.name + "\n";
-        DebugMsg("Added parameter to JSFX: %s (default: %f, min: %f, max: %f)\n", param.name.c_str(), param.defaultValue, param.minValue, param.maxValue);
+        jsfxContent += BuildJSFXSliderLine(sliderIndex++, param);
+        DebugMsg("Added parameter to JSFX: %s (def:%s, min:%s, max:%s, flags:0x%X)\n",
+            param.name.c_str(),
+            FmtFloat(param.defaultValue).c_str(),
+            FmtFloat(param.minValue).c_str(),
+            FmtFloat(param.maxValue).c_str(),
+            param.flags);
     }
-    jsfxContent += "@sample\n";
 
     // Write the JSFX content to the file
     DebugMsg("Writing JSFX content to file...\n");
@@ -4539,10 +4625,10 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         PlayStopCurrentSelectedEvent();
         return true;
     }
-    // if (command == actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem) {
-    //     InsertEventParameterJSFXForSelectedMediaItem();
-    //     return true;
-    // }
+    if (command == actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem) {
+        InsertEventParameterJSFXForSelectedMediaItem();
+        return true;
+    }
     // if (command == actionIDToggleDebugOnOff) {
     //     toggleDebugMessagesOnOff();
     //     return true;
@@ -4603,8 +4689,8 @@ void RegisterActions() {
     static custom_action_register_t actionTriggerSelectedEvent = { 0, "ReaMOD_TriggerSelectedEvent", "ReaMOD: Play/Stop Current Selected Event" };
     actionIDTriggerSelectedEvent = plugin_register("custom_action", &actionTriggerSelectedEvent);
 
-    // static custom_action_register_t actionInsertParamEnvelopesForSelectedEventOnSelectedItem = { 0, "ReaMOD_InsertParamEnvelopesForSelectedEventOnSelectedItem", "ReaMOD: Insert parameter envelopes for selected FMOD event on selected media item" };
-    // actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem = plugin_register("custom_action", &actionInsertParamEnvelopesForSelectedEventOnSelectedItem);
+    static custom_action_register_t actionInsertParamEnvelopesForSelectedEventOnSelectedItem = { 0, "ReaMOD_InsertParamEnvelopesForSelectedEventOnSelectedItem", "ReaMOD: Insert parameter envelopes for selected FMOD event on selected media item" };
+    actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem = plugin_register("custom_action", &actionInsertParamEnvelopesForSelectedEventOnSelectedItem);
 
     // static custom_action_register_t actionToggleDebugOnOff = { 0, "ReaMOD_ToggleDebugMessagesOnOff", "ReaMOD: Toggle posting debug messages on/off." };
     // actionIDToggleDebugOnOff = plugin_register("custom_action", &actionToggleDebugOnOff);
