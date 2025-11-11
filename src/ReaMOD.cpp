@@ -54,6 +54,7 @@ static int actionIDInsertParamUpdateItemForSelectedMediaItem = 0;
 static int actionIDInsertParamAutomationItemsForSelectedMediaItem = 0;
 static int actionIDInsertPositionInterpolationItemsForSelectedMediaItem = 0;
 static int actionIDInsertParamEnvelopesForSelectedEventOnSelectedItem = 0;
+static int actionIDInsertGlobalParametersJSFX = 0;
 // static int actionIDPostFmodTracksListToConsole = 0;
 static int actionIDSearchForFmodEvent = 0;
 static int actionIDTriggerSelectedEvent = 0;
@@ -150,7 +151,15 @@ struct GlobalParameter {
     float currentValue;
     float minValue;
     float maxValue;
+
+    // NEW:
+    unsigned int flags = 0;                  // FMOD_STUDIO_PARAMETER_FLAGS
+    std::vector<std::string> labels;         // for labeled params
+
+    bool isDiscrete() const { return (flags & FMOD_STUDIO_PARAMETER_DISCRETE) != 0; }
+    bool isLabeled()  const { return (flags & FMOD_STUDIO_PARAMETER_LABELED)  != 0; }
 };
+
 
 // Declare a global vector to store parameters of the selected event
 std::vector<ParameterInfo> selectedEventParameters;
@@ -224,7 +233,8 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         CountTrackEnvelopes = reinterpret_cast<decltype(CountTrackEnvelopes)>(rec->GetFunc("CountTrackEnvelopes"));
         GetTrackEnvelopeByName = reinterpret_cast<decltype(GetTrackEnvelopeByName)>(rec->GetFunc("GetTrackEnvelopeByName"));
         GetEnvelopeName = reinterpret_cast<decltype(GetEnvelopeName)>(rec->GetFunc("GetEnvelopeName"));
-
+        GetSetMediaTrackInfo_String = reinterpret_cast<decltype(GetSetMediaTrackInfo_String)>(rec->GetFunc("GetSetMediaTrackInfo_String"));
+        InsertTrackAtIndex         = reinterpret_cast<decltype(InsertTrackAtIndex)>(rec->GetFunc("InsertTrackAtIndex"));
     }
 }
 
@@ -426,6 +436,28 @@ void RetrieveGlobalParameters() {
         if (result == FMOD_OK) {
             globalParam.currentValue = currentValue;
         }
+
+        globalParam.flags = paramDesc.flags;
+        
+        // If labeled, pull label strings for each integer index in range
+        if ((globalParam.flags & FMOD_STUDIO_PARAMETER_LABELED) != 0) {
+            const int first = (int)std::round(globalParam.minValue);
+            const int last  = (int)std::round(globalParam.maxValue);
+            for (int li = first; li <= last; ++li) {
+                char buf[256] = {};
+                int retrieved = 0;
+        
+                // Use the System-level label getter for globals (ID is available on paramDesc)
+                FMOD_RESULT lr = fmod_system->getParameterLabelByID(paramDesc.id, li - first, buf, sizeof(buf), &retrieved);
+        
+                if (lr == FMOD_OK && buf[0] != '\0') {
+                    globalParam.labels.emplace_back(buf);
+                } else {
+                    globalParam.labels.emplace_back(std::to_string(li));
+                }
+            }
+        }
+
 
         // Extract prefix from parameter name
         std::string paramName = paramDesc.name;
@@ -4458,6 +4490,29 @@ static std::string BuildJSFXSliderLine(int sliderIndex, const ParameterInfo& p) 
     return line;
 }
 
+static std::string BuildJSFXSliderLine_Global(int sliderIndex, const GlobalParameter& p) {
+    const bool stepIsOne = p.isDiscrete() || p.isLabeled();
+
+    std::string line = "slider" + std::to_string(sliderIndex) + ": "
+        + FmtFloat(p.currentValue) + "<"
+        + FmtFloat(p.minValue) + ","
+        + FmtFloat(p.maxValue);
+
+    if (stepIsOne) line += ",1";
+
+    if (p.isLabeled() && !p.labels.empty()) {
+        line += "{";
+        for (size_t i = 0; i < p.labels.size(); ++i) {
+            if (i) line += ",";
+            line += SanitizeLabel(p.labels[i]);
+        }
+        line += "}";
+    }
+
+    line += "> " + SanitizeForJSFXName(p.name) + "\n";
+    return line;
+}
+
 
 void InsertEventParameterJSFXForSelectedMediaItem() {
     DebugMsg("Starting InsertEventParameterJSFXForSelectedMediaItem...\n");
@@ -4570,6 +4625,138 @@ void InsertEventParameterJSFXForSelectedMediaItem() {
     }
 }
 
+static MediaTrack* FindOrCreateAndSelectGlobalTrack() {
+    const char* TARGET = "FMOD - Global Parameters";
+
+    // Search for an existing track with the exact name
+    const int trackCount = CountTracks(nullptr);
+    for (int i = 0; i < trackCount; ++i) {
+        MediaTrack* tr = GetTrack(nullptr, i);
+        char nameBuf[512] = {};
+        if (GetSetMediaTrackInfo_String &&
+            GetSetMediaTrackInfo_String(tr, "P_NAME", nameBuf, false) &&
+            std::strcmp(nameBuf, TARGET) == 0) {
+
+            // Deselect all tracks
+            for (int j = 0; j < trackCount; ++j) {
+                MediaTrack* tj = GetTrack(nullptr, j);
+                int sel0 = 0;
+                GetSetMediaTrackInfo(tj, "I_SELECTED", &sel0);
+            }
+            // Select just this one
+            { int sel1 = 1; GetSetMediaTrackInfo(tr, "I_SELECTED", &sel1); }
+            UpdateArrange();
+            return tr;
+        }
+    }
+
+    // Not found → create a new track at the end
+    int newIndex = trackCount;
+    if (!InsertTrackAtIndex) {
+        DebugMsg("InsertTrackAtIndex not available.\n");
+        return nullptr;
+    }
+    InsertTrackAtIndex(newIndex, true); // wantDefaults = true
+    UpdateArrange(); // ensure track list updates
+
+    MediaTrack* newTrack = GetTrack(nullptr, newIndex);
+    if (!newTrack) {
+        DebugMsg("Failed to get newly created track.\n");
+        return nullptr;
+    }
+
+    // Name the track
+    if (GetSetMediaTrackInfo_String) {
+        GetSetMediaTrackInfo_String(newTrack, "P_NAME",
+                                    const_cast<char*>("FMOD - Global Parameters"), true);
+    }
+
+    // Deselect all tracks, then select just this one
+    const int total = CountTracks(nullptr);
+    for (int j = 0; j < total; ++j) {
+        MediaTrack* tj = GetTrack(nullptr, j);
+        int sel0 = 0;
+        GetSetMediaTrackInfo(tj, "I_SELECTED", &sel0);
+    }
+    { int sel1 = 1; GetSetMediaTrackInfo(newTrack, "I_SELECTED", &sel1); }
+    UpdateArrange();
+
+    return newTrack;
+}
+
+
+void InsertGlobalParametersJSFXOnSelectedTrack() {
+    // Ensure we have globals for the current project/session
+    if (loaded_banks.empty() || !fmod_system) {
+        PostMsg("FMOD is not initialized or no banks are loaded.\n");
+        return;
+    }
+
+    // (Re)build the list to be safe
+    RetrieveGlobalParameters();  // populates globalParameters
+    if (globalParameters.empty()) {
+        PostMsg("No Global Parameters found.\n");
+        return;
+    }
+
+    // Find or create the "FMOD - Global Parameters" track, select only it
+    MediaTrack* targetTrack = FindOrCreateAndSelectGlobalTrack();
+    if (!targetTrack) {
+        PostMsg("Could not create/select 'FMOD - Global Parameters' track.\n");
+        return;
+    }
+
+    // Build a stable JSFX name: "<Project> - GlobalParameters"
+    std::string projectName = selected_file_name; // e.g., "MyProject.fspro"
+    auto dot = projectName.rfind(".fspro");
+    if (dot != std::string::npos) projectName.erase(dot);
+    std::string jsfxName = projectName + " - GlobalParameters";
+
+    // Create Effects/ReaMOD/<Project> directory if needed
+    std::string effectsPath = std::string(GetResourcePath()) + "/Effects/ReaMOD/" + projectName;
+    if (!fs::exists(effectsPath)) {
+        std::error_code ec;
+        fs::create_directories(effectsPath, ec);
+        if (ec) {
+            DebugMsg("Failed to create Effects/ReaMOD subdir: %s\n", ec.message().c_str());
+            return;
+        }
+    }
+
+    // Write the JSFX file
+    std::string jsfxFilePath = effectsPath + "/" + jsfxName + ".jsfx";
+
+    std::string jsfxContent = "desc: " + jsfxName + "\n";
+    int sliderIndex = 1;
+    for (const auto& gp : globalParameters) {
+        jsfxContent += BuildJSFXSliderLine_Global(sliderIndex++, gp);
+        DebugMsg("Global slider: %s (cur:%f min:%f max:%f flags:0x%X)\n",
+                 gp.name.c_str(), gp.currentValue, gp.minValue, gp.maxValue, gp.flags);
+    }
+    jsfxContent += "@sample\n";
+
+    {
+        std::ofstream f(jsfxFilePath, std::ios::binary);
+        if (!f) {
+            DebugMsg("Failed to create JSFX: %s\n", jsfxFilePath.c_str());
+            return;
+        }
+        f.write(jsfxContent.data(), (std::streamsize)jsfxContent.size());
+    }
+
+    // Insert as a **track** FX on the selected "FMOD - Global Parameters" track
+    int fxIndex = TrackFX_AddByName(targetTrack, jsfxName.c_str(), false, -1);
+    if (fxIndex >= 0) {
+        DebugMsg("Inserted global JSFX '%s' at track FX index %d\n", jsfxName.c_str(), fxIndex);
+        UpdateArrange();
+    } else {
+        DebugMsg("Failed to insert global JSFX '%s'\n", jsfxName.c_str());
+    }
+
+}
+
+
+
 // Command hook function for Reaper custom action
 static bool commandHook(KbdSectionInfo *sec, const int command, const int val, const int valhw, const int relmode, HWND hwnd) {
     // Check if the action ID matches the registered actions
@@ -4609,6 +4796,11 @@ static bool commandHook(KbdSectionInfo *sec, const int command, const int val, c
         InsertParamAutomationItemsForSelectedMediaItem();
         return true;
     }
+    if (command == actionIDInsertGlobalParametersJSFX) {
+        InsertGlobalParametersJSFXOnSelectedTrack();
+        return 1;
+    }
+
     if (command == actionIDInsertPositionInterpolationItemsForSelectedMediaItem) {
         InsertPositionInterpolationItemsForSelectedMediaItem();
         return true;
@@ -4679,6 +4871,10 @@ void RegisterActions() {
     // Register the custom action for inserting parameter automation items
     static custom_action_register_t actionInsertPositionInterpolationItemsForSelectedMediaItem = {0, "ReaMOD_actionInsertPositionInterpolationItemsForSelectedMediaItem", "ReaMOD: Insert position interpolation items for selected media item over time selection"};
     actionIDInsertPositionInterpolationItemsForSelectedMediaItem = plugin_register("custom_action", &actionInsertPositionInterpolationItemsForSelectedMediaItem);
+
+    // Register the custom action for inserting Global Parameter SFX on selected track
+    static custom_action_register_t actionInsertGlobalParametersJSFX = {0, "ReaMOD_actionInsertGlobalParametersJSFXonSelectedTrack", "ReaMOD: Insert FMOD Global Parameters JSFX on selected track"};
+    actionIDInsertGlobalParametersJSFX = plugin_register("custom_action", &actionInsertGlobalParametersJSFX);
 
     // static custom_action_register_t actionPostFmodTracksListToConsole = { 0, "ReaMOD_PostFmodTracksListToConsole", "ReaMOD: Post current list of FMOD tracks to console" };
     // actionIDPostFmodTracksListToConsole = plugin_register("custom_action", &actionPostFmodTracksListToConsole);
