@@ -566,13 +566,13 @@ static bool LoadReaMODFromProjectExtState() {
     std::vector<std::string> parsedDirs;
     if (GetProjExtState(proj, "ReaMOD", "bank_dirs", buf, sizeof(buf)) > 0 && buf[0]) {
         parsedDirs = Split(std::string(buf), '|');
-        loadedAnything = true;
+        customBankDirectories = parsedDirs; // Assign here
+        RefreshBankFiles();
     } else if (!fmodProjectDirectory.empty()) {
-        // fallback to Build/Desktop/ if dirs weren't saved yet
-        fs::path defDir = fs::path(fmodProjectDirectory) / "Build" / "Desktop";
-        parsedDirs.push_back(defDir.lexically_normal().string());
+        // Fallback: Use the smart finder logic
+        FindBankFiles(fmodProjectDirectory);
+        // Do NOT overwrite customBankDirectories here
     }
-    customBankDirectories = parsedDirs;
 
     // Rescan banks now that dirs are known
     RefreshBankFiles(); // rebuilds bank_files/bank_load_states
@@ -713,6 +713,12 @@ void UnloadAllBanks() {
     groupedGlobalParameters.clear();
 }
 
+// Updated to handle custom named "Master" bank files:
+// 1. Strings Bank Detection: Instead of strictly checking for entry.path().filename() == "Master.strings.bank", the code now checks if the filename ends with .strings.bank. This captures MyGame.strings.bank or any renamed variation.
+
+// 2. Strings Bank Exclusion: When gathering "other" banks, we explicitly exclude any file that was identified as a strings bank. This prevents the metadata bank from appearing in the user-toggleable load list (which should only contain sample data banks).
+
+// 3. Loading Priority: The code continues to load all identified masterStringsPaths before proceeding to populate and synchronize the main bank_files list. This ensures FMOD has the GUID-to-Path mapping available before it attempts to load any events from the standard banks
 void RefreshBankFiles() {
     if (!fmod_system) {
         bank_files.clear();
@@ -722,11 +728,6 @@ void RefreshBankFiles() {
     }
 
     UnloadAllBanks();
-
-    // if (customBankDirectories.empty()) {
-    //     UnloadAllBanks();
-    //     return;
-    // }
 
     std::unordered_map<std::string, bool> previousLoadStates;
     for (size_t i = 0; i < bank_files.size(); ++i) {
@@ -761,20 +762,27 @@ void RefreshBankFiles() {
             continue;
         }
 
+        // 1. Find all *.strings.bank files (Metadata)
         for (const auto& entry : entries) {
             std::error_code entryError;
             if (!entry.is_regular_file(entryError) || entryError) {
                 continue;
             }
 
-            if (entry.path().filename() == "Master.strings.bank") {
+            std::string filename = entry.path().filename().string();
+            // Check if file ends with ".strings.bank"
+            if (filename.length() >= 13 &&
+                filename.compare(filename.length() - 13, 13, ".strings.bank") == 0) {
+                
                 std::string normalizedPath = entry.path().lexically_normal().string();
                 if (seenMasterStrings.insert(normalizedPath).second) {
                     masterStringsPaths.push_back(normalizedPath);
+                    DebugMsg("Found strings bank: %s\n", normalizedPath.c_str());
                 }
             }
         }
 
+        // 2. Find Master.bank (Optional: keep specialized handling if it exists)
         for (const auto& entry : entries) {
             std::error_code entryError;
             if (!entry.is_regular_file(entryError) || entryError) {
@@ -789,6 +797,7 @@ void RefreshBankFiles() {
             }
         }
 
+        // 3. Find all other .bank files
         std::vector<std::string> localOtherBanks;
         for (const auto& entry : entries) {
             std::error_code entryError;
@@ -798,7 +807,14 @@ void RefreshBankFiles() {
 
             if (entry.path().extension() == ".bank") {
                 std::string fileName = entry.path().filename().string();
-                if (fileName == "Master.bank" || fileName == "Master.strings.bank") {
+                
+                // Skip if it's explicitly "Master.bank" (already handled)
+                if (fileName == "Master.bank") {
+                    continue;
+                }
+                // Skip if it is a ".strings.bank" file (handled in step 1)
+                if (fileName.length() >= 13 &&
+                    fileName.compare(fileName.length() - 13, 13, ".strings.bank") == 0) {
                     continue;
                 }
 
@@ -813,6 +829,7 @@ void RefreshBankFiles() {
         otherBanks.insert(otherBanks.end(), localOtherBanks.begin(), localOtherBanks.end());
     }
 
+    // Unload banks that are no longer present
     std::unordered_set<std::string> banksToKeep(masterBanks.begin(), masterBanks.end());
     banksToKeep.insert(otherBanks.begin(), otherBanks.end());
     std::unordered_set<std::string> masterStringsToKeep(masterStringsPaths.begin(), masterStringsPaths.end());
@@ -838,10 +855,11 @@ void RefreshBankFiles() {
         fmod_system->update();
     }
 
+    // Load ALL found strings banks first
     masterStringEvents.clear();
     for (const std::string& masterStringsPath : masterStringsPaths) {
         if (loaded_banks.find(masterStringsPath) == loaded_banks.end()) {
-            LoadBank(masterStringsPath, false);
+            LoadBank(masterStringsPath, false); // false = don't load sample data for strings bank
         }
 
         auto bankIt = loaded_banks.find(masterStringsPath);
@@ -865,9 +883,11 @@ void RefreshBankFiles() {
     std::sort(masterStringEvents.begin(), masterStringEvents.end());
     masterStringEvents.erase(std::unique(masterStringEvents.begin(), masterStringEvents.end()), masterStringEvents.end());
 
+    // Rebuild the bank files list for the GUI
     bank_files.clear();
     bank_load_states.clear();
 
+    // Add Master.bank first (if found)
     for (const std::string& bankPath : masterBanks) {
         bool shouldLoad = true;
         auto previousIt = previousLoadStates.find(bankPath);
@@ -879,6 +899,7 @@ void RefreshBankFiles() {
         bank_load_states.push_back(shouldLoad);
     }
 
+    // Add all other banks (Renamed Master banks will appear here)
     for (const std::string& bankPath : otherBanks) {
         bool shouldLoad = false;
         auto previousIt = previousLoadStates.find(bankPath);
@@ -895,11 +916,99 @@ void RefreshBankFiles() {
 }
 
 // Function to find all .bank files in the "Build/Desktop/" directory relative to the selected .fspro file
+// Updated to use GetCustomBuildDirectory() to first check the `Workspace.xml` for custom a Bank Build path...
+// ...if it doesn't find a custom path `FindBankFiles()` assumes the Bank files are in the default "Build" folder.
+
+// Helper function to parse Workspace.xml for custom bank output directory
+std::string GetCustomBuildDirectory(const std::string& fspro_dir) {
+    fs::path workspacePath = fs::path(fspro_dir) / "Metadata" / "Workspace.xml";
+    std::ifstream file(workspacePath);
+    
+    if (!file.is_open()) {
+        return ""; // File not found, assume default
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        // Search for the property defining the output directory
+        if (line.find("name=\"builtBanksOutputDirectory\"") != std::string::npos) {
+            // The value is typically on the next line or shortly after in standard FMOD XML formatting
+            while (std::getline(file, line)) {
+                size_t valStart = line.find("<value>");
+                size_t valEnd = line.find("</value>");
+                
+                if (valStart != std::string::npos && valEnd != std::string::npos) {
+                    // Extract the path string between <value> and </value>
+                    return line.substr(valStart + 7, valEnd - (valStart + 7));
+                }
+                
+                // Safety break if we hit the end of the property object without finding a value
+                if (line.find("</property>") != std::string::npos) {
+                    break;
+                }
+            }
+        }
+    }
+    return ""; // Property not found, use default
+}
+
 void FindBankFiles(const std::string& fspro_dir) {
     customBankDirectories.clear();
+    
     if (!fspro_dir.empty()) {
-        fs::path bankDirectory = fs::path(fspro_dir) / "Build" / "Desktop";
-        customBankDirectories.push_back(bankDirectory.lexically_normal().string());
+        std::string buildDirName = "Build"; // Default FMOD folder
+        
+        // 1. Check Workspace.xml for a custom output directory override
+        std::string customDir = GetCustomBuildDirectory(fspro_dir);
+        if (!customDir.empty()) {
+            buildDirName = customDir;
+            DebugMsg("Found custom bank output directory in Workspace.xml: %s\n", buildDirName.c_str());
+        }
+
+        // 2. Resolve the absolute path to the base Build folder
+        fs::path baseBuildPath = fs::path(fspro_dir) / buildDirName;
+        
+        try {
+            // Resolve relative paths (e.g. "../Banks") to absolute
+            baseBuildPath = baseBuildPath.lexically_normal();
+
+            if (fs::exists(baseBuildPath) && fs::is_directory(baseBuildPath)) {
+                
+                // 3. Iterate through all subdirectories (Platforms)
+                // This replaces the hardcoded "/Desktop" check
+                bool foundAnyPlatform = false;
+                for (const auto& entry : fs::directory_iterator(baseBuildPath)) {
+                    if (entry.is_directory()) {
+                        
+                        // Check if this platform folder actually contains .bank files
+                        bool containsBanks = false;
+                        for (const auto& file : fs::directory_iterator(entry.path())) {
+                            if (file.path().extension() == ".bank") {
+                                containsBanks = true;
+                                break;
+                            }
+                        }
+
+                        // If it has banks, add it to our list
+                        if (containsBanks) {
+                            std::string platformPath = entry.path().string();
+                            customBankDirectories.push_back(platformPath);
+                            DebugMsg("Found platform with banks: %s\n", platformPath.c_str());
+                            foundAnyPlatform = true;
+                        }
+                    }
+                }
+
+                if (!foundAnyPlatform) {
+                    DebugMsg("Warning: Build directory exists, but no subdirectories containing .bank files were found.\n");
+                }
+
+            } else {
+                DebugMsg("Warning: Base build directory does not exist: %s\n", baseBuildPath.string().c_str());
+            }
+        } catch (const std::exception& e) {
+            DebugMsg("Error resolving build directory path: %s\n", e.what());
+        }
     }
 
     RefreshBankFiles();
@@ -2579,7 +2688,7 @@ void CheckItems(double playPosition) {
                 std::string itemGUID = GetItemGUID(item);
 
                 if (playPosition < previousPlayPosition) {
-                    activeEventInstances.clear();  // Reset instances if playhead moved backward
+                    ReleaseAllEventInstances();
                 }
 
                 // Get the item name
@@ -3044,12 +3153,17 @@ void LoadStateFromFile(const std::string& filePath) {
 
     inFile.close();
 
-    if (parsedDirectories.empty() && !fsproDirectory.empty()) {
-        fs::path defaultDir = fs::path(fsproDirectory) / "Build" / "Desktop";
-        parsedDirectories.push_back(defaultDir.lexically_normal().string());
+    // 1. Apply what we loaded
+    if (!parsedDirectories.empty()) {
+        customBankDirectories = parsedDirectories;
     }
 
-    customBankDirectories = parsedDirectories;
+    // 2. Check if we need fallback logic
+    if (customBankDirectories.empty() && !fsproDirectory.empty()) {
+         FindBankFiles(fsproDirectory);
+    } else {
+         RefreshBankFiles();
+    }
 
     RefreshBankFiles();
 
