@@ -127,6 +127,8 @@ FMOD::Studio::System* fmod_system = nullptr;
 
 void RefreshBankFiles();
 void SynchronizeLoadedBanks();
+void FindBankFiles(const std::string& fspro_dir);
+void ReleaseAllEventInstances();
 
 // Define the ParameterInfo struct
 struct ParameterInfo {
