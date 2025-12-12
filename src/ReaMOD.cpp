@@ -84,6 +84,7 @@ std::vector<std::string> masterStringEvents;  // Store event paths from Master.s
 std::vector<std::string> bank_files; // Store the list of found .bank files and their toggle states
 std::vector<bool> bank_load_states;
 std::vector<std::string> customBankDirectories; // User-defined directories to search for bank files
+std::vector<bool> customBankDirectoryEnabled; // Track which directories are enabled/loaded
 std::unordered_map<std::string, FMOD::Studio::Bank*> loaded_banks;  // Map of loaded banks
 std::unordered_map<std::string, std::vector<std::string>> bank_events;  // Map of events in each bank
 // std::unordered_map<int, bool> triggeredMarkers;  // Stores whether a marker has already triggered
@@ -417,6 +418,14 @@ static void SaveReaMODToProjectExtState() {
     }
     SetProjExtState(proj, "ReaMOD", "bank_dirs", dirsJoined.c_str());
 
+    // 2b) Directory enabled states (pipe-separated, 0/1 for each directory)
+    std::string dirEnabledStates;
+    for (size_t i = 0; i < customBankDirectoryEnabled.size(); ++i) {
+        if (i) dirEnabledStates += "|";
+        dirEnabledStates += (customBankDirectoryEnabled[i] ? "1" : "0");
+    }
+    SetProjExtState(proj, "ReaMOD", "bank_dir_enabled", dirEnabledStates.c_str());
+
     // 3) Bank load states (one per line: "<normalized_bank_path>|0/1")
     //    We save *all* known banks so we can map states reliably after rescan.
     //    Use normalized paths for consistent cross-platform matching.
@@ -629,6 +638,23 @@ static bool LoadReaMODFromProjectExtState() {
             }
         }
         loadedAnything = true;
+    }
+
+    // 3b. Load directory enabled states
+    memset(buf, 0, sizeof(buf));
+    std::vector<bool> savedDirEnabledStates;
+    if (GetProjExtState(proj, "ReaMOD", "bank_dir_enabled", buf, sizeof(buf)) > 0 && buf[0]) {
+        std::vector<std::string> enabledStrings = Split(std::string(buf), '|');
+        for (const auto& s : enabledStrings) {
+            savedDirEnabledStates.push_back(s == "1");
+        }
+    }
+    
+    // Ensure customBankDirectoryEnabled matches customBankDirectories size
+    customBankDirectoryEnabled.resize(customBankDirectories.size(), true); // Default to enabled
+    // Apply saved states where available
+    for (size_t i = 0; i < savedDirEnabledStates.size() && i < customBankDirectoryEnabled.size(); ++i) {
+        customBankDirectoryEnabled[i] = savedDirEnabledStates[i];
     }
 
     // 4. Load saved bank states BEFORE refreshing, so RefreshBankFiles can use them
@@ -866,7 +892,22 @@ void RefreshBankFiles() {
     std::vector<std::string> masterBanks;
     std::vector<std::string> otherBanks;
 
-    for (const std::string& directory : customBankDirectories) {
+    // Ensure customBankDirectoryEnabled is the right size
+    while (customBankDirectoryEnabled.size() < customBankDirectories.size()) {
+        customBankDirectoryEnabled.push_back(true); // New directories default to enabled
+    }
+    while (customBankDirectoryEnabled.size() > customBankDirectories.size()) {
+        customBankDirectoryEnabled.pop_back();
+    }
+
+    for (size_t dirIndex = 0; dirIndex < customBankDirectories.size(); ++dirIndex) {
+        const std::string& directory = customBankDirectories[dirIndex];
+        
+        // Skip disabled directories
+        if (!customBankDirectoryEnabled[dirIndex]) {
+            continue;
+        }
+        
         if (directory.empty()) {
             continue;
         }
@@ -1092,6 +1133,7 @@ std::string GetCustomBuildDirectory(const std::string& fspro_dir) {
 // Function to find all .bank files in the "Build/Desktop/" directory relative to the selected .fspro file
 void FindBankFiles(const std::string& fspro_dir) {
     customBankDirectories.clear();
+    customBankDirectoryEnabled.clear();
     
     if (!fspro_dir.empty()) {
         std::string buildDirName = "Build"; // Default FMOD folder
@@ -1154,6 +1196,7 @@ void FindBankFiles(const std::string& fspro_dir) {
                         if (containsBanks) {
                             std::string platformPath = entry.path().string();
                             customBankDirectories.push_back(platformPath);
+                            customBankDirectoryEnabled.push_back(true);
                             DebugMsg("Found platform with banks: %s\n", platformPath.c_str());
                             foundAnyPlatform = true;
                         }
@@ -1172,6 +1215,7 @@ void FindBankFiles(const std::string& fspro_dir) {
                     
                     if (containsBanksDirectly) {
                         customBankDirectories.push_back(baseBuildPath.string());
+                        customBankDirectoryEnabled.push_back(true);
                         DebugMsg("Found banks directly in build directory (no platform subfolder): %s\n", baseBuildPath.string().c_str());
                         foundAnyPlatform = true;
                     }
@@ -3704,6 +3748,15 @@ void RenderGUI() {
 
         ReaMODText(reaMOD_Main_ImGui_Context, "Search directories:", reaMODMediumFont);
         bool directoryListChanged = false;
+        
+        // Ensure customBankDirectoryEnabled is the right size
+        while (customBankDirectoryEnabled.size() < customBankDirectories.size()) {
+            customBankDirectoryEnabled.push_back(true);
+        }
+        while (customBankDirectoryEnabled.size() > customBankDirectories.size()) {
+            customBankDirectoryEnabled.pop_back();
+        }
+        
         if (customBankDirectories.empty()) {
             ReaMODText(reaMOD_Main_ImGui_Context, "No directories selected.", reaMODMediumFont);
         } else {
@@ -3718,9 +3771,23 @@ void RenderGUI() {
                     isDirectory = fs::is_directory(directoryPath, dirError);
                 }
                 bool isValidDirectory = directoryExists && !dirError && isDirectory;
+                bool isEnabled = customBankDirectoryEnabled[i];
+                
                 if (!isValidDirectory) {
                     displayPath += " (missing)";
+                } else if (!isEnabled) {
+                    displayPath += " (disabled)";
                 }
+
+                // Load/Unload button
+                std::string loadUnloadLabel = isEnabled ? ("Unload##Dir" + std::to_string(i)) : ("Load##Dir" + std::to_string(i));
+                if (StyledButton(reaMOD_Main_ImGui_Context, loadUnloadLabel)) {
+                    customBankDirectoryEnabled[i] = !customBankDirectoryEnabled[i];
+                    directoryListChanged = true;
+                    break;
+                }
+                
+                ImGui::SameLine(reaMOD_Main_ImGui_Context);
 
                 std::string removeLabel = "Remove##BankDir" + std::to_string(i);
                 std::string upLabel = "Up##BankDir" + std::to_string(i);
@@ -3728,6 +3795,7 @@ void RenderGUI() {
 
                 if (StyledButton(reaMOD_Main_ImGui_Context, removeLabel)) {
                     customBankDirectories.erase(customBankDirectories.begin() + i);
+                    customBankDirectoryEnabled.erase(customBankDirectoryEnabled.begin() + i);
                     directoryListChanged = true;
                     break;
                 }
@@ -3735,6 +3803,9 @@ void RenderGUI() {
                 ImGui::SameLine(reaMOD_Main_ImGui_Context);
                 if (!isValidDirectory) {
                     ImGui::TextColored(reaMOD_Main_ImGui_Context, orange, displayPath.c_str());
+                } else if (!isEnabled) {
+                    // Show disabled directories in a dimmed color
+                    ImGui::TextColored(reaMOD_Main_ImGui_Context, 0.5f, 0.5f, 0.5f, 1.0f, displayPath.c_str());
                 } else {
                     ReaMODText(reaMOD_Main_ImGui_Context, displayPath.c_str(), reaMODMediumFont);
                 }
@@ -3743,6 +3814,7 @@ void RenderGUI() {
                     ImGui::SameLine(reaMOD_Main_ImGui_Context);
                     if (StyledButton(reaMOD_Main_ImGui_Context, upLabel)) {
                         std::swap(customBankDirectories[i], customBankDirectories[i - 1]);
+                        std::swap(customBankDirectoryEnabled[i], customBankDirectoryEnabled[i - 1]);
                         directoryListChanged = true;
                         break;
                     }
@@ -3752,6 +3824,7 @@ void RenderGUI() {
                     ImGui::SameLine(reaMOD_Main_ImGui_Context);
                     if (StyledButton(reaMOD_Main_ImGui_Context, downLabel)) {
                         std::swap(customBankDirectories[i], customBankDirectories[i + 1]);
+                        std::swap(customBankDirectoryEnabled[i], customBankDirectoryEnabled[i + 1]);
                         directoryListChanged = true;
                         break;
                     }
@@ -3773,9 +3846,72 @@ void RenderGUI() {
 
             const char* selectedPath = tinyfd_selectFolderDialog("Select FMOD bank directory", defaultPath);
             if (selectedPath) {
-                std::string normalizedPath = fs::path(selectedPath).lexically_normal().string();
-                if (std::find(customBankDirectories.begin(), customBankDirectories.end(), normalizedPath) == customBankDirectories.end()) {
-                    customBankDirectories.push_back(normalizedPath);
+                std::string normalizedPath = NormalizePath(fs::path(selectedPath).lexically_normal().string());
+                
+                // Check if the selected directory contains .bank files directly
+                bool hasBanksDirectly = false;
+                std::vector<std::string> subdirsWithBanks;
+                
+                std::error_code ec;
+                if (fs::exists(normalizedPath, ec) && fs::is_directory(normalizedPath, ec)) {
+                    // First check for .bank files directly in selected folder
+                    for (const auto& entry : fs::directory_iterator(normalizedPath, ec)) {
+                        if (!ec && entry.is_regular_file(ec) && entry.path().extension() == ".bank") {
+                            hasBanksDirectly = true;
+                            break;
+                        }
+                    }
+                    
+                    // If no banks directly, check subfolders (platform folders)
+                    if (!hasBanksDirectly) {
+                        ec.clear();
+                        for (const auto& subEntry : fs::directory_iterator(normalizedPath, ec)) {
+                            if (ec) break;
+                            std::error_code subEc;
+                            if (subEntry.is_directory(subEc) && !subEc) {
+                                // Check if this subfolder contains .bank files
+                                for (const auto& bankEntry : fs::directory_iterator(subEntry.path(), subEc)) {
+                                    if (!subEc && bankEntry.is_regular_file(subEc) && bankEntry.path().extension() == ".bank") {
+                                        subdirsWithBanks.push_back(NormalizePath(subEntry.path().string()));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                bool addedAny = false;
+                
+                if (hasBanksDirectly) {
+                    // Add the selected folder directly
+                    if (std::find(customBankDirectories.begin(), customBankDirectories.end(), normalizedPath) == customBankDirectories.end()) {
+                        customBankDirectories.push_back(normalizedPath);
+                        customBankDirectoryEnabled.push_back(true);
+                        addedAny = true;
+                        DebugMsg("Added directory with banks: %s\n", normalizedPath.c_str());
+                    }
+                } else if (!subdirsWithBanks.empty()) {
+                    // Add each subfolder that contains banks (platform folders)
+                    for (const auto& subdir : subdirsWithBanks) {
+                        if (std::find(customBankDirectories.begin(), customBankDirectories.end(), subdir) == customBankDirectories.end()) {
+                            customBankDirectories.push_back(subdir);
+                            customBankDirectoryEnabled.push_back(true);
+                            addedAny = true;
+                            DebugMsg("Added platform subfolder with banks: %s\n", subdir.c_str());
+                        }
+                    }
+                } else {
+                    // No banks found, but add anyway (user might populate it later)
+                    if (std::find(customBankDirectories.begin(), customBankDirectories.end(), normalizedPath) == customBankDirectories.end()) {
+                        customBankDirectories.push_back(normalizedPath);
+                        customBankDirectoryEnabled.push_back(true);
+                        addedAny = true;
+                        DebugMsg("Added directory (no banks found yet): %s\n", normalizedPath.c_str());
+                    }
+                }
+                
+                if (addedAny) {
                     RefreshBankFiles();
                 }
             }
