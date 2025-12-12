@@ -129,6 +129,56 @@ FMOD::Studio::System* fmod_system = nullptr;
 // Project tracking for detecting project switches
 ReaProject* lastTrackedProject = nullptr;
 
+// ============================================================================
+// FMOD Studio-Inspired Color Palette
+// ============================================================================
+// FMOD Studio uses a dark anthracite theme with cyan accents and orange for
+// active/playing states. This palette aims to match that professional look.
+
+// Background colors (dark anthracite/charcoal tones)
+int fmodBackground          = 0x1E1E1EFF;  // Main window background
+int fmodBackgroundLight     = 0x252526FF;  // Slightly lighter panels
+int fmodSurface             = 0x2D2D30FF;  // Elevated surfaces (panels, cards)
+int fmodSurfaceHover        = 0x3E3E42FF;  // Surface on hover
+
+// Primary accent (FMOD cyan/teal)
+int fmodAccent              = 0x00A8CCFF;  // Primary interactive color
+int fmodAccentHover         = 0x00C8E8FF;  // Accent on hover (brighter)
+int fmodAccentActive        = 0x0088A8FF;  // Accent when pressed (darker)
+int fmodAccentMuted         = 0x007B99FF;  // Muted accent for less emphasis
+
+// Secondary accent (Orange for active/playing states)
+int fmodOrange              = 0xFF8C00FF;  // Active/playing state
+int fmodOrangeHover         = 0xFFA040FF;  // Orange on hover
+int fmodOrangeActive        = 0xE67800FF;  // Orange when pressed
+
+// Text colors (white with varying opacity)
+int fmodTextPrimary         = 0xE0E0E0FF;  // Primary text (87% white)
+int fmodTextSecondary       = 0xA0A0A0FF;  // Secondary text (60% white)
+int fmodTextDisabled        = 0x666666FF;  // Disabled text (38% white)
+
+// Status colors
+int fmodSuccess             = 0x4EC94EFF;  // Green for success/loaded
+int fmodSuccessHover        = 0x3CB83CFF;  // Success hover
+int fmodWarning             = 0xFFB74DFF;  // Warning/attention (amber)
+int fmodError               = 0xF44336FF;  // Error/missing (red)
+
+// Border and separator colors
+int fmodBorder              = 0x3C3C3CFF;  // Subtle borders
+int fmodSeparator           = 0x454545FF;  // Separator lines
+
+// Header/Title bar
+int fmodTitleBar            = 0x323233FF;  // Title bar background
+int fmodTitleBarActive      = 0x007ACCFF;  // Title bar when focused
+
+// Legacy aliases for backward compatibility (map to new FMOD colors)
+int greyDark = 0x1E1E1EFF;
+int blue = 0x00A8CCFF;
+int orange = 0xFFB74DFF;
+int supportButtonBackground = 0x2D2D30FF;
+int supportButtonHovered = 0x3E3E42FF;
+int supportButtonActive = 0x00A8CCFF;
+
 void RefreshBankFiles();
 void SynchronizeLoadedBanks();
 void StopAllEvents();
@@ -3166,56 +3216,6 @@ std::string FindCommonPrefix(const std::vector<std::string>& strings) {
     return prefix;
 }
 
-// ============================================================================
-// FMOD Studio-Inspired Color Palette
-// ============================================================================
-// FMOD Studio uses a dark anthracite theme with cyan accents and orange for
-// active/playing states. This palette aims to match that professional look.
-
-// Background colors (dark anthracite/charcoal tones)
-int fmodBackground          = 0x1E1E1EFF;  // Main window background
-int fmodBackgroundLight     = 0x252526FF;  // Slightly lighter panels
-int fmodSurface             = 0x2D2D30FF;  // Elevated surfaces (panels, cards)
-int fmodSurfaceHover        = 0x3E3E42FF;  // Surface on hover
-
-// Primary accent (FMOD cyan/teal)
-int fmodAccent              = 0x00A8CCFF;  // Primary interactive color
-int fmodAccentHover         = 0x00C8E8FF;  // Accent on hover (brighter)
-int fmodAccentActive        = 0x0088A8FF;  // Accent when pressed (darker)
-int fmodAccentMuted         = 0x007B99FF;  // Muted accent for less emphasis
-
-// Secondary accent (Orange for active/playing states)
-int fmodOrange              = 0xFF8C00FF;  // Active/playing state
-int fmodOrangeHover         = 0xFFA040FF;  // Orange on hover
-int fmodOrangeActive        = 0xE67800FF;  // Orange when pressed
-
-// Text colors (white with varying opacity)
-int fmodTextPrimary         = 0xE0E0E0FF;  // Primary text (87% white)
-int fmodTextSecondary       = 0xA0A0A0FF;  // Secondary text (60% white)
-int fmodTextDisabled        = 0x666666FF;  // Disabled text (38% white)
-
-// Status colors
-int fmodSuccess             = 0x4EC94EFF;  // Green for success/loaded
-int fmodSuccessHover        = 0x3CB83CFF;  // Success hover
-int fmodWarning             = 0xFFB74DFF;  // Warning/attention (amber)
-int fmodError               = 0xF44336FF;  // Error/missing (red)
-
-// Border and separator colors
-int fmodBorder              = 0x3C3C3CFF;  // Subtle borders
-int fmodSeparator           = 0x454545FF;  // Separator lines
-
-// Header/Title bar
-int fmodTitleBar            = 0x323233FF;  // Title bar background
-int fmodTitleBarActive      = 0x007ACCFF;  // Title bar when focused
-
-// Legacy aliases for backward compatibility (map to new FMOD colors)
-int greyDark = fmodBackground;
-int blue = fmodAccent;
-int orange = fmodWarning;
-int supportButtonBackground = fmodSurface;
-int supportButtonHovered = fmodSurfaceHover;
-int supportButtonActive = fmodAccent;
-
 std::string LocateReaMODFontsDirectory() {
     static std::string cachedPath;
     static bool loggedMissingDirectory = false;
@@ -3379,11 +3379,6 @@ void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
     ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, fmodSurfaceHover);
     ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, fmodAccentMuted);
     
-    // Tab colors
-    ImGui::PushStyleColor(ctx, ImGui::Col_Tab, fmodSurface);
-    ImGui::PushStyleColor(ctx, ImGui::Col_TabHovered, fmodAccentMuted);
-    ImGui::PushStyleColor(ctx, ImGui::Col_TabActive, fmodAccent);
-    
     // Separator
     ImGui::PushStyleColor(ctx, ImGui::Col_Separator, fmodSeparator);
     ImGui::PushStyleColor(ctx, ImGui::Col_SeparatorHovered, fmodAccent);
@@ -3413,7 +3408,7 @@ void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
     if (reaMODRegularFont) {
         ImGui::PopFont(ctx);
     }
-    ImGui::PopStyleColor(ctx, 36);  // Updated count to match PushReaMODInterfaceStyle
+    ImGui::PopStyleColor(ctx, 33);  // Updated count: removed 3 Tab colors
 }
 
 bool StyledButton(ImGui_Context* ctx, const char* label) {
