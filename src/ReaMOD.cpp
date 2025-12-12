@@ -3905,15 +3905,22 @@ void RenderGUI() {
                     for (auto& globalParam : parameters) {
                         float previousValue = globalParam.currentValue;
     
-                        double doubleValue = static_cast<double>(globalParam.currentValue);
-                        double doubleMin = static_cast<double>(globalParam.minValue);
-                        double doubleMax = static_cast<double>(globalParam.maxValue);
+                        // Check if parameter is discrete (integer steps only)
+                        if (globalParam.isDiscrete()) {
+                            int intValue = static_cast<int>(std::round(globalParam.currentValue));
+                            int intMin = static_cast<int>(std::round(globalParam.minValue));
+                            int intMax = static_cast<int>(std::round(globalParam.maxValue));
+                            
+                            ImGui::SliderInt(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), &intValue, intMin, intMax);
+                            globalParam.currentValue = static_cast<float>(intValue);
+                        } else {
+                            double doubleValue = static_cast<double>(globalParam.currentValue);
+                            double doubleMin = static_cast<double>(globalParam.minValue);
+                            double doubleMax = static_cast<double>(globalParam.maxValue);
     
-                        // Use SliderDouble to create a slider for the parameter
-                        ImGui::SliderDouble(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), &doubleValue, doubleMin, doubleMax);
-    
-                        // Update the currentValue with the new value from the slider
-                        globalParam.currentValue = static_cast<float>(doubleValue);
+                            ImGui::SliderDouble(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), &doubleValue, doubleMin, doubleMax);
+                            globalParam.currentValue = static_cast<float>(doubleValue);
+                        }
     
                         // If the value has changed, update the global parameter in FMOD
                         if (previousValue != globalParam.currentValue) {
@@ -3934,15 +3941,22 @@ void RenderGUI() {
                     for (auto& globalParam : noPrefixParameters) {
                         float previousValue = globalParam.currentValue;
     
-                        double doubleValue = static_cast<double>(globalParam.currentValue);
-                        double doubleMin = static_cast<double>(globalParam.minValue);
-                        double doubleMax = static_cast<double>(globalParam.maxValue);
+                        // Check if parameter is discrete (integer steps only)
+                        if (globalParam.isDiscrete()) {
+                            int intValue = static_cast<int>(std::round(globalParam.currentValue));
+                            int intMin = static_cast<int>(std::round(globalParam.minValue));
+                            int intMax = static_cast<int>(std::round(globalParam.maxValue));
+                            
+                            ImGui::SliderInt(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), &intValue, intMin, intMax);
+                            globalParam.currentValue = static_cast<float>(intValue);
+                        } else {
+                            double doubleValue = static_cast<double>(globalParam.currentValue);
+                            double doubleMin = static_cast<double>(globalParam.minValue);
+                            double doubleMax = static_cast<double>(globalParam.maxValue);
     
-                        // Use SliderDouble to create a slider for the parameter
-                        ImGui::SliderDouble(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), &doubleValue, doubleMin, doubleMax);
-    
-                        // Update the currentValue with the new value from the slider
-                        globalParam.currentValue = static_cast<float>(doubleValue);
+                            ImGui::SliderDouble(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), &doubleValue, doubleMin, doubleMax);
+                            globalParam.currentValue = static_cast<float>(doubleValue);
+                        }
     
                         // If the value has changed, update the global parameter in FMOD
                         if (previousValue != globalParam.currentValue) {
@@ -4001,15 +4015,31 @@ void RenderGUI() {
                 double doubleMin = static_cast<double>(param.minValue);
                 double doubleMax = static_cast<double>(param.maxValue);
     
-                // Use SliderDouble to create a slider for the parameter
-                ImGui::SliderDouble(reaMOD_Main_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax);
+                // Check if parameter is discrete (integer steps only)
+                if (param.isDiscrete()) {
+                    // For discrete parameters, use integer slider behavior
+                    int intValue = static_cast<int>(std::round(param.currentValue));
+                    int intMin = static_cast<int>(std::round(param.minValue));
+                    int intMax = static_cast<int>(std::round(param.maxValue));
+                    
+                    ImGui::SliderInt(reaMOD_Main_ImGui_Context, param.name.c_str(), &intValue, intMin, intMax);
+                    
+                    if (ImGui::IsItemActive(reaMOD_Main_ImGui_Context)) {
+                        anySliderActive = true;
+                    }
+                    
+                    param.currentValue = static_cast<float>(intValue);
+                } else {
+                    // For continuous parameters, use double slider
+                    ImGui::SliderDouble(reaMOD_Main_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax);
     
-                if (ImGui::IsItemActive(reaMOD_Main_ImGui_Context)) {
-                    anySliderActive = true;
+                    if (ImGui::IsItemActive(reaMOD_Main_ImGui_Context)) {
+                        anySliderActive = true;
+                    }
+    
+                    // Update the currentValue with the new value from the slider
+                    param.currentValue = static_cast<float>(doubleValue);
                 }
-    
-                // Update the currentValue with the new value from the slider
-                param.currentValue = static_cast<float>(doubleValue);
     
                 // If the value has changed and the slider is active, update the FMOD event instance
                 if (previousValue != param.currentValue && anySliderActive) {
