@@ -118,15 +118,31 @@ std::string formattedLastSaveTimestamp; // Holds the formatted "Last Save" text
 
 int numFramesForItem = 10; // Default number of frames for the inserted item
 bool moveCursorAfterInsert = true; // Default to true, meaning the cursor moves forward by default
-bool updateItemInsertionLength = true; 
+bool updateItemInsertionLength = true;
 bool syncSelectedEventWithItemSelection = true;
 MediaItem* lastSelectedItem = nullptr;
 
 // FMOD system pointers
 FMOD::Studio::System* fmod_system = nullptr;
 
+// Project tracking for detecting project switches
+ReaProject* lastTrackedProject = nullptr;
+
 void RefreshBankFiles();
 void SynchronizeLoadedBanks();
+void StopAllEvents();
+void ReleaseAllEventInstances();
+
+// Helper function to normalize paths consistently across platforms
+static std::string NormalizePath(const std::string& path) {
+    if (path.empty()) return path;
+    std::string normalized = fs::path(path).lexically_normal().string();
+    // On Windows, also convert backslashes to forward slashes for consistent comparison
+    #if defined(_WIN32)
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+    #endif
+    return normalized;
+}
 
 // Define the ParameterInfo struct
 struct ParameterInfo {
@@ -283,7 +299,7 @@ void DebugMsg(const char* fmt, ...) {
         }
 
         va_end(args);
-    }  
+    }
 }
 
 bool OpenURLInDefaultBrowser(const std::string& url) {
@@ -391,20 +407,27 @@ static void SaveReaMODToProjectExtState() {
     // 1) FMOD project (.fspro) path
     SetProjExtState(proj, "ReaMOD", "fspro_path", selected_file_path);
 
-    // 2) Bank search directories (pipe-separated)
-    std::string dirsJoined = Join(customBankDirectories, "|");
+    // 2) Bank search directories (pipe-separated) - use normalized paths
+    std::string dirsJoined;
+    for (size_t i = 0; i < customBankDirectories.size(); ++i) {
+        if (i) dirsJoined += "|";
+        dirsJoined += NormalizePath(customBankDirectories[i]);
+    }
     SetProjExtState(proj, "ReaMOD", "bank_dirs", dirsJoined.c_str());
 
-    // 3) Bank load states (one per line: "<absolute_bank_path>|0/1")
+    // 3) Bank load states (one per line: "<normalized_bank_path>|0/1")
     //    We save *all* known banks so we can map states reliably after rescan.
+    //    Use normalized paths for consistent cross-platform matching.
     std::string states;
     for (size_t i = 0; i < bank_files.size(); ++i) {
         if (i) states += "\n";
-        states += bank_files[i];
+        states += NormalizePath(bank_files[i]);
         states += "|";
         states += (bank_load_states[i] ? "1" : "0");
     }
     SetProjExtState(proj, "ReaMOD", "bank_states", states.c_str());
+    
+    MarkProjectDirty(proj);
 }
 
 
@@ -541,10 +564,12 @@ static bool LoadReaMODFromProjectExtState() {
     bool loadedAnything = false;
     char buf[65536] = {0};
 
-    // fspro path
+    // 1. Load fspro path
     if (GetProjExtState(proj, "ReaMOD", "fspro_path", buf, sizeof(buf)) > 0 && buf[0]) {
         std::strncpy(selected_file_path, buf, FILE_PATH_BUFFER_SIZE-1);
-        // derive file name + directory like your OpenFileDialog() does
+        selected_file_path[FILE_PATH_BUFFER_SIZE - 1] = '\0';
+        
+        // Derive file name + directory
         std::string file_path(selected_file_path);
         size_t p1 = file_path.find_last_of("/\\");
         std::string fsproDirectory;
@@ -560,44 +585,83 @@ static bool LoadReaMODFromProjectExtState() {
         }
         fmodProjectDirectory = fsproDirectory;
         loadedAnything = true;
+    } else {
+        // No saved state - reset to defaults
+        selected_file_path[0] = '\0';
+        std::strncpy(selected_file_name, "No project selected.", FILE_PATH_BUFFER_SIZE - 1);
+        fmodProjectDirectory.clear();
     }
 
-    // bank dirs
-    std::vector<std::string> parsedDirs;
+    // 2. ALWAYS run smart finder first.
+    // This populates customBankDirectories with the actual, current build paths on disk.
+    if (!fmodProjectDirectory.empty()) {
+        FindBankFiles(fmodProjectDirectory);
+    } else {
+        customBankDirectories.clear();
+    }
+
+    // 3. Load and merge saved bank dirs
+    // This preserves any manual directories the user added, while avoiding duplicates.
+    memset(buf, 0, sizeof(buf));
     if (GetProjExtState(proj, "ReaMOD", "bank_dirs", buf, sizeof(buf)) > 0 && buf[0]) {
-        parsedDirs = Split(std::string(buf), '|');
+        std::vector<std::string> parsedDirs = Split(std::string(buf), '|');
+        
+        for (const auto& rawDir : parsedDirs) {
+            // Normalize path to ensure consistent comparison (fixes Windows/Mac slash issues)
+            std::string dir = NormalizePath(rawDir);
+            if (dir.empty()) continue;
+
+            // Only add if not already found by FindBankFiles
+            bool alreadyExists = false;
+            for (const auto& existing : customBankDirectories) {
+                if (NormalizePath(existing) == dir) {
+                    alreadyExists = true;
+                    break;
+                }
+            }
+            
+            if (!alreadyExists) {
+                customBankDirectories.push_back(dir);
+            }
+        }
         loadedAnything = true;
-    } else if (!fmodProjectDirectory.empty()) {
-        // fallback to Build/Desktop/ if dirs weren't saved yet
-        fs::path defDir = fs::path(fmodProjectDirectory) / "Build" / "Desktop";
-        parsedDirs.push_back(defDir.lexically_normal().string());
     }
-    customBankDirectories = parsedDirs;
 
-    // Rescan banks now that dirs are known
-    RefreshBankFiles(); // rebuilds bank_files/bank_load_states
-    // (At this point bank_load_states reflect previous defaults or remembered per-path states)
-
-    // bank load states (path|0/1 per line)
+    // 4. Load saved bank states BEFORE refreshing, so RefreshBankFiles can use them
+    std::unordered_map<std::string, bool> savedBankStates;
+    memset(buf, 0, sizeof(buf));
     if (GetProjExtState(proj, "ReaMOD", "bank_states", buf, sizeof(buf)) > 0 && buf[0]) {
-        std::unordered_map<std::string, bool> saved;
         for (const auto& line : Split(std::string(buf), '\n')) {
             size_t bar = line.find('|');
             if (bar == std::string::npos) continue;
-            std::string p = line.substr(0, bar);
+            std::string p = NormalizePath(line.substr(0, bar));
             bool st = (bar+1 < line.size() && line[bar+1] == '1');
-            saved[p] = st;
+            savedBankStates[p] = st;
         }
-        // apply onto current bank_files order
-        for (size_t i = 0; i < bank_files.size(); ++i) {
-            auto it = saved.find(bank_files[i]);
-            if (it != saved.end()) bank_load_states[i] = it->second;
-        }
-        SynchronizeLoadedBanks();
         loadedAnything = true;
     }
 
-    // Update globals/UI bits that depend on loaded banks
+    // 5. Refresh files now that we have the complete, valid list
+    // This will discover all bank files in the directories
+    RefreshBankFiles();
+
+    // 6. Apply saved bank load states AFTER refresh populated bank_files
+    if (!savedBankStates.empty()) {
+        bool statesChanged = false;
+        for (size_t i = 0; i < bank_files.size(); ++i) {
+            std::string normalizedPath = NormalizePath(bank_files[i]);
+            auto it = savedBankStates.find(normalizedPath);
+            if (it != savedBankStates.end() && bank_load_states[i] != it->second) {
+                bank_load_states[i] = it->second;
+                statesChanged = true;
+            }
+        }
+        if (statesChanged) {
+            SynchronizeLoadedBanks();
+        }
+    }
+
+    // Update globals/UI bits
     RetrieveGlobalParameters();
 
     return loadedAnything;
@@ -686,7 +750,7 @@ void SynchronizeLoadedBanks() {
         }
     }
 
-    if (systemNeedsUpdate) {
+    if (systemNeedsUpdate && fmod_system) {
         fmod_system->update();
     }
 }
@@ -700,8 +764,10 @@ void UnloadAllBanks() {
         }
     }
     
-    //Update FMOD System
-    fmod_system->update();
+    // Update FMOD System (with null check)
+    if (fmod_system) {
+        fmod_system->update();
+    }
 
     // Clear the maps and vectors after unloading banks
     loaded_banks.clear();
@@ -721,17 +787,16 @@ void RefreshBankFiles() {
         return;
     }
 
-    UnloadAllBanks();
-
-    // if (customBankDirectories.empty()) {
-    //     UnloadAllBanks();
-    //     return;
-    // }
-
+    // IMPORTANT: Capture previous load states BEFORE UnloadAllBanks clears them!
     std::unordered_map<std::string, bool> previousLoadStates;
     for (size_t i = 0; i < bank_files.size(); ++i) {
-        previousLoadStates[bank_files[i]] = bank_load_states[i];
+        // Use normalized path as key for consistent matching
+        std::string normalizedPath = NormalizePath(bank_files[i]);
+        previousLoadStates[normalizedPath] = bank_load_states[i];
     }
+
+    // Now safe to unload all banks
+    UnloadAllBanks();
 
     std::unordered_set<std::string> seenBanks;
     std::unordered_set<std::string> seenMasterStrings;
@@ -768,7 +833,7 @@ void RefreshBankFiles() {
             }
 
             if (entry.path().filename() == "Master.strings.bank") {
-                std::string normalizedPath = entry.path().lexically_normal().string();
+                std::string normalizedPath = NormalizePath(entry.path().string());
                 if (seenMasterStrings.insert(normalizedPath).second) {
                     masterStringsPaths.push_back(normalizedPath);
                 }
@@ -782,7 +847,7 @@ void RefreshBankFiles() {
             }
 
             if (entry.path().filename() == "Master.bank") {
-                std::string normalizedPath = entry.path().lexically_normal().string();
+                std::string normalizedPath = NormalizePath(entry.path().string());
                 if (seenBanks.insert(normalizedPath).second) {
                     masterBanks.push_back(normalizedPath);
                 }
@@ -802,7 +867,7 @@ void RefreshBankFiles() {
                     continue;
                 }
 
-                std::string normalizedPath = entry.path().lexically_normal().string();
+                std::string normalizedPath = NormalizePath(entry.path().string());
                 if (seenBanks.insert(normalizedPath).second) {
                     localOtherBanks.push_back(normalizedPath);
                 }
@@ -820,8 +885,9 @@ void RefreshBankFiles() {
     bool unloadedAny = false;
     for (auto it = loaded_banks.begin(); it != loaded_banks.end();) {
         const std::string& path = it->first;
-        if (banksToKeep.find(path) == banksToKeep.end() &&
-            masterStringsToKeep.find(path) == masterStringsToKeep.end()) {
+        std::string normalizedPath = NormalizePath(path);
+        if (banksToKeep.find(normalizedPath) == banksToKeep.end() &&
+            masterStringsToKeep.find(normalizedPath) == masterStringsToKeep.end()) {
             FMOD::Studio::Bank* bank = it->second;
             if (bank) {
                 bank->unload();
@@ -870,7 +936,9 @@ void RefreshBankFiles() {
 
     for (const std::string& bankPath : masterBanks) {
         bool shouldLoad = true;
-        auto previousIt = previousLoadStates.find(bankPath);
+        // Use normalized path for lookup
+        std::string normalizedPath = NormalizePath(bankPath);
+        auto previousIt = previousLoadStates.find(normalizedPath);
         if (previousIt != previousLoadStates.end()) {
             shouldLoad = previousIt->second;
         }
@@ -881,7 +949,9 @@ void RefreshBankFiles() {
 
     for (const std::string& bankPath : otherBanks) {
         bool shouldLoad = false;
-        auto previousIt = previousLoadStates.find(bankPath);
+        // Use normalized path for lookup
+        std::string normalizedPath = NormalizePath(bankPath);
+        auto previousIt = previousLoadStates.find(normalizedPath);
         if (previousIt != previousLoadStates.end()) {
             shouldLoad = previousIt->second;
         }
@@ -894,15 +964,168 @@ void RefreshBankFiles() {
     SaveReaMODToProjectExtState();
 }
 
+// Helper function to parse Workspace.xml for custom bank output directory
+std::string GetCustomBuildDirectory(const std::string& fspro_dir) {
+    fs::path workspacePath = fs::path(fspro_dir) / "Metadata" / "Workspace.xml";
+    std::ifstream file(workspacePath);
+    
+    if (!file.is_open()) {
+        DebugMsg("GetCustomBuildDirectory: Could not open Workspace.xml at: %s\n", workspacePath.string().c_str());
+        return ""; // File not found, assume default
+    }
+
+    DebugMsg("GetCustomBuildDirectory: Parsing Workspace.xml at: %s\n", workspacePath.string().c_str());
+
+    std::string line;
+    bool foundProperty = false;
+    
+    while (std::getline(file, line)) {
+        // Search for the property defining the output directory
+        if (line.find("name=\"builtBanksOutputDirectory\"") != std::string::npos) {
+            foundProperty = true;
+            DebugMsg("GetCustomBuildDirectory: Found builtBanksOutputDirectory property\n");
+            
+            // 1. Check if the value is on the SAME line first
+            size_t valStart = line.find("<value>");
+            size_t valEnd = line.find("</value>");
+            if (valStart != std::string::npos && valEnd != std::string::npos && valEnd > valStart) {
+                std::string value = line.substr(valStart + 7, valEnd - (valStart + 7));
+                DebugMsg("GetCustomBuildDirectory: Extracted value (same line): '%s'\n", value.c_str());
+                return value;
+            }
+
+            // 2. If not on the same line, check subsequent lines for <value>...</value>
+            while (std::getline(file, line)) {
+                // Trim leading whitespace/tabs from the line for easier parsing
+                size_t firstNonSpace = line.find_first_not_of(" \t\r\n");
+                if (firstNonSpace != std::string::npos) {
+                    line = line.substr(firstNonSpace);
+                }
+                
+                valStart = line.find("<value>");
+                valEnd = line.find("</value>");
+                
+                if (valStart != std::string::npos && valEnd != std::string::npos && valEnd > valStart) {
+                    std::string value = line.substr(valStart + 7, valEnd - (valStart + 7));
+                    DebugMsg("GetCustomBuildDirectory: Extracted value (next line): '%s'\n", value.c_str());
+                    return value;
+                }
+                
+                // Safety break if we hit the end of the property object
+                if (line.find("</property>") != std::string::npos) {
+                    DebugMsg("GetCustomBuildDirectory: Hit </property> without finding value\n");
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (!foundProperty) {
+        DebugMsg("GetCustomBuildDirectory: builtBanksOutputDirectory property not found in Workspace.xml\n");
+    }
+    
+    return ""; // Property not found, use default
+}
+
 // Function to find all .bank files in the "Build/Desktop/" directory relative to the selected .fspro file
 void FindBankFiles(const std::string& fspro_dir) {
     customBankDirectories.clear();
+    
     if (!fspro_dir.empty()) {
-        fs::path bankDirectory = fs::path(fspro_dir) / "Build" / "Desktop";
-        customBankDirectories.push_back(bankDirectory.lexically_normal().string());
-    }
+        std::string buildDirName = "Build"; // Default FMOD folder
+        
+        // 1. Check Workspace.xml for a custom output directory override
+        std::string customDir = GetCustomBuildDirectory(fspro_dir);
+        if (!customDir.empty()) {
+            buildDirName = customDir;
+            DebugMsg("Found custom bank output directory in Workspace.xml: %s\n", buildDirName.c_str());
+        }
 
-    RefreshBankFiles();
+        // 2. Resolve the path to the base Build folder
+        fs::path baseBuildPath;
+        
+        try {
+            // Check if the custom directory is an absolute path
+            fs::path customPath(buildDirName);
+            if (customPath.is_absolute()) {
+                // Use the absolute path directly
+                baseBuildPath = customPath;
+                DebugMsg("Using absolute custom build path: %s\n", baseBuildPath.string().c_str());
+            } else {
+                // It's a relative path - resolve it relative to the fspro directory
+                baseBuildPath = fs::path(fspro_dir) / buildDirName;
+                DebugMsg("Combined relative path with fspro_dir: %s\n", baseBuildPath.string().c_str());
+            }
+            
+            // Normalize the path to resolve .. and . components
+            // Use weakly_canonical to handle paths that may not fully exist yet
+            // but fall back to lexically_normal if that fails
+            std::error_code ec;
+            fs::path canonicalPath = fs::weakly_canonical(baseBuildPath, ec);
+            if (!ec) {
+                baseBuildPath = canonicalPath;
+            } else {
+                // Fall back to lexically_normal if weakly_canonical fails
+                baseBuildPath = baseBuildPath.lexically_normal();
+            }
+            
+            DebugMsg("Resolved build path: %s\n", baseBuildPath.string().c_str());
+
+            if (fs::exists(baseBuildPath) && fs::is_directory(baseBuildPath)) {
+                DebugMsg("Build directory exists, scanning for platform subdirectories...\n");
+                
+                // 3. Iterate through all subdirectories (Platforms)
+                bool foundAnyPlatform = false;
+                for (const auto& entry : fs::directory_iterator(baseBuildPath)) {
+                    if (entry.is_directory()) {
+                        
+                        // Check if this platform folder actually contains .bank files
+                        bool containsBanks = false;
+                        for (const auto& file : fs::directory_iterator(entry.path())) {
+                            if (file.path().extension() == ".bank") {
+                                containsBanks = true;
+                                break;
+                            }
+                        }
+
+                        // If it has banks, add it to our list
+                        if (containsBanks) {
+                            std::string platformPath = entry.path().string();
+                            customBankDirectories.push_back(platformPath);
+                            DebugMsg("Found platform with banks: %s\n", platformPath.c_str());
+                            foundAnyPlatform = true;
+                        }
+                    }
+                }
+
+                // 4. Also check if .bank files exist directly in the build directory (no platform subfolder)
+                if (!foundAnyPlatform) {
+                    bool containsBanksDirectly = false;
+                    for (const auto& file : fs::directory_iterator(baseBuildPath)) {
+                        if (file.is_regular_file() && file.path().extension() == ".bank") {
+                            containsBanksDirectly = true;
+                            break;
+                        }
+                    }
+                    
+                    if (containsBanksDirectly) {
+                        customBankDirectories.push_back(baseBuildPath.string());
+                        DebugMsg("Found banks directly in build directory (no platform subfolder): %s\n", baseBuildPath.string().c_str());
+                        foundAnyPlatform = true;
+                    }
+                }
+
+                if (!foundAnyPlatform) {
+                    DebugMsg("Warning: Build directory exists, but no .bank files were found.\n");
+                }
+
+            } else {
+                DebugMsg("Warning: Base build directory does not exist: %s\n", baseBuildPath.string().c_str());
+            }
+        } catch (const std::exception& e) {
+            DebugMsg("Error resolving build directory path: %s\n", e.what());
+        }
+    }
 }
 
 // Function to open the file dialog and extract file name
@@ -922,7 +1145,7 @@ void OpenFileDialog() {
         size_t last_backslash_pos = file_path.find_last_of('\\');
 
         // Use the larger of the two positions (whichever one exists)
-        size_t pos = (last_slash_pos == std::string::npos) ? last_backslash_pos : 
+        size_t pos = (last_slash_pos == std::string::npos) ? last_backslash_pos :
                      (last_backslash_pos == std::string::npos) ? last_slash_pos :
                      (last_slash_pos > last_backslash_pos ? last_slash_pos : last_backslash_pos);
 
@@ -937,6 +1160,7 @@ void OpenFileDialog() {
 
         // Find the .bank files in the "Build/Desktop/" directory
         FindBankFiles(fspro_directory);
+        RefreshBankFiles();
         RetrieveGlobalParameters();
         SaveReaMODToProjectExtState();
     } else {
@@ -1702,7 +1926,7 @@ void InsertParamUpdateItemForSelectedMediaItem() {
     double frameRate = TimeMap_curFrameRate(nullptr, &dropFrame);
 
     // Calculate the number of frames for this item from the time selection
-    double totalSeconds = timeSelectionLength; 
+    double totalSeconds = timeSelectionLength;
     int framesFromTimeSelection = static_cast<int>(totalSeconds * frameRate);
     if (framesFromTimeSelection < 1) framesFromTimeSelection = 1; // At least one frame
 
@@ -1756,9 +1980,9 @@ void InsertPositionInterpolationItemsForSelectedMediaItem() {
 
     // Prompt the user only for start and end positions (6 values: sx, sy, sz, ex, ey, ez)
     char userInputs[512] = "";
-    if (!GetUserInputs("Position Interpolation", 6, 
-        "Start X,Start Y,Start Z,End X,End Y,End Z", 
-        userInputs, sizeof(userInputs))) 
+    if (!GetUserInputs("Position Interpolation", 6,
+        "Start X,Start Y,Start Z,End X,End Y,End Z",
+        userInputs, sizeof(userInputs)))
     {
         PostMsg("User cancelled the input dialog.\n");
         return;
@@ -2714,7 +2938,9 @@ void ReleaseAllEventInstances() {
     triggeredItems.clear();  // Clear the triggered items map
     DebugMsg("All FMOD event instances released.\n");
 
-    fmod_system->update();  // Ensure FMOD processes all the release calls
+    if (fmod_system) {
+        fmod_system->update();  // Ensure FMOD processes all the release calls
+    }
 }
 
 void stopReleaseALLFMODEventInstances(){
@@ -2763,98 +2989,6 @@ std::string getReaMODFileName(const std::string& filePath) {
     return baseFileName;
 }
 
-void SaveStateToFile(const std::string& filePath = "") {
-    std::string finalFilePath;
-
-    // Determine the default file name
-    if (filePath.empty()) {
-        if (!currentDisplayedFileName.empty() && currentDisplayedFileName != "No ReaMOD session loaded.") {
-            finalFilePath = currentDisplayedFileName + ".ReaMOD";
-        } else {
-            std::string reaperProjectName = GetCurrentReaperProjectName();
-            finalFilePath = reaperProjectName + ".ReaMOD";
-        }
-    } else {
-        finalFilePath = filePath;
-    }
-
-    // Open the file for writing
-    std::ofstream outFile(finalFilePath);
-    if (!outFile) {
-        DebugMsg("Failed to open file for saving: %s\n", finalFilePath.c_str());
-        return;
-    }
-
-    // Save relevant state information
-    outFile << "fspro_file=" << selected_file_path << "\n";
-    outFile << "lookahead_time_ms=" << lookAheadTimeMs << "\n";
-    outFile << "move_cursor_after_insert=" << (moveCursorAfterInsert ? 1 : 0) << "\n";
-    outFile << "num_frames_for_item=" << numFramesForItem << "\n";
-    outFile << "item_sync_selection=" << syncSelectedEventWithItemSelection << "\n";
-    outFile << "update_item_insertion_length_from_last_time_selection=" << updateItemInsertionLength << "\n";
-    outFile << "show_full_bank_directory_paths=" << (showFullBankDirectoryPaths ? 1 : 0) << "\n";
-
-    // Separate Master.bank and other bank files
-    std::string master_bank_file;
-    bool master_bank_loaded = false;
-    std::vector<std::pair<std::string, bool>> other_banks;
-
-    for (size_t i = 0; i < bank_files.size(); ++i) {
-        if (bank_files[i].find("Master.bank") != std::string::npos) {
-            master_bank_file = bank_files[i];
-            master_bank_loaded = bank_load_states[i];
-        } else {
-            other_banks.emplace_back(bank_files[i], bank_load_states[i]);
-        }
-    }
-
-    // Sort other bank files
-    std::sort(other_banks.begin(), other_banks.end());
-
-    outFile << "<bank_directories>\n";
-    for (const auto& directory : customBankDirectories) {
-        outFile << "bank_directory=" << directory << "\n";
-    }
-    outFile << "</bank_directories>\n";
-
-    outFile << "<bank_files>\n";
-
-    // Write Master.bank first if it exists
-    if (!master_bank_file.empty()) {
-        outFile << "bank_file=" << master_bank_file << "\n";
-        outFile << "load_state=" << (master_bank_loaded ? 1 : 0) << "\n";
-    }
-
-    // Write other bank files
-    for (const auto& bank_pair : other_banks) {
-        outFile << "bank_file=" << bank_pair.first << "\n";
-        outFile << "load_state=" << (bank_pair.second ? 1 : 0) << "\n";
-    }
-
-    outFile << "</bank_files>\n";
-
-    outFile.close();
-    DebugMsg("State saved successfully to: %s\n", finalFilePath.c_str());
-
-    // Update the displayed file name
-    currentDisplayedFileName = getReaMODFileName(finalFilePath);
-
-    // Get the last modification time and update formattedLastSaveTimestamp
-    std::error_code ec;
-    auto ftime = fs::last_write_time(finalFilePath, ec);
-    if (!ec) {
-        auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-            ftime - decltype(ftime)::clock::now() + std::chrono::system_clock::now());
-        std::time_t timeT = std::chrono::system_clock::to_time_t(sctp);
-        char buffer[128];
-        std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", std::localtime(&timeT));
-        formattedLastSaveTimestamp = "Last Save: " + std::string(buffer);
-    } else {
-        DebugMsg("Error retrieving last modification time: %s\n", ec.message().c_str());
-        formattedLastSaveTimestamp.clear();
-    }
-}
-
 // Utility function to trim leading and trailing whitespace from a string
 std::string TrimString(const std::string& str) {
     const char* whitespace = " \t\n\r";
@@ -2864,285 +2998,6 @@ std::string TrimString(const std::string& str) {
 
     size_t end = str.find_last_not_of(whitespace);
     return str.substr(start, end - start + 1);
-}
-
-void LoadStateFromFile(const std::string& filePath) {
-    if (!IsFMODInitialized()) {
-        DebugMsg("FMOD system is not initialized. Cannot load state from file.\n");
-        return;
-    }
-
-    UnloadAllBanks();
-
-    std::ifstream inFile(filePath);
-    if (!inFile.is_open()) {
-        DebugMsg("Failed to open file for loading: %s\n", filePath.c_str());
-        return;
-    }
-
-    bank_files.clear();
-    bank_load_states.clear();
-    bank_events.clear();
-    loaded_banks.clear();
-    masterStringEvents.clear();
-    std::strncpy(selected_file_name, "No project selected.", FILE_PATH_BUFFER_SIZE - 1);
-
-    std::string line;
-    std::string fsproDirectory;
-    std::unordered_map<std::string, bool> savedBankStates;
-    std::vector<std::string> parsedDirectories;
-
-    while (std::getline(inFile, line)) {
-        line = TrimString(line);
-        if (line.empty()) {
-            continue;
-        }
-
-        if (line == "<bank_directories>") {
-            while (std::getline(inFile, line)) {
-                line = TrimString(line);
-                if (line.empty()) {
-                    continue;
-                }
-                if (line == "</bank_directories>") {
-                    break;
-                }
-
-                size_t equalsPos = line.find('=');
-                if (equalsPos == std::string::npos) {
-                    DebugMsg("Error: Invalid line in bank_directories section: %s\n", line.c_str());
-                    continue;
-                }
-
-                std::string key = line.substr(0, equalsPos);
-                std::string value = line.substr(equalsPos + 1);
-
-                if (key == "bank_directory") {
-                    std::string normalizedDir = fs::path(value).lexically_normal().string();
-                    if (std::find(parsedDirectories.begin(), parsedDirectories.end(), normalizedDir) == parsedDirectories.end()) {
-                        parsedDirectories.push_back(normalizedDir);
-                    }
-                } else {
-                    DebugMsg("Error: Unexpected key in bank_directories section: %s\n", key.c_str());
-                }
-            }
-            continue;
-        }
-
-        if (line == "<bank_files>") {
-            while (std::getline(inFile, line)) {
-                line = TrimString(line);
-                if (line.empty()) {
-                    continue;
-                }
-                if (line == "</bank_files>") {
-                    break;
-                }
-
-                size_t equalsPos = line.find('=');
-                if (equalsPos == std::string::npos) {
-                    DebugMsg("Error: Invalid line in bank_files section: %s\n", line.c_str());
-                    continue;
-                }
-
-                std::string key = line.substr(0, equalsPos);
-                std::string value = line.substr(equalsPos + 1);
-
-                if (key == "bank_file") {
-                    std::string bankPath = fs::path(value).lexically_normal().string();
-
-                    std::string stateLine;
-                    while (std::getline(inFile, stateLine) && TrimString(stateLine).empty()) {
-                    }
-
-                    if (inFile.eof()) {
-                        DebugMsg("Error: Unexpected end of file after bank_file entry.\n");
-                        break;
-                    }
-
-                    stateLine = TrimString(stateLine);
-                    size_t stateEquals = stateLine.find('=');
-                    if (stateEquals == std::string::npos) {
-                        DebugMsg("Error: Invalid load_state entry: %s\n", stateLine.c_str());
-                        continue;
-                    }
-
-                    std::string stateKey = stateLine.substr(0, stateEquals);
-                    std::string stateValue = stateLine.substr(stateEquals + 1);
-
-                    if (stateKey == "load_state") {
-                        try {
-                            bool loadState = (std::stoi(stateValue) != 0);
-                            savedBankStates[bankPath] = loadState;
-                            DebugMsg("Loaded bank_file: %s, load_state: %d\n", bankPath.c_str(), loadState);
-                        } catch (const std::exception& e) {
-                            DebugMsg("Error parsing load_state value: %s\n", e.what());
-                        }
-                    } else {
-                        DebugMsg("Error: Expected load_state after bank_file entry.\n");
-                    }
-                } else {
-                    DebugMsg("Error: Unexpected key in bank_files section: %s\n", key.c_str());
-                }
-            }
-            continue;
-        }
-
-        size_t equalsPos = line.find('=');
-        if (equalsPos == std::string::npos) {
-            DebugMsg("Error: Invalid line in .ReaMOD file: %s\n", line.c_str());
-            continue;
-        }
-
-        std::string key = line.substr(0, equalsPos);
-        std::string value = line.substr(equalsPos + 1);
-
-        try {
-            if (key == "fspro_file") {
-                std::strncpy(selected_file_path, value.c_str(), FILE_PATH_BUFFER_SIZE - 1);
-                selected_file_path[FILE_PATH_BUFFER_SIZE - 1] = '\0';
-                DebugMsg("Loaded fspro_file: %s\n", selected_file_path);
-
-                std::string file_path(selected_file_path);
-                size_t last_slash_pos = file_path.find_last_of("/\\");
-                if (last_slash_pos != std::string::npos) {
-                    std::string file_name = file_path.substr(last_slash_pos + 1);
-                    std::strncpy(selected_file_name, file_name.c_str(), FILE_PATH_BUFFER_SIZE - 1);
-                    selected_file_name[FILE_PATH_BUFFER_SIZE - 1] = '\0';
-                    fsproDirectory = file_path.substr(0, last_slash_pos);
-                } else {
-                    std::strncpy(selected_file_name, file_path.c_str(), FILE_PATH_BUFFER_SIZE - 1);
-                    selected_file_name[FILE_PATH_BUFFER_SIZE - 1] = '\0';
-                    fsproDirectory.clear();
-                }
-                fmodProjectDirectory = fsproDirectory;
-            } else if (key == "lookahead_time_ms") {
-                lookAheadTimeMs = std::stoi(value);
-                DebugMsg("Loaded lookahead_time_ms: %d\n", lookAheadTimeMs);
-            } else if (key == "move_cursor_after_insert") {
-                moveCursorAfterInsert = (std::stoi(value) != 0);
-                DebugMsg("Loaded move_cursor_after_insert: %d\n", moveCursorAfterInsert);
-            } else if (key == "num_frames_for_item") {
-                numFramesForItem = std::stoi(value);
-                DebugMsg("Loaded num_frames_for_item: %d\n", numFramesForItem);
-            } else if (key == "item_sync_selection") {
-                syncSelectedEventWithItemSelection = (std::stoi(value) != 0);
-                DebugMsg("Loaded item_sync_selection: %d\n", syncSelectedEventWithItemSelection);
-            } else if (key == "update_item_insertion_length_from_last_time_selection") {
-                updateItemInsertionLength = (std::stoi(value) != 0);
-                DebugMsg("Loaded update_item_insertion_length: %d\n", updateItemInsertionLength);
-            } else if (key == "show_full_bank_directory_paths") {
-                showFullBankDirectoryPaths = (std::stoi(value) != 0);
-                DebugMsg("Loaded show_full_bank_directory_paths: %d\n", showFullBankDirectoryPaths);
-            } else {
-                DebugMsg("Error: Unknown key in .ReaMOD file: %s\n", key.c_str());
-            }
-        } catch (const std::exception& e) {
-            DebugMsg("Error parsing value for key %s: %s\n", key.c_str(), e.what());
-        }
-    }
-
-    inFile.close();
-
-    if (parsedDirectories.empty() && !fsproDirectory.empty()) {
-        fs::path defaultDir = fs::path(fsproDirectory) / "Build" / "Desktop";
-        parsedDirectories.push_back(defaultDir.lexically_normal().string());
-    }
-
-    customBankDirectories = parsedDirectories;
-
-    RefreshBankFiles();
-
-    if (!savedBankStates.empty()) {
-        for (size_t i = 0; i < bank_files.size(); ++i) {
-            auto it = savedBankStates.find(bank_files[i]);
-            if (it != savedBankStates.end()) {
-                bank_load_states[i] = it->second;
-            }
-        }
-    }
-
-    SynchronizeLoadedBanks();
-
-    DebugMsg("State loaded from file: %s\n", filePath.c_str());
-
-    currentDisplayedFileName = getReaMODFileName(filePath);
-
-    std::error_code ec;
-    auto ftime = fs::last_write_time(filePath, ec);
-    if (!ec) {
-        auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-            ftime - decltype(ftime)::clock::now() + std::chrono::system_clock::now());
-        std::time_t timeT = std::chrono::system_clock::to_time_t(sctp);
-        char buffer[128];
-        std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", std::localtime(&timeT));
-        formattedLastSaveTimestamp = "Last Save: " + std::string(buffer);
-    } else {
-        DebugMsg("Error retrieving last modification time: %s\n", ec.message().c_str());
-        formattedLastSaveTimestamp.clear();
-    }
-
-    RetrieveGlobalParameters();
-}
-
-void SaveStateDialog() {
-    // Determine the default file name
-    std::string defaultFileName;
-    if (!currentDisplayedFileName.empty() && currentDisplayedFileName != "No ReaMOD session loaded." && currentDisplayedFileName != " ") {
-        // If a .ReaMOD file is already loaded, use its name
-        defaultFileName = currentDisplayedFileName + ".ReaMOD";
-    } else {
-        // Otherwise, use the currently open Reaper project name
-        std::string reaperProjectName = GetCurrentReaperProjectName();
-        if (reaperProjectName.empty()) {
-            reaperProjectName = "Untitled"; // Fallback to "Untitled" if no Reaper project name is available
-        }
-        defaultFileName = reaperProjectName + ".ReaMOD";
-    }
-
-    // Set up the file dialog
-    const char* filterPatterns[2] = { "*.ReaMOD", "*.*" };
-    const char* savePath = tinyfd_saveFileDialog(
-        "Save State As",      // Dialog title
-        defaultFileName.c_str(), // Default filename
-        2,                    // Number of filter patterns
-        filterPatterns,       // Filter patterns array
-        "ReaMOD files (*.ReaMOD)" // Filter description
-    );
-
-    if (savePath) {
-        // If the file name doesn't end with .ReaMOD, add the extension
-        std::string savePathStr(savePath);
-        if (savePathStr.find(".ReaMOD") == std::string::npos) {
-            savePathStr += ".ReaMOD";
-        }
-        SaveStateToFile(savePathStr);
-        currentReaMODFileName = fs::path(savePathStr).filename().string(); // Update current session file name
-        currentDisplayedFileName = getReaMODFileName(savePathStr); // Update the displayed file name
-        DebugMsg("State saved successfully to: %s\n", savePathStr.c_str());
-    } else {
-        DebugMsg("Save operation canceled or invalid file name.\n");
-    }
-}
-
-void LoadStateDialog() {
-    const char* filterPatterns[2] = { "*.ReaMOD", "*.*" };
-    const char* loadPath = tinyfd_openFileDialog(
-        "Load State",         // Dialog title
-        "",                   // Default path
-        2,                    // Number of filter patterns
-        filterPatterns,       // Filter patterns array
-        "ReaMOD files (*.ReaMOD)", // Filter description
-        0                     // Allow multiple selection (0 = single file)
-    );
-
-    if (loadPath) {
-        LoadStateFromFile(loadPath);
-        currentReaMODFileName = fs::path(loadPath).filename().string(); // Update current session file name
-        DebugMsg("State loaded successfully from: %s\n", loadPath);
-    } else {
-        DebugMsg("Load operation canceled or invalid file name.\n");
-    }
 }
 
 // Function to remove the ".bank" extension from a filename for display purposes
@@ -3414,7 +3269,7 @@ void RenderEventSearchWindow() {
         // }
 
         // Static buffer to hold user input
-        static char eventSearchBuffer[256] = "";    
+        static char eventSearchBuffer[256] = "";
 
         // Static string to hold error message
         static std::string errorMessage;
@@ -3709,6 +3564,22 @@ void RenderGUI() {
     // Early exit if context is null (safety check)
     if (!reaMOD_Main_ImGui_Context) {
         return;
+    }
+
+    // Check for project change and reload state if needed
+    ReaProject* currentProj = CurrentProject();
+    if (currentProj != lastTrackedProject) {
+        DebugMsg("Project change detected. Reloading ReaMOD state from new project.\n");
+        
+        // Stop any playing events and clean up before switching
+        StopAllEvents();
+        ReleaseAllEventInstances();
+        
+        // Update the tracked project
+        lastTrackedProject = currentProj;
+        
+        // Load the ReaMOD state from the new project
+        LoadReaMODFromProjectExtState();
     }
 
     EnsureReaMODFontsLoaded();
@@ -4210,7 +4081,7 @@ void RenderGUI() {
         }
 
         ImGui::Separator(reaMOD_Main_ImGui_Context);
-        ImGui::Text(reaMOD_Main_ImGui_Context,"Beta V1.1");
+        ImGui::Text(reaMOD_Main_ImGui_Context,"Beta V1.3");
 
         // Pop style colors after End() but before cleanup
         // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
@@ -4249,7 +4120,7 @@ void UpdateEventPlayStates() {
             DebugMsg("FMOD event triggered by play button has stopped playing.\n");
             buttonStates[eventPath] = false;
             stateChanged = true;
-        } 
+        }
         // Check if playback is starting/playing and button state is false
         else if ((playbackState == FMOD_STUDIO_PLAYBACK_PLAYING || playbackState == FMOD_STUDIO_PLAYBACK_STARTING) && !buttonStates[eventPath]) {
             DebugMsg("FMOD event is playing but button state is not active.\n");
@@ -4482,29 +4353,6 @@ void MonitorItemSelection() {
     }
 }
 
-
-void AutoLoadReaMODFile() {
-    std::string reaperProjectName = GetCurrentReaperProjectName();
-    if (!reaperProjectName.empty() && reaperProjectName != "Untitled") {
-        char projectFilePath[256] = {0};
-        if (EnumProjects(-1, projectFilePath, sizeof(projectFilePath))) {
-            // Form the expected .ReaMOD file path
-            std::string projectDirectory = fs::path(projectFilePath).parent_path().string();
-            std::string reaMODFilePath = projectDirectory + "/" + reaperProjectName + ".ReaMOD";
-
-            // Check if the .ReaMOD file exists
-            if (fs::exists(reaMODFilePath)) {
-                DebugMsg("Auto-loading ReaMOD file: %s\n", reaMODFilePath.c_str());
-                LoadStateFromFile(reaMODFilePath);
-                currentReaMODFileName = fs::path(reaMODFilePath).filename().string(); // Update current session file name
-                currentDisplayedFileName = getReaMODFileName(reaMODFilePath); // Update the displayed file name
-            } else {
-                DebugMsg("No matching ReaMOD file found for project: %s\n", reaMODFilePath.c_str());
-            }
-        }
-    }
-}
-
 void toggleReaMODWindow() {
     if (!reaMOD_Main_ImGui_Context) {
         // First-time setup: initialize ReaImGui and FMOD, and start rendering
@@ -4521,17 +4369,21 @@ void toggleReaMODWindow() {
         guiTaskId = AddTask(RenderGUI);
         itemSelectionTaskId = AddTask(MonitorItemSelection);
 
-        if (reaModWindowPreviouslyOpen != true) {
-            LoadReaMODFromProjectExtState();
-            // AutoLoadReaMODFile();
-            reaModWindowPreviouslyOpen = true;
-        }
+        // Initialize project tracking and load state from current project
+        // Always load on window open - the project might have changed while window was closed
+        lastTrackedProject = CurrentProject();
+        LoadReaMODFromProjectExtState();
+        reaModWindowPreviouslyOpen = true;
     } else {
         // Clean up: remove tasks and close the window
         taskMap.clear();
 
         // Nullify the ImGui context to signify the window is closed
         reaMOD_Main_ImGui_Context = nullptr;
+        
+        // Note: We do NOT reset lastTrackedProject here so that when
+        // the window reopens, if same project, we don't reload unnecessarily
+        // The RenderGUI project change detection will handle actual project changes
     }
 }
 
