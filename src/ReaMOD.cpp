@@ -132,6 +132,7 @@ void RefreshBankFiles();
 void SynchronizeLoadedBanks();
 void StopAllEvents();
 void ReleaseAllEventInstances();
+void FindBankFiles(const std::string& fspro_dir);
 
 // Helper function to normalize paths consistently across platforms
 static std::string NormalizePath(const std::string& path) {
