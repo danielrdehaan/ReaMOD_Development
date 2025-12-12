@@ -4542,13 +4542,12 @@ void RenderGUI() {
         ImGui::Separator(reaMOD_Main_ImGui_Context);
         ImGui::Text(reaMOD_Main_ImGui_Context,"Beta V1.3");
 
-        // Pop style colors after End() but before cleanup
-        // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
-        ImGui::PopStyleColor(reaMOD_Main_ImGui_Context, 33);  // Updated count for FMOD Studio styling
-
     }
 
     ImGui::End(reaMOD_Main_ImGui_Context);
+    
+    // Pop style colors AFTER End() - must match the 31 PushStyleColor calls
+    ImGui::PopStyleColor(reaMOD_Main_ImGui_Context, 31);
 
     // Render search window while main context is still valid
     RenderEventSearchWindow();
