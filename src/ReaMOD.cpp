@@ -970,37 +970,60 @@ std::string GetCustomBuildDirectory(const std::string& fspro_dir) {
     std::ifstream file(workspacePath);
     
     if (!file.is_open()) {
+        DebugMsg("GetCustomBuildDirectory: Could not open Workspace.xml at: %s\n", workspacePath.string().c_str());
         return ""; // File not found, assume default
     }
 
+    DebugMsg("GetCustomBuildDirectory: Parsing Workspace.xml at: %s\n", workspacePath.string().c_str());
+
     std::string line;
+    bool foundProperty = false;
+    
     while (std::getline(file, line)) {
         // Search for the property defining the output directory
         if (line.find("name=\"builtBanksOutputDirectory\"") != std::string::npos) {
+            foundProperty = true;
+            DebugMsg("GetCustomBuildDirectory: Found builtBanksOutputDirectory property\n");
             
-            // 1. Check if the value is on the SAME line first (Robustness fix)
+            // 1. Check if the value is on the SAME line first
             size_t valStart = line.find("<value>");
             size_t valEnd = line.find("</value>");
-            if (valStart != std::string::npos && valEnd != std::string::npos) {
-                return line.substr(valStart + 7, valEnd - (valStart + 7));
+            if (valStart != std::string::npos && valEnd != std::string::npos && valEnd > valStart) {
+                std::string value = line.substr(valStart + 7, valEnd - (valStart + 7));
+                DebugMsg("GetCustomBuildDirectory: Extracted value (same line): '%s'\n", value.c_str());
+                return value;
             }
 
-            // 2. If not on the same line, check subsequent lines
+            // 2. If not on the same line, check subsequent lines for <value>...</value>
             while (std::getline(file, line)) {
+                // Trim leading whitespace/tabs from the line for easier parsing
+                size_t firstNonSpace = line.find_first_not_of(" \t\r\n");
+                if (firstNonSpace != std::string::npos) {
+                    line = line.substr(firstNonSpace);
+                }
+                
                 valStart = line.find("<value>");
                 valEnd = line.find("</value>");
                 
-                if (valStart != std::string::npos && valEnd != std::string::npos) {
-                    return line.substr(valStart + 7, valEnd - (valStart + 7));
+                if (valStart != std::string::npos && valEnd != std::string::npos && valEnd > valStart) {
+                    std::string value = line.substr(valStart + 7, valEnd - (valStart + 7));
+                    DebugMsg("GetCustomBuildDirectory: Extracted value (next line): '%s'\n", value.c_str());
+                    return value;
                 }
                 
                 // Safety break if we hit the end of the property object
                 if (line.find("</property>") != std::string::npos) {
+                    DebugMsg("GetCustomBuildDirectory: Hit </property> without finding value\n");
                     break;
                 }
             }
         }
     }
+    
+    if (!foundProperty) {
+        DebugMsg("GetCustomBuildDirectory: builtBanksOutputDirectory property not found in Workspace.xml\n");
+    }
+    
     return ""; // Property not found, use default
 }
 
@@ -1018,14 +1041,38 @@ void FindBankFiles(const std::string& fspro_dir) {
             DebugMsg("Found custom bank output directory in Workspace.xml: %s\n", buildDirName.c_str());
         }
 
-        // 2. Resolve the absolute path to the base Build folder
-        fs::path baseBuildPath = fs::path(fspro_dir) / buildDirName;
+        // 2. Resolve the path to the base Build folder
+        fs::path baseBuildPath;
         
         try {
-            // Resolve relative paths (e.g. "../Banks") to absolute
-            baseBuildPath = baseBuildPath.lexically_normal();
+            // Check if the custom directory is an absolute path
+            fs::path customPath(buildDirName);
+            if (customPath.is_absolute()) {
+                // Use the absolute path directly
+                baseBuildPath = customPath;
+                DebugMsg("Using absolute custom build path: %s\n", baseBuildPath.string().c_str());
+            } else {
+                // It's a relative path - resolve it relative to the fspro directory
+                baseBuildPath = fs::path(fspro_dir) / buildDirName;
+                DebugMsg("Combined relative path with fspro_dir: %s\n", baseBuildPath.string().c_str());
+            }
+            
+            // Normalize the path to resolve .. and . components
+            // Use weakly_canonical to handle paths that may not fully exist yet
+            // but fall back to lexically_normal if that fails
+            std::error_code ec;
+            fs::path canonicalPath = fs::weakly_canonical(baseBuildPath, ec);
+            if (!ec) {
+                baseBuildPath = canonicalPath;
+            } else {
+                // Fall back to lexically_normal if weakly_canonical fails
+                baseBuildPath = baseBuildPath.lexically_normal();
+            }
+            
+            DebugMsg("Resolved build path: %s\n", baseBuildPath.string().c_str());
 
             if (fs::exists(baseBuildPath) && fs::is_directory(baseBuildPath)) {
+                DebugMsg("Build directory exists, scanning for platform subdirectories...\n");
                 
                 // 3. Iterate through all subdirectories (Platforms)
                 bool foundAnyPlatform = false;
@@ -1051,8 +1098,25 @@ void FindBankFiles(const std::string& fspro_dir) {
                     }
                 }
 
+                // 4. Also check if .bank files exist directly in the build directory (no platform subfolder)
                 if (!foundAnyPlatform) {
-                    DebugMsg("Warning: Build directory exists, but no subdirectories containing .bank files were found.\n");
+                    bool containsBanksDirectly = false;
+                    for (const auto& file : fs::directory_iterator(baseBuildPath)) {
+                        if (file.is_regular_file() && file.path().extension() == ".bank") {
+                            containsBanksDirectly = true;
+                            break;
+                        }
+                    }
+                    
+                    if (containsBanksDirectly) {
+                        customBankDirectories.push_back(baseBuildPath.string());
+                        DebugMsg("Found banks directly in build directory (no platform subfolder): %s\n", baseBuildPath.string().c_str());
+                        foundAnyPlatform = true;
+                    }
+                }
+
+                if (!foundAnyPlatform) {
+                    DebugMsg("Warning: Build directory exists, but no .bank files were found.\n");
                 }
 
             } else {
@@ -4017,7 +4081,7 @@ void RenderGUI() {
         }
 
         ImGui::Separator(reaMOD_Main_ImGui_Context);
-        ImGui::Text(reaMOD_Main_ImGui_Context,"Beta V1.1");
+        ImGui::Text(reaMOD_Main_ImGui_Context,"Beta V1.3");
 
         // Pop style colors after End() but before cleanup
         // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
