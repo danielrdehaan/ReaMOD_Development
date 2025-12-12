@@ -197,9 +197,6 @@ std::unordered_map<std::string, EventInstanceData> activeEventInstances;
 // Declare the function pointer for BR_GetMediaItemGUID
 void (*BR_GetMediaItemGUID)(MediaItem* item, char* guidStringOut, int guidStringOut_sz) = nullptr;
 
-// Declare the function pointer for MarkProjectDirty
-void (*MarkProjectDirty)(ReaProject* proj) = nullptr;
-
 
 void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
     if (rec && rec->GetFunc) {
