@@ -3916,7 +3916,7 @@ void RenderGUI() {
                             if (ImGui::BeginCombo(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), previewLabel)) {
                                 for (int i = 0; i < static_cast<int>(globalParam.labels.size()); ++i) {
                                     bool isSelected = (currentIndex == i);
-                                    if (ImGui::Selectable(reaMOD_Main_ImGui_Context, globalParam.labels[i].c_str(), isSelected)) {
+                                    if (ImGui::Selectable(reaMOD_Main_ImGui_Context, globalParam.labels[i].c_str(), &isSelected)) {
                                         currentIndex = i;
                                         globalParam.currentValue = globalParam.minValue + static_cast<float>(i);
                                     }
@@ -3974,7 +3974,7 @@ void RenderGUI() {
                             if (ImGui::BeginCombo(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), previewLabel)) {
                                 for (int i = 0; i < static_cast<int>(globalParam.labels.size()); ++i) {
                                     bool isSelected = (currentIndex == i);
-                                    if (ImGui::Selectable(reaMOD_Main_ImGui_Context, globalParam.labels[i].c_str(), isSelected)) {
+                                    if (ImGui::Selectable(reaMOD_Main_ImGui_Context, globalParam.labels[i].c_str(), &isSelected)) {
                                         currentIndex = i;
                                         globalParam.currentValue = globalParam.minValue + static_cast<float>(i);
                                     }
@@ -4068,7 +4068,7 @@ void RenderGUI() {
                     if (ImGui::BeginCombo(reaMOD_Main_ImGui_Context, param.name.c_str(), previewLabel)) {
                         for (int i = 0; i < static_cast<int>(param.labels.size()); ++i) {
                             bool isSelected = (currentIndex == i);
-                            if (ImGui::Selectable(reaMOD_Main_ImGui_Context, param.labels[i].c_str(), isSelected)) {
+                            if (ImGui::Selectable(reaMOD_Main_ImGui_Context, param.labels[i].c_str(), &isSelected)) {
                                 currentIndex = i;
                                 param.currentValue = param.minValue + static_cast<float>(i);
                             }
