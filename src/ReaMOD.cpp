@@ -3051,8 +3051,6 @@ void LoadStateFromFile(const std::string& filePath) {
 
     customBankDirectories = parsedDirectories;
 
-    RefreshBankFiles();
-
     if (!savedBankStates.empty()) {
         for (size_t i = 0; i < bank_files.size(); ++i) {
             auto it = savedBankStates.find(bank_files[i]);
