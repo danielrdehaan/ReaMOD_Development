@@ -678,7 +678,8 @@ void LoadBank(const std::string& bank_path, bool load_sample_data = true) {
         FMOD_RESULT result = fmod_system->loadBankFile(bank_path.c_str(), FMOD_STUDIO_LOAD_BANK_NORMAL, &bank);
         DebugMsg("Loading bank: %s\n", bank_path.c_str());
         if (result == FMOD_OK) {
-            // Debug message to indicate that the bank is being loaded
+            // Debug message to indicate that the bank was loaded successfully
+            DebugMsg("Successfully loaded bank: %s\n", bank_path.c_str());
 
             loaded_banks[bank_path] = bank;
             if (load_sample_data) {
