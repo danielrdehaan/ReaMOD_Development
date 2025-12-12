@@ -197,6 +197,9 @@ std::unordered_map<std::string, EventInstanceData> activeEventInstances;
 // Declare the function pointer for BR_GetMediaItemGUID
 void (*BR_GetMediaItemGUID)(MediaItem* item, char* guidStringOut, int guidStringOut_sz) = nullptr;
 
+// Declare the function pointer for MarkProjectDirty
+void (*MarkProjectDirty)(ReaProject* proj) = nullptr;
+
 
 void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
     if (rec && rec->GetFunc) {
@@ -254,6 +257,7 @@ void LoadReaperAPIFunctions(reaper_plugin_info_t* rec) {
         InsertTrackAtIndex         = reinterpret_cast<decltype(InsertTrackAtIndex)>(rec->GetFunc("InsertTrackAtIndex"));
         GetProjExtState = reinterpret_cast<decltype(GetProjExtState)>(rec->GetFunc("GetProjExtState"));
         SetProjExtState = reinterpret_cast<decltype(SetProjExtState)>(rec->GetFunc("SetProjExtState"));
+        MarkProjectDirty = reinterpret_cast<decltype(MarkProjectDirty)>(rec->GetFunc("MarkProjectDirty"));
     }
 }
 
@@ -428,7 +432,9 @@ static void SaveReaMODToProjectExtState() {
     }
     SetProjExtState(proj, "ReaMOD", "bank_states", states.c_str());
     
-    MarkProjectDirty(proj);
+    if (MarkProjectDirty) {
+        MarkProjectDirty(proj);
+    }
 }
 
 
