@@ -3905,8 +3905,30 @@ void RenderGUI() {
                     for (auto& globalParam : parameters) {
                         float previousValue = globalParam.currentValue;
     
+                        // Check if parameter is labeled (use dropdown)
+                        if (globalParam.isLabeled() && !globalParam.labels.empty()) {
+                            int currentIndex = static_cast<int>(std::round(globalParam.currentValue - globalParam.minValue));
+                            if (currentIndex < 0) currentIndex = 0;
+                            if (currentIndex >= static_cast<int>(globalParam.labels.size())) currentIndex = static_cast<int>(globalParam.labels.size()) - 1;
+                            
+                            const char* previewLabel = globalParam.labels[currentIndex].c_str();
+                            
+                            if (ImGui::BeginCombo(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), previewLabel)) {
+                                for (int i = 0; i < static_cast<int>(globalParam.labels.size()); ++i) {
+                                    bool isSelected = (currentIndex == i);
+                                    if (ImGui::Selectable(reaMOD_Main_ImGui_Context, globalParam.labels[i].c_str(), isSelected)) {
+                                        currentIndex = i;
+                                        globalParam.currentValue = globalParam.minValue + static_cast<float>(i);
+                                    }
+                                    if (isSelected) {
+                                        ImGui::SetItemDefaultFocus(reaMOD_Main_ImGui_Context);
+                                    }
+                                }
+                                ImGui::EndCombo(reaMOD_Main_ImGui_Context);
+                            }
+                        }
                         // Check if parameter is discrete (integer steps only)
-                        if (globalParam.isDiscrete()) {
+                        else if (globalParam.isDiscrete()) {
                             int intValue = static_cast<int>(std::round(globalParam.currentValue));
                             int intMin = static_cast<int>(std::round(globalParam.minValue));
                             int intMax = static_cast<int>(std::round(globalParam.maxValue));
@@ -3941,8 +3963,30 @@ void RenderGUI() {
                     for (auto& globalParam : noPrefixParameters) {
                         float previousValue = globalParam.currentValue;
     
+                        // Check if parameter is labeled (use dropdown)
+                        if (globalParam.isLabeled() && !globalParam.labels.empty()) {
+                            int currentIndex = static_cast<int>(std::round(globalParam.currentValue - globalParam.minValue));
+                            if (currentIndex < 0) currentIndex = 0;
+                            if (currentIndex >= static_cast<int>(globalParam.labels.size())) currentIndex = static_cast<int>(globalParam.labels.size()) - 1;
+                            
+                            const char* previewLabel = globalParam.labels[currentIndex].c_str();
+                            
+                            if (ImGui::BeginCombo(reaMOD_Main_ImGui_Context, globalParam.name.c_str(), previewLabel)) {
+                                for (int i = 0; i < static_cast<int>(globalParam.labels.size()); ++i) {
+                                    bool isSelected = (currentIndex == i);
+                                    if (ImGui::Selectable(reaMOD_Main_ImGui_Context, globalParam.labels[i].c_str(), isSelected)) {
+                                        currentIndex = i;
+                                        globalParam.currentValue = globalParam.minValue + static_cast<float>(i);
+                                    }
+                                    if (isSelected) {
+                                        ImGui::SetItemDefaultFocus(reaMOD_Main_ImGui_Context);
+                                    }
+                                }
+                                ImGui::EndCombo(reaMOD_Main_ImGui_Context);
+                            }
+                        }
                         // Check if parameter is discrete (integer steps only)
-                        if (globalParam.isDiscrete()) {
+                        else if (globalParam.isDiscrete()) {
                             int intValue = static_cast<int>(std::round(globalParam.currentValue));
                             int intMin = static_cast<int>(std::round(globalParam.minValue));
                             int intMax = static_cast<int>(std::round(globalParam.maxValue));
@@ -4004,19 +4048,40 @@ void RenderGUI() {
                 }
             }
     
-            // Flag to detect if any slider is active
+            // Flag to detect if any slider/combo is active
             bool anySliderActive = false;
     
-            // Display sliders for the event's parameters using SliderDouble
+            // Display controls for the event's parameters
             for (auto& param : selectedEventParameters) {
                 float previousValue = param.currentValue;
     
-                double doubleValue = static_cast<double>(param.currentValue);
-                double doubleMin = static_cast<double>(param.minValue);
-                double doubleMax = static_cast<double>(param.maxValue);
-    
+                // Check if parameter is labeled (use dropdown)
+                if (param.isLabeled() && !param.labels.empty()) {
+                    // For labeled parameters, use a dropdown/combo box
+                    int currentIndex = static_cast<int>(std::round(param.currentValue - param.minValue));
+                    if (currentIndex < 0) currentIndex = 0;
+                    if (currentIndex >= static_cast<int>(param.labels.size())) currentIndex = static_cast<int>(param.labels.size()) - 1;
+                    
+                    // Get the current label for preview
+                    const char* previewLabel = param.labels[currentIndex].c_str();
+                    
+                    if (ImGui::BeginCombo(reaMOD_Main_ImGui_Context, param.name.c_str(), previewLabel)) {
+                        for (int i = 0; i < static_cast<int>(param.labels.size()); ++i) {
+                            bool isSelected = (currentIndex == i);
+                            if (ImGui::Selectable(reaMOD_Main_ImGui_Context, param.labels[i].c_str(), isSelected)) {
+                                currentIndex = i;
+                                param.currentValue = param.minValue + static_cast<float>(i);
+                            }
+                            if (isSelected) {
+                                ImGui::SetItemDefaultFocus(reaMOD_Main_ImGui_Context);
+                            }
+                        }
+                        ImGui::EndCombo(reaMOD_Main_ImGui_Context);
+                        anySliderActive = true; // Treat combo interaction as active
+                    }
+                }
                 // Check if parameter is discrete (integer steps only)
-                if (param.isDiscrete()) {
+                else if (param.isDiscrete()) {
                     // For discrete parameters, use integer slider behavior
                     int intValue = static_cast<int>(std::round(param.currentValue));
                     int intMin = static_cast<int>(std::round(param.minValue));
@@ -4031,6 +4096,10 @@ void RenderGUI() {
                     param.currentValue = static_cast<float>(intValue);
                 } else {
                     // For continuous parameters, use double slider
+                    double doubleValue = static_cast<double>(param.currentValue);
+                    double doubleMin = static_cast<double>(param.minValue);
+                    double doubleMax = static_cast<double>(param.maxValue);
+                    
                     ImGui::SliderDouble(reaMOD_Main_ImGui_Context, param.name.c_str(), &doubleValue, doubleMin, doubleMax);
     
                     if (ImGui::IsItemActive(reaMOD_Main_ImGui_Context)) {
