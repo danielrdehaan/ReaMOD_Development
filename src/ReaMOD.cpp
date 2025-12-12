@@ -3918,7 +3918,7 @@ void RenderGUI() {
             }
         }
         ImGui::SameLine(reaMOD_Main_ImGui_Context);
-        if (StyledButton(reaMOD_Main_ImGui_Context, "Rescan")) {
+        if (StyledButton(reaMOD_Main_ImGui_Context, "Refresh")) {
             RefreshBankFiles();
         }
 
