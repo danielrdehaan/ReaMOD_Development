@@ -3804,8 +3804,9 @@ void RenderGUI() {
                 if (!isValidDirectory) {
                     ImGui::TextColored(reaMOD_Main_ImGui_Context, orange, displayPath.c_str());
                 } else if (!isEnabled) {
-                    // Show disabled directories in a dimmed color
-                    ImGui::TextColored(reaMOD_Main_ImGui_Context, 0.5f, 0.5f, 0.5f, 1.0f, displayPath.c_str());
+                    // Show disabled directories in a dimmed color (gray)
+                    int gray = 0x808080FF; // RGBA gray
+                    ImGui::TextColored(reaMOD_Main_ImGui_Context, gray, displayPath.c_str());
                 } else {
                     ReaMODText(reaMOD_Main_ImGui_Context, displayPath.c_str(), reaMODMediumFont);
                 }
