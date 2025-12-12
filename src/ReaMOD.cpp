@@ -541,10 +541,11 @@ static bool LoadReaMODFromProjectExtState() {
     bool loadedAnything = false;
     char buf[65536] = {0};
 
-    // fspro path
+    // 1. Load fspro path
     if (GetProjExtState(proj, "ReaMOD", "fspro_path", buf, sizeof(buf)) > 0 && buf[0]) {
         std::strncpy(selected_file_path, buf, FILE_PATH_BUFFER_SIZE-1);
-        // derive file name + directory like your OpenFileDialog() does
+        
+        // Derive file name + directory
         std::string file_path(selected_file_path);
         size_t p1 = file_path.find_last_of("/\\");
         std::string fsproDirectory;
@@ -562,23 +563,41 @@ static bool LoadReaMODFromProjectExtState() {
         loadedAnything = true;
     }
 
-    // bank dirs
-    std::vector<std::string> parsedDirs;
-    if (GetProjExtState(proj, "ReaMOD", "bank_dirs", buf, sizeof(buf)) > 0 && buf[0]) {
-        parsedDirs = Split(std::string(buf), '|');
-        loadedAnything = true;
-    } else if (!fmodProjectDirectory.empty()) {
-        // fallback to Build/Desktop/ if dirs weren't saved yet
-        fs::path defDir = fs::path(fmodProjectDirectory) / "Build" / "Desktop";
-        parsedDirs.push_back(defDir.lexically_normal().string());
+    // 2. ALWAYS run smart finder first.
+    // This populates customBankDirectories with the actual, current build paths on disk.
+    if (!fmodProjectDirectory.empty()) {
+        FindBankFiles(fmodProjectDirectory);
     }
-    customBankDirectories = parsedDirs;
 
-    // Rescan banks now that dirs are known
-    RefreshBankFiles(); // rebuilds bank_files/bank_load_states
-    // (At this point bank_load_states reflect previous defaults or remembered per-path states)
+    // 3. Load and merge saved bank dirs
+    // This preserves any manual directories the user added, while avoiding duplicates.
+    if (GetProjExtState(proj, "ReaMOD", "bank_dirs", buf, sizeof(buf)) > 0 && buf[0]) {
+        std::vector<std::string> parsedDirs = Split(std::string(buf), '|');
+        
+        for (const auto& rawDir : parsedDirs) {
+            // Normalize path to ensure consistent comparison (fixes Windows/Mac slash issues)
+            std::string dir = fs::path(rawDir).lexically_normal().string();
 
-    // bank load states (path|0/1 per line)
+            // Only add if not already found by FindBankFiles
+            bool alreadyExists = false;
+            for (const auto& existing : customBankDirectories) {
+                if (existing == dir) {
+                    alreadyExists = true;
+                    break;
+                }
+            }
+            
+            if (!alreadyExists) {
+                customBankDirectories.push_back(dir);
+            }
+        }
+        loadedAnything = true;
+    }
+
+    // 4. Refresh files now that we have the complete, valid list
+    RefreshBankFiles();
+
+    // 5. Apply saved bank load states
     if (GetProjExtState(proj, "ReaMOD", "bank_states", buf, sizeof(buf)) > 0 && buf[0]) {
         std::unordered_map<std::string, bool> saved;
         for (const auto& line : Split(std::string(buf), '\n')) {
@@ -588,7 +607,8 @@ static bool LoadReaMODFromProjectExtState() {
             bool st = (bar+1 < line.size() && line[bar+1] == '1');
             saved[p] = st;
         }
-        // apply onto current bank_files order
+        
+        // Apply saved states to the newly found files
         for (size_t i = 0; i < bank_files.size(); ++i) {
             auto it = saved.find(bank_files[i]);
             if (it != saved.end()) bank_load_states[i] = it->second;
@@ -597,7 +617,7 @@ static bool LoadReaMODFromProjectExtState() {
         loadedAnything = true;
     }
 
-    // Update globals/UI bits that depend on loaded banks
+    // Update globals/UI bits
     RetrieveGlobalParameters();
 
     return loadedAnything;
@@ -894,12 +914,103 @@ void RefreshBankFiles() {
     SaveReaMODToProjectExtState();
 }
 
+// Helper function to parse Workspace.xml for custom bank output directory
+std::string GetCustomBuildDirectory(const std::string& fspro_dir) {
+    fs::path workspacePath = fs::path(fspro_dir) / "Metadata" / "Workspace.xml";
+    std::ifstream file(workspacePath);
+    
+    if (!file.is_open()) {
+        return ""; // File not found, assume default
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        // Search for the property defining the output directory
+        if (line.find("name=\"builtBanksOutputDirectory\"") != std::string::npos) {
+            
+            // 1. Check if the value is on the SAME line first (Robustness fix)
+            size_t valStart = line.find("<value>");
+            size_t valEnd = line.find("</value>");
+            if (valStart != std::string::npos && valEnd != std::string::npos) {
+                return line.substr(valStart + 7, valEnd - (valStart + 7));
+            }
+
+            // 2. If not on the same line, check subsequent lines
+            while (std::getline(file, line)) {
+                valStart = line.find("<value>");
+                valEnd = line.find("</value>");
+                
+                if (valStart != std::string::npos && valEnd != std::string::npos) {
+                    return line.substr(valStart + 7, valEnd - (valStart + 7));
+                }
+                
+                // Safety break if we hit the end of the property object
+                if (line.find("</property>") != std::string::npos) {
+                    break;
+                }
+            }
+        }
+    }
+    return ""; // Property not found, use default
+}
+
 // Function to find all .bank files in the "Build/Desktop/" directory relative to the selected .fspro file
 void FindBankFiles(const std::string& fspro_dir) {
     customBankDirectories.clear();
+    
     if (!fspro_dir.empty()) {
-        fs::path bankDirectory = fs::path(fspro_dir) / "Build" / "Desktop";
-        customBankDirectories.push_back(bankDirectory.lexically_normal().string());
+        std::string buildDirName = "Build"; // Default FMOD folder
+        
+        // 1. Check Workspace.xml for a custom output directory override
+        std::string customDir = GetCustomBuildDirectory(fspro_dir);
+        if (!customDir.empty()) {
+            buildDirName = customDir;
+            DebugMsg("Found custom bank output directory in Workspace.xml: %s\n", buildDirName.c_str());
+        }
+
+        // 2. Resolve the absolute path to the base Build folder
+        fs::path baseBuildPath = fs::path(fspro_dir) / buildDirName;
+        
+        try {
+            // Resolve relative paths (e.g. "../Banks") to absolute
+            baseBuildPath = baseBuildPath.lexically_normal();
+
+            if (fs::exists(baseBuildPath) && fs::is_directory(baseBuildPath)) {
+                
+                // 3. Iterate through all subdirectories (Platforms)
+                bool foundAnyPlatform = false;
+                for (const auto& entry : fs::directory_iterator(baseBuildPath)) {
+                    if (entry.is_directory()) {
+                        
+                        // Check if this platform folder actually contains .bank files
+                        bool containsBanks = false;
+                        for (const auto& file : fs::directory_iterator(entry.path())) {
+                            if (file.path().extension() == ".bank") {
+                                containsBanks = true;
+                                break;
+                            }
+                        }
+
+                        // If it has banks, add it to our list
+                        if (containsBanks) {
+                            std::string platformPath = entry.path().string();
+                            customBankDirectories.push_back(platformPath);
+                            DebugMsg("Found platform with banks: %s\n", platformPath.c_str());
+                            foundAnyPlatform = true;
+                        }
+                    }
+                }
+
+                if (!foundAnyPlatform) {
+                    DebugMsg("Warning: Build directory exists, but no subdirectories containing .bank files were found.\n");
+                }
+
+            } else {
+                DebugMsg("Warning: Base build directory does not exist: %s\n", baseBuildPath.string().c_str());
+            }
+        } catch (const std::exception& e) {
+            DebugMsg("Error resolving build directory path: %s\n", e.what());
+        }
     }
 
     RefreshBankFiles();
