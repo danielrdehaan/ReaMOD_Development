@@ -405,6 +405,8 @@ static void SaveReaMODToProjectExtState() {
         states += (bank_load_states[i] ? "1" : "0");
     }
     SetProjExtState(proj, "ReaMOD", "bank_states", states.c_str());
+    
+    MarkProjectDirty(proj);
 }
 
 
@@ -1012,8 +1014,6 @@ void FindBankFiles(const std::string& fspro_dir) {
             DebugMsg("Error resolving build directory path: %s\n", e.what());
         }
     }
-
-    RefreshBankFiles();
 }
 
 // Function to open the file dialog and extract file name
@@ -1048,6 +1048,7 @@ void OpenFileDialog() {
 
         // Find the .bank files in the "Build/Desktop/" directory
         FindBankFiles(fspro_directory);
+        RefreshBankFiles();
         RetrieveGlobalParameters();
         SaveReaMODToProjectExtState();
     } else {
