@@ -1838,15 +1838,17 @@ bool RenderPlayButton(ImGui_Context* ctx, const std::string& button_id, const st
     // Use event_path as the key for buttonStates
     bool is_active = buttonStates[event_path];
 
-    // Push button color based on its state
+    // FMOD Studio style: Orange when playing, subtle surface when stopped
     if (is_active) {
-        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0x32CD32FF); // Active (green)
-        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0x008000FF); // Dark green when hovered
-        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x006400FF); // Even darker green when clicked
+        // Active/playing state - FMOD orange
+        ImGui::PushStyleColor(ctx, ImGui::Col_Button, fmodOrange);
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, fmodOrangeHover);
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, fmodOrangeActive);
     } else {
-        ImGui::PushStyleColor(ctx, ImGui::Col_Button, 0xC0C0C0FF); // Inactive (grey)
-        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, 0xA9A9A9FF); // Darker grey when hovered
-        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x808080FF); // Dark grey when clicked
+        // Inactive state - subtle surface color
+        ImGui::PushStyleColor(ctx, ImGui::Col_Button, fmodSurface);
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, fmodSurfaceHover);
+        ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, fmodAccent);
     }
 
     // Render the button
@@ -3164,12 +3166,55 @@ std::string FindCommonPrefix(const std::vector<std::string>& strings) {
     return prefix;
 }
 
-int greyDark = 0x333333FF;
-int blue = 0x6DD0F6FF;
-int orange = 0xFFD700FF;
-int supportButtonBackground = 0x282828FF;
-int supportButtonHovered = 0x949494FF;
-int supportButtonActive = 0x6DD0F6FF;
+// ============================================================================
+// FMOD Studio-Inspired Color Palette
+// ============================================================================
+// FMOD Studio uses a dark anthracite theme with cyan accents and orange for
+// active/playing states. This palette aims to match that professional look.
+
+// Background colors (dark anthracite/charcoal tones)
+int fmodBackground          = 0x1E1E1EFF;  // Main window background
+int fmodBackgroundLight     = 0x252526FF;  // Slightly lighter panels
+int fmodSurface             = 0x2D2D30FF;  // Elevated surfaces (panels, cards)
+int fmodSurfaceHover        = 0x3E3E42FF;  // Surface on hover
+
+// Primary accent (FMOD cyan/teal)
+int fmodAccent              = 0x00A8CCFF;  // Primary interactive color
+int fmodAccentHover         = 0x00C8E8FF;  // Accent on hover (brighter)
+int fmodAccentActive        = 0x0088A8FF;  // Accent when pressed (darker)
+int fmodAccentMuted         = 0x007B99FF;  // Muted accent for less emphasis
+
+// Secondary accent (Orange for active/playing states)
+int fmodOrange              = 0xFF8C00FF;  // Active/playing state
+int fmodOrangeHover         = 0xFFA040FF;  // Orange on hover
+int fmodOrangeActive        = 0xE67800FF;  // Orange when pressed
+
+// Text colors (white with varying opacity)
+int fmodTextPrimary         = 0xE0E0E0FF;  // Primary text (87% white)
+int fmodTextSecondary       = 0xA0A0A0FF;  // Secondary text (60% white)
+int fmodTextDisabled        = 0x666666FF;  // Disabled text (38% white)
+
+// Status colors
+int fmodSuccess             = 0x4EC94EFF;  // Green for success/loaded
+int fmodSuccessHover        = 0x3CB83CFF;  // Success hover
+int fmodWarning             = 0xFFB74DFF;  // Warning/attention (amber)
+int fmodError               = 0xF44336FF;  // Error/missing (red)
+
+// Border and separator colors
+int fmodBorder              = 0x3C3C3CFF;  // Subtle borders
+int fmodSeparator           = 0x454545FF;  // Separator lines
+
+// Header/Title bar
+int fmodTitleBar            = 0x323233FF;  // Title bar background
+int fmodTitleBarActive      = 0x007ACCFF;  // Title bar when focused
+
+// Legacy aliases for backward compatibility (map to new FMOD colors)
+int greyDark = fmodBackground;
+int blue = fmodAccent;
+int orange = fmodWarning;
+int supportButtonBackground = fmodSurface;
+int supportButtonHovered = fmodSurfaceHover;
+int supportButtonActive = fmodAccent;
 
 std::string LocateReaMODFontsDirectory() {
     static std::string cachedPath;
@@ -3298,19 +3343,67 @@ void ReaMODText(ImGui_Context* ctx, const char* text, ImGui_Font* font) {
 
 void PushReaMODInterfaceStyle(ImGui_Context* ctx) {
     EnsureReaMODFontsLoaded();
-    ImGui::PushStyleColor(ctx, ImGui::Col_WindowBg, greyDark);
-    ImGui::PushStyleColor(ctx, ImGui::Col_Button, supportButtonBackground);
-    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, supportButtonActive);
-    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBg, supportButtonBackground);
-    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgHovered, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgActive, supportButtonActive);
-    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrab, supportButtonActive);
-    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrabActive, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_CheckMark, blue);
-    ImGui::PushStyleColor(ctx, ImGui::Col_Header, supportButtonBackground);
-    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, supportButtonHovered);
-    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, supportButtonActive);
+    
+    // Window and background colors
+    ImGui::PushStyleColor(ctx, ImGui::Col_WindowBg, fmodBackground);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ChildBg, fmodBackgroundLight);
+    ImGui::PushStyleColor(ctx, ImGui::Col_PopupBg, fmodSurface);
+    
+    // Border colors
+    ImGui::PushStyleColor(ctx, ImGui::Col_Border, fmodBorder);
+    
+    // Title bar
+    ImGui::PushStyleColor(ctx, ImGui::Col_TitleBg, fmodTitleBar);
+    ImGui::PushStyleColor(ctx, ImGui::Col_TitleBgActive, fmodTitleBar);
+    ImGui::PushStyleColor(ctx, ImGui::Col_TitleBgCollapsed, fmodBackground);
+    
+    // Button colors (FMOD surface style)
+    ImGui::PushStyleColor(ctx, ImGui::Col_Button, fmodSurface);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, fmodSurfaceHover);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, fmodAccent);
+    
+    // Frame/input backgrounds
+    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBg, fmodSurface);
+    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgHovered, fmodSurfaceHover);
+    ImGui::PushStyleColor(ctx, ImGui::Col_FrameBgActive, fmodAccentMuted);
+    
+    // Slider styling (cyan accent)
+    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrab, fmodAccent);
+    ImGui::PushStyleColor(ctx, ImGui::Col_SliderGrabActive, fmodAccentHover);
+    
+    // Checkmark and selection
+    ImGui::PushStyleColor(ctx, ImGui::Col_CheckMark, fmodAccent);
+    
+    // Header/Tree node colors
+    ImGui::PushStyleColor(ctx, ImGui::Col_Header, fmodSurface);
+    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderHovered, fmodSurfaceHover);
+    ImGui::PushStyleColor(ctx, ImGui::Col_HeaderActive, fmodAccentMuted);
+    
+    // Tab colors
+    ImGui::PushStyleColor(ctx, ImGui::Col_Tab, fmodSurface);
+    ImGui::PushStyleColor(ctx, ImGui::Col_TabHovered, fmodAccentMuted);
+    ImGui::PushStyleColor(ctx, ImGui::Col_TabActive, fmodAccent);
+    
+    // Separator
+    ImGui::PushStyleColor(ctx, ImGui::Col_Separator, fmodSeparator);
+    ImGui::PushStyleColor(ctx, ImGui::Col_SeparatorHovered, fmodAccent);
+    ImGui::PushStyleColor(ctx, ImGui::Col_SeparatorActive, fmodAccentHover);
+    
+    // Scrollbar
+    ImGui::PushStyleColor(ctx, ImGui::Col_ScrollbarBg, fmodBackground);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ScrollbarGrab, fmodSurface);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ScrollbarGrabHovered, fmodSurfaceHover);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ScrollbarGrabActive, fmodAccent);
+    
+    // Text colors
+    ImGui::PushStyleColor(ctx, ImGui::Col_Text, fmodTextPrimary);
+    ImGui::PushStyleColor(ctx, ImGui::Col_TextDisabled, fmodTextDisabled);
+    
+    // Resize grip
+    ImGui::PushStyleColor(ctx, ImGui::Col_ResizeGrip, fmodSurface);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ResizeGripHovered, fmodAccent);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ResizeGripActive, fmodAccentHover);
+    
     if (reaMODRegularFont) {
         ImGui::PushFont(ctx, reaMODRegularFont);
     }
@@ -3320,7 +3413,7 @@ void PopReaMODInterfaceStyle(ImGui_Context* ctx) {
     if (reaMODRegularFont) {
         ImGui::PopFont(ctx);
     }
-    ImGui::PopStyleColor(ctx, 13);
+    ImGui::PopStyleColor(ctx, 36);  // Updated count to match PushReaMODInterfaceStyle
 }
 
 bool StyledButton(ImGui_Context* ctx, const char* label) {
@@ -3340,6 +3433,39 @@ bool StyledButton(ImGui_Context* ctx, const char* label) {
 
 bool StyledButton(ImGui_Context* ctx, const std::string& label) {
     return StyledButton(ctx, label.c_str());
+}
+
+// Primary action button (cyan accent)
+bool StyledButtonPrimary(ImGui_Context* ctx, const char* label) {
+    ImGui::PushStyleColor(ctx, ImGui::Col_Button, fmodAccent);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, fmodAccentHover);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, fmodAccentActive);
+    ImGui::PushStyleColor(ctx, ImGui::Col_Text, fmodBackground);
+    bool pressed = ImGui::Button(ctx, label);
+    ImGui::PopStyleColor(ctx, 4);
+    return pressed;
+}
+
+// Success button (green - for Load actions)
+bool StyledButtonSuccess(ImGui_Context* ctx, const char* label) {
+    ImGui::PushStyleColor(ctx, ImGui::Col_Button, fmodSuccess);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, fmodSuccessHover);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, 0x2DA82DFF);
+    ImGui::PushStyleColor(ctx, ImGui::Col_Text, fmodBackground);
+    bool pressed = ImGui::Button(ctx, label);
+    ImGui::PopStyleColor(ctx, 4);
+    return pressed;
+}
+
+// Warning button (orange - for Unload actions)
+bool StyledButtonWarning(ImGui_Context* ctx, const char* label) {
+    ImGui::PushStyleColor(ctx, ImGui::Col_Button, fmodOrange);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonHovered, fmodOrangeHover);
+    ImGui::PushStyleColor(ctx, ImGui::Col_ButtonActive, fmodOrangeActive);
+    ImGui::PushStyleColor(ctx, ImGui::Col_Text, fmodBackground);
+    bool pressed = ImGui::Button(ctx, label);
+    ImGui::PopStyleColor(ctx, 4);
+    return pressed;
 }
 
 void RenderEventSearchWindow() {
@@ -3691,20 +3817,61 @@ void RenderGUI() {
     EnsureReaMODFontsLoaded();
     ImGui::SetNextWindowSize(reaMOD_Main_ImGui_Context, 700, 400, ImGui::Cond_FirstUseEver);
 
-    // PushReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_WindowBg, greyDark);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_Button, supportButtonBackground);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ButtonHovered, supportButtonHovered);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ButtonActive, supportButtonActive);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_FrameBg, supportButtonBackground);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_FrameBgHovered, supportButtonHovered);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_FrameBgActive, supportButtonActive);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_SliderGrab, supportButtonActive);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_SliderGrabActive, supportButtonHovered);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_CheckMark, blue);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_Header, supportButtonBackground);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_HeaderHovered, supportButtonHovered);
-    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_HeaderActive, supportButtonActive);
+    // Apply full FMOD Studio-inspired styling
+    // Window and background colors
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_WindowBg, fmodBackground);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ChildBg, fmodBackgroundLight);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_PopupBg, fmodSurface);
+    
+    // Border colors
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_Border, fmodBorder);
+    
+    // Title bar
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_TitleBg, fmodTitleBar);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_TitleBgActive, fmodTitleBar);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_TitleBgCollapsed, fmodBackground);
+    
+    // Button colors
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_Button, fmodSurface);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ButtonHovered, fmodSurfaceHover);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ButtonActive, fmodAccent);
+    
+    // Frame/input backgrounds
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_FrameBg, fmodSurface);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_FrameBgHovered, fmodSurfaceHover);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_FrameBgActive, fmodAccentMuted);
+    
+    // Slider styling
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_SliderGrab, fmodAccent);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_SliderGrabActive, fmodAccentHover);
+    
+    // Checkmark
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_CheckMark, fmodAccent);
+    
+    // Header/Tree node colors
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_Header, fmodSurface);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_HeaderHovered, fmodSurfaceHover);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_HeaderActive, fmodAccentMuted);
+    
+    // Separator
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_Separator, fmodSeparator);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_SeparatorHovered, fmodAccent);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_SeparatorActive, fmodAccentHover);
+    
+    // Scrollbar
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ScrollbarBg, fmodBackground);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ScrollbarGrab, fmodSurface);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ScrollbarGrabHovered, fmodSurfaceHover);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ScrollbarGrabActive, fmodAccent);
+    
+    // Text colors
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_Text, fmodTextPrimary);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_TextDisabled, fmodTextDisabled);
+    
+    // Resize grip
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ResizeGrip, fmodSurface);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ResizeGripHovered, fmodAccent);
+    ImGui::PushStyleColor(reaMOD_Main_ImGui_Context, ImGui::Col_ResizeGripActive, fmodAccentHover);
 
     bool open = true;  // Open flag for the window
     bool windowVisible = ImGui::Begin(reaMOD_Main_ImGui_Context, "ReaMOD Window", &open, ImGui::WindowFlags_NoFocusOnAppearing);
@@ -3802,11 +3969,10 @@ void RenderGUI() {
 
                 ImGui::SameLine(reaMOD_Main_ImGui_Context);
                 if (!isValidDirectory) {
-                    ImGui::TextColored(reaMOD_Main_ImGui_Context, orange, displayPath.c_str());
+                    ImGui::TextColored(reaMOD_Main_ImGui_Context, fmodError, displayPath.c_str());
                 } else if (!isEnabled) {
-                    // Show disabled directories in a dimmed color (gray)
-                    int gray = 0x808080FF; // RGBA gray
-                    ImGui::TextColored(reaMOD_Main_ImGui_Context, gray, displayPath.c_str());
+                    // Show disabled directories in a dimmed color (FMOD text disabled)
+                    ImGui::TextColored(reaMOD_Main_ImGui_Context, fmodTextDisabled, displayPath.c_str());
                 } else {
                     ReaMODText(reaMOD_Main_ImGui_Context, displayPath.c_str(), reaMODMediumFont);
                 }
@@ -4383,7 +4549,7 @@ void RenderGUI() {
 
         // Pop style colors after End() but before cleanup
         // PopReaMODInterfaceStyle(reaMOD_Main_ImGui_Context);
-        ImGui::PopStyleColor(reaMOD_Main_ImGui_Context, 13);
+        ImGui::PopStyleColor(reaMOD_Main_ImGui_Context, 33);  // Updated count for FMOD Studio styling
 
     }
 
