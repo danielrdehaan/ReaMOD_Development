@@ -673,27 +673,72 @@ static bool LoadReaMODFromProjectExtState() {
 
 // Load a bank and retrieve its events
 void LoadBank(const std::string& bank_path, bool load_sample_data = true) {
-    if (loaded_banks.find(bank_path) == loaded_banks.end()) {
-        FMOD::Studio::Bank* bank = nullptr;
-        FMOD_RESULT result = fmod_system->loadBankFile(bank_path.c_str(), FMOD_STUDIO_LOAD_BANK_NORMAL, &bank);
-        DebugMsg("Loading bank: %s\n", bank_path.c_str());
-        if (result == FMOD_OK) {
-            // Debug message to indicate that the bank was loaded successfully
-            DebugMsg("Successfully loaded bank: %s\n", bank_path.c_str());
+    // Normalize the path for consistent lookup
+    std::string normalizedPath = NormalizePath(bank_path);
+    
+    if (loaded_banks.find(normalizedPath) != loaded_banks.end()) {
+        DebugMsg("Bank already loaded (skipping): %s\n", bank_path.c_str());
+        return;
+    }
+    
+    // Also check with the original path in case of mixed usage
+    if (loaded_banks.find(bank_path) != loaded_banks.end()) {
+        DebugMsg("Bank already loaded with original path (skipping): %s\n", bank_path.c_str());
+        return;
+    }
+    
+    FMOD::Studio::Bank* bank = nullptr;
+    FMOD_RESULT result = fmod_system->loadBankFile(bank_path.c_str(), FMOD_STUDIO_LOAD_BANK_NORMAL, &bank);
+    DebugMsg("Loading bank: %s\n", bank_path.c_str());
+    
+    if (result == FMOD_OK) {
+        DebugMsg("Successfully loaded bank: %s\n", bank_path.c_str());
 
-            loaded_banks[bank_path] = bank;
-            if (load_sample_data) {
-                // Load the sample data for the bank
-                bank->loadSampleData();
+        // Store with normalized path for consistent lookup
+        loaded_banks[normalizedPath] = bank;
+        
+        if (load_sample_data) {
+            bank->loadSampleData();
+        }
+
+        // Retrieve event descriptions
+        int event_count = 0;
+        bank->getEventCount(&event_count);
+        if (event_count > 0) {
+            std::vector<std::string> events;
+            std::vector<FMOD::Studio::EventDescription*> event_descriptions(event_count);
+            bank->getEventList(event_descriptions.data(), event_count, &event_count);
+
+            for (int i = 0; i < event_count; ++i) {
+                char event_path[512];
+                event_descriptions[i]->getPath(event_path, sizeof(event_path), nullptr);
+                events.push_back(event_path);
             }
 
+            bank_events[normalizedPath] = events;
+        }
+    } else if (result == FMOD_ERR_EVENT_ALREADY_LOADED) {
+        // Bank is already loaded in FMOD but not in our tracking map
+        // This can happen if the tracking got out of sync
+        DebugMsg("Bank already loaded in FMOD (re-syncing): %s\n", bank_path.c_str());
+        
+        // Try to get the bank handle from FMOD
+        FMOD::Studio::Bank* existingBank = nullptr;
+        // Use the bank path to look it up - extract just the filename for the lookup
+        std::string bankName = "bank:/" + fs::path(bank_path).stem().string();
+        FMOD_RESULT lookupResult = fmod_system->getBank(bankName.c_str(), &existingBank);
+        
+        if (lookupResult == FMOD_OK && existingBank) {
+            loaded_banks[normalizedPath] = existingBank;
+            DebugMsg("Re-synced existing bank: %s\n", bank_path.c_str());
+            
             // Retrieve event descriptions
             int event_count = 0;
-            bank->getEventCount(&event_count);
+            existingBank->getEventCount(&event_count);
             if (event_count > 0) {
                 std::vector<std::string> events;
                 std::vector<FMOD::Studio::EventDescription*> event_descriptions(event_count);
-                bank->getEventList(event_descriptions.data(), event_count, &event_count);
+                existingBank->getEventList(event_descriptions.data(), event_count, &event_count);
 
                 for (int i = 0; i < event_count; ++i) {
                     char event_path[512];
@@ -701,12 +746,13 @@ void LoadBank(const std::string& bank_path, bool load_sample_data = true) {
                     events.push_back(event_path);
                 }
 
-                bank_events[bank_path] = events;
+                bank_events[normalizedPath] = events;
             }
         } else {
-            // Debug message for failure to load the bank
-            DebugMsg("Failed to load bank: %s\n", bank_path.c_str());
+            DebugMsg("Could not re-sync bank, lookup failed: %s (result: %d)\n", bank_path.c_str(), lookupResult);
         }
+    } else {
+        DebugMsg("Failed to load bank: %s (FMOD error: %d)\n", bank_path.c_str(), result);
     }
 }
 
@@ -716,12 +762,18 @@ void SynchronizeLoadedBanks() {
     }
 
     bool systemNeedsUpdate = false;
-    std::unordered_set<std::string> trackedBanks(bank_files.begin(), bank_files.end());
+    
+    // Build a set of tracked banks using normalized paths
+    std::unordered_set<std::string> trackedBanks;
+    for (const auto& bankFile : bank_files) {
+        trackedBanks.insert(NormalizePath(bankFile));
+    }
 
     for (size_t i = 0; i < bank_files.size(); ++i) {
         const std::string& bankPath = bank_files[i];
+        std::string normalizedPath = NormalizePath(bankPath);
         bool shouldBeLoaded = bank_load_states[i];
-        auto loadedIt = loaded_banks.find(bankPath);
+        auto loadedIt = loaded_banks.find(normalizedPath);
 
         if (shouldBeLoaded) {
             if (loadedIt == loaded_banks.end()) {
@@ -734,7 +786,7 @@ void SynchronizeLoadedBanks() {
                 bank->unload();
                 systemNeedsUpdate = true;
             }
-            bank_events.erase(bankPath);
+            bank_events.erase(normalizedPath);
             loaded_banks.erase(loadedIt);
         }
     }
@@ -761,10 +813,13 @@ void SynchronizeLoadedBanks() {
 }
 
 void UnloadAllBanks() {
+    DebugMsg("UnloadAllBanks: Unloading %zu banks...\n", loaded_banks.size());
+    
     // Iterate over all loaded banks and unload them
     for (auto& bankPair : loaded_banks) {
         FMOD::Studio::Bank* bank = bankPair.second;
         if (bank) {
+            DebugMsg("Unloading bank: %s\n", bankPair.first.c_str());
             bank->unload();
         }
     }
@@ -782,6 +837,8 @@ void UnloadAllBanks() {
     masterStringEvents.clear();
     globalParameters.clear();
     groupedGlobalParameters.clear();
+    
+    DebugMsg("UnloadAllBanks: Complete\n");
 }
 
 void RefreshBankFiles() {
