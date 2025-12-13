@@ -846,13 +846,17 @@ void UnloadAllBanks() {
         FMOD::Studio::Bank* bank = bankPair.second;
         if (bank) {
             DebugMsg("Unloading bank: %s\n", bankPair.first.c_str());
-            bank->unload();
+            FMOD_RESULT result = bank->unload();
+            if (result != FMOD_OK) {
+                DebugMsg("Warning: Failed to unload bank %s (error: %d)\n", bankPair.first.c_str(), result);
+            }
         }
     }
     
-    // Update FMOD System (with null check)
+    // Flush all pending FMOD commands to ensure unloads complete synchronously
+    // This is critical on Windows to prevent "already loaded" errors (error 74)
     if (fmod_system) {
-        fmod_system->update();
+        fmod_system->flushCommands();
     }
 
     // Clear the maps and vectors after unloading banks
@@ -894,7 +898,7 @@ void RefreshBankFiles() {
 
     // Ensure customBankDirectoryEnabled is the right size
     while (customBankDirectoryEnabled.size() < customBankDirectories.size()) {
-        customBankDirectoryEnabled.push_back(true); // New directories default to enabled
+        customBankDirectoryEnabled.push_back(false); // New directories default to disabled
     }
     while (customBankDirectoryEnabled.size() > customBankDirectories.size()) {
         customBankDirectoryEnabled.pop_back();
@@ -1196,7 +1200,7 @@ void FindBankFiles(const std::string& fspro_dir) {
                         if (containsBanks) {
                             std::string platformPath = entry.path().string();
                             customBankDirectories.push_back(platformPath);
-                            customBankDirectoryEnabled.push_back(true);
+                            customBankDirectoryEnabled.push_back(false); // Default to disabled - user chooses which to load
                             DebugMsg("Found platform with banks: %s\n", platformPath.c_str());
                             foundAnyPlatform = true;
                         }
@@ -1215,7 +1219,7 @@ void FindBankFiles(const std::string& fspro_dir) {
                     
                     if (containsBanksDirectly) {
                         customBankDirectories.push_back(baseBuildPath.string());
-                        customBankDirectoryEnabled.push_back(true);
+                        customBankDirectoryEnabled.push_back(false); // Default to disabled - user chooses which to load
                         DebugMsg("Found banks directly in build directory (no platform subfolder): %s\n", baseBuildPath.string().c_str());
                         foundAnyPlatform = true;
                     }
@@ -3751,7 +3755,7 @@ void RenderGUI() {
         
         // Ensure customBankDirectoryEnabled is the right size
         while (customBankDirectoryEnabled.size() < customBankDirectories.size()) {
-            customBankDirectoryEnabled.push_back(true);
+            customBankDirectoryEnabled.push_back(false); // Default to disabled
         }
         while (customBankDirectoryEnabled.size() > customBankDirectories.size()) {
             customBankDirectoryEnabled.pop_back();
